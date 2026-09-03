@@ -1,10 +1,12 @@
 import {
+	BadRequestException,
 	Controller,
 	ForbiddenException,
 	Get,
 	Headers,
 	Logger,
 	Post,
+	Query,
 	ServiceUnavailableException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
@@ -19,6 +21,8 @@ import {
 } from "@nestjs/swagger";
 import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
 import type { EnvironmentVariables } from "../config/env.validation";
+import { gmailBackfillInput } from "../google/gmail-backfill";
+import { GoogleSyncService } from "../google/google-sync.service";
 import { MailboxSyncService } from "./mailbox-sync.service";
 
 @ApiTags("Internal — Cron")
@@ -36,6 +40,7 @@ export class SyncController {
 
 	constructor(
 		private readonly sync: MailboxSyncService,
+		private readonly google: GoogleSyncService,
 		config: ConfigService<EnvironmentVariables, true>,
 	) {
 		this.secret = config.get("CRON_SECRET", { infer: true });
@@ -73,7 +78,36 @@ export class SyncController {
 		return this.run(authorization);
 	}
 
+	@Post("gmail/backfill")
+	@AllowAnonymous()
+	@ApiOperation({ summary: "Run a bounded Gmail historical backfill" })
+	@ApiOkResponse({
+		description:
+			"The bounded Gmail backfill ran, or dry-run counted candidates.",
+	})
+	async gmailBackfill(
+		@Headers("authorization") authorization?: string,
+		@Query() query?: Record<string, unknown>,
+	) {
+		this.authorize(authorization);
+
+		const parsed = gmailBackfillInput.safeParse(query ?? {});
+		if (!parsed.success) {
+			throw new BadRequestException(
+				parsed.error.issues.map((issue) => issue.message).join(" "),
+			);
+		}
+
+		return this.google.backfillGmail(parsed.data);
+	}
+
 	private async run(authorization?: string) {
+		this.authorize(authorization);
+
+		return this.sync.runDue();
+	}
+
+	private authorize(authorization?: string): void {
 		if (!this.secret) {
 			this.logger.error({
 				message: "CRON_SECRET is not set — refusing to run the sync route.",
@@ -84,8 +118,6 @@ export class SyncController {
 		if (!timingSafeEquals(authorization ?? "", `Bearer ${this.secret}`)) {
 			throw new ForbiddenException();
 		}
-
-		return this.sync.runDue();
 	}
 }
 

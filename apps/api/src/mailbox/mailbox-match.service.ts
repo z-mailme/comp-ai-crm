@@ -8,6 +8,7 @@ import { EnrichmentLogService } from "../crm/enrichment-log.service";
 import { InjectDatabase } from "../database/database.constants";
 import {
 	dominantDomain,
+	exactContactParticipants,
 	externalParticipants,
 	isDerivedName,
 	type Participant,
@@ -88,6 +89,22 @@ export class MailboxMatchService {
 		request: MatchRequest,
 		context: MatchContext,
 	): Promise<MatchResult> {
+		const exactCandidates = exactContactParticipants(request.participants, {
+			ourDomains: context.ourDomains,
+			ourAddresses: context.ourAddresses,
+			suppressedDomains: context.suppressedDomains,
+			suppressedEmails: context.suppressedEmails,
+		});
+		const contact = await this.exactContact(exactCandidates);
+
+		if (contact) {
+			return {
+				companyId: contact.companyId,
+				contactId: contact.id,
+				external: exactCandidates,
+			};
+		}
+
 		const external = externalParticipants(request.participants, {
 			ourDomains: context.ourDomains,
 			ourAddresses: context.ourAddresses,
@@ -97,19 +114,6 @@ export class MailboxMatchService {
 
 		if (external.length === 0) {
 			return { companyId: null, contactId: null, external };
-		}
-
-		const contact = await this.db.contact.findFirst({
-			where: { email: { in: external.map((person) => person.email) } },
-			select: { id: true, companyId: true },
-		});
-
-		if (contact) {
-			return {
-				companyId: contact.companyId,
-				contactId: contact.id,
-				external,
-			};
 		}
 
 		const domains = [
@@ -150,6 +154,28 @@ export class MailboxMatchService {
 		}
 
 		return this.create(external, domain, request);
+	}
+
+	private async exactContact(
+		participants: readonly Participant[],
+	): Promise<{ id: string; companyId: string | null } | null> {
+		const emails = participants.map((person) => person.email);
+		if (emails.length === 0) return null;
+
+		const contacts = await this.db.contact.findMany({
+			where: { email: { in: emails } },
+			select: { id: true, companyId: true, email: true },
+		});
+		const byEmail = new Map(
+			contacts.map((contact) => [contact.email, contact]),
+		);
+
+		for (const email of emails) {
+			const contact = byEmail.get(email);
+			if (contact) return contact;
+		}
+
+		return null;
 	}
 
 	private async create(

@@ -1,6 +1,7 @@
 import { Injectable } from "@nestjs/common";
 import { SyncStateService } from "../mailbox/sync-state.service";
 import { CalendarSyncService } from "./calendar-sync.service";
+import type { GmailBackfillInput } from "./gmail-backfill";
 import { GmailSyncService } from "./gmail-sync.service";
 import { GOOGLE_SYNC_SOURCES, type GoogleSyncSource } from "./google.constants";
 
@@ -25,5 +26,9 @@ export class GoogleSyncService {
 		for (const source of GOOGLE_SYNC_SOURCES) {
 			await this.runOne(userId, source);
 		}
+	}
+
+	async backfillGmail(input: GmailBackfillInput) {
+		return this.gmail.backfill(input);
 	}
 }
