@@ -2,6 +2,7 @@ import { afterAll, describe, expect, it } from "bun:test";
 import {
 	db,
 	GoogleSyncStatus,
+	MailboxMatchStatus,
 	type MailboxSyncModel as MailboxSync,
 } from "@crm/db";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
@@ -19,6 +20,7 @@ import type { GmailBackfillInput } from "../src/google/gmail-backfill";
 import { GmailSyncService } from "../src/google/gmail-sync.service";
 import type { SyncSource } from "../src/mailbox/mailbox.constants";
 import type { MailboxResult } from "../src/mailbox/mailbox-api.client";
+import { MailboxDealMatchService } from "../src/mailbox/mailbox-deal-match.service";
 import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import type { MailboxTokenService } from "../src/mailbox/mailbox-token.service";
 import { SyncStateService } from "../src/mailbox/sync-state.service";
@@ -146,7 +148,8 @@ async function kit(
 	const directory = new CompanyDirectoryService(agent);
 	const log = new EnrichmentLogService(db, stamp);
 	const match = new MailboxMatchService(db, directory, agent, log);
-	const threads = new ThreadWriterService(db, match, stamp);
+	const dealMatch = new MailboxDealMatchService(db);
+	const threads = new ThreadWriterService(db, match, dealMatch, stamp);
 	const service = new GmailSyncService(
 		db,
 		gmail as unknown as GmailClient,
@@ -247,6 +250,7 @@ async function stored(rfcMessageId: string) {
 				select: {
 					contactId: true,
 					companyId: true,
+					matchStatus: true,
 					messageCount: true,
 					activity: { select: { id: true } },
 				},
@@ -455,7 +459,7 @@ describe("GmailSyncService backfill", () => {
 		expect(setup.gmail.listMessageCalls[0]?.query).toBe(`from:${email}`);
 	});
 
-	it("does not create a company for an unknown free-mail address", async () => {
+	it("stores an unknown free-mail address without creating a company", async () => {
 		const setup = await kit("unknown-free-mail", {
 			autoCreate: true,
 			cursor: "live-cursor",
@@ -479,8 +483,12 @@ describe("GmailSyncService backfill", () => {
 
 		const outcome = await setup.service.backfill(backfillInput(setup));
 
-		expect(outcome.messagesWritten).toBe(0);
-		expect(await stored(rfc)).toBeNull();
+		expect(outcome.messagesWritten).toBe(1);
+		const saved = await stored(rfc);
+		expect(saved?.thread.companyId).toBeNull();
+		expect(saved?.thread.contactId).toBeNull();
+		expect(saved?.thread.matchStatus).toBe(MailboxMatchStatus.UNMATCHED);
+		expect(saved?.thread.activity).toBeNull();
 		expect(await db.company.count({ where: { domain: "gmail.com" } })).toBe(
 			before,
 		);
@@ -514,8 +522,12 @@ describe("GmailSyncService backfill", () => {
 
 		const outcome = await setup.service.backfill(backfillInput(setup));
 
-		expect(outcome.messagesWritten).toBe(0);
-		expect(await stored(rfc)).toBeNull();
+		expect(outcome.messagesWritten).toBe(1);
+		const saved = await stored(rfc);
+		expect(saved?.thread.companyId).toBeNull();
+		expect(saved?.thread.contactId).toBeNull();
+		expect(saved?.thread.matchStatus).toBe(MailboxMatchStatus.UNMATCHED);
+		expect(saved?.thread.activity).toBeNull();
 	});
 });
 

@@ -2,6 +2,7 @@ import {
 	ActivityType,
 	type Db,
 	EmailDirection,
+	MailboxMatchStatus,
 	type MailboxSyncModel as MailboxSync,
 	type Prisma,
 	Prisma as PrismaNamespace,
@@ -11,6 +12,7 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import type { SyncSource } from "./mailbox.constants";
+import { MailboxDealMatchService } from "./mailbox-deal-match.service";
 import {
 	MailboxMatchService,
 	type MatchContext,
@@ -29,6 +31,7 @@ export type IncomingMessage = {
 	gmailMessageId?: string | null;
 	outlookMessageId?: string | null;
 	outlookWebLink?: string | null;
+	dealId?: string | null;
 };
 
 @Injectable()
@@ -38,6 +41,7 @@ export class ThreadWriterService {
 	constructor(
 		@InjectDatabase() private readonly db: Db,
 		private readonly match: MailboxMatchService,
+		private readonly deals: MailboxDealMatchService,
 		private readonly stamp: ActivityStampService,
 	) {}
 
@@ -70,12 +74,17 @@ export class ThreadWriterService {
 					select: {
 						companyId: true,
 						contactId: true,
-						activity: { select: { id: true } },
+						dealId: true,
+						matchStatus: true,
+						firstMessageAt: true,
+						lastMessageAt: true,
+						activity: { select: { id: true, dealId: true } },
 					},
 				},
 			},
 		});
-		if (existing?.thread.activity) return false;
+		if (existing?.thread.activity?.dealId && existing.thread.dealId)
+			return false;
 
 		const repair = existing !== null;
 		const participants = [parsed.from, ...parsed.recipients];
@@ -86,16 +95,29 @@ export class ThreadWriterService {
 					id: existing.threadId,
 					companyId: existing.thread.companyId,
 					contactId: existing.thread.contactId,
+					dealId: existing.thread.dealId,
+					matchStatus: existing.thread.matchStatus,
+					firstMessageAt: existing.thread.firstMessageAt,
+					lastMessageAt: existing.thread.lastMessageAt,
 				}
 			: await this.db.emailThread.findUnique({
 					where: { rootMessageId: parsed.rootId },
-					select: { id: true, companyId: true, contactId: true },
+					select: {
+						id: true,
+						companyId: true,
+						contactId: true,
+						dealId: true,
+						matchStatus: true,
+						firstMessageAt: true,
+						lastMessageAt: true,
+					},
 				});
 
 		let companyId = thread?.companyId ?? null;
 		let contactId = thread?.contactId ?? null;
+		let dealId = thread?.dealId ?? null;
 
-		if (!thread) {
+		if (!thread || !companyId || !contactId) {
 			const repliedTo =
 				outbound ||
 				(await this.hasOutboundInThread(parsed.rootId, options.mailbox));
@@ -110,13 +132,38 @@ export class ThreadWriterService {
 				context,
 			);
 
-			companyId = match.companyId;
-			contactId = match.contactId;
-
-			if (!companyId && !contactId) {
-				return false;
-			}
+			const nextCompanyId = companyId ?? match.companyId;
+			companyId = nextCompanyId;
+			contactId =
+				contactId ??
+				(match.contactId &&
+				(!nextCompanyId || match.companyId === nextCompanyId)
+					? match.contactId
+					: null);
 		}
+
+		const firstMessageAt =
+			thread && thread.firstMessageAt < parsed.sentAt
+				? thread.firstMessageAt
+				: parsed.sentAt;
+		const lastMessageAt =
+			thread && thread.lastMessageAt > parsed.sentAt
+				? thread.lastMessageAt
+				: parsed.sentAt;
+
+		const dealMatch = await this.deals.resolve({
+			explicitDealId: parsed.dealId ?? null,
+			existingDealId: dealId,
+			companyId,
+			contactId,
+			firstMessageAt,
+			lastMessageAt,
+		});
+
+		dealId = dealMatch.dealId;
+		companyId = companyId ?? dealMatch.companyId;
+
+		const matchStatus = matchStatusFor({ companyId, contactId, dealId });
 
 		let occurredAt: Date;
 
@@ -129,8 +176,10 @@ export class ThreadWriterService {
 							create: {
 								rootMessageId: parsed.rootId,
 								subject: parsed.subject,
+								matchStatus,
 								companyId,
 								contactId,
+								dealId,
 								firstMessageAt: parsed.sentAt,
 								lastMessageAt: parsed.sentAt,
 								messageCount: 0,
@@ -172,31 +221,46 @@ export class ThreadWriterService {
 				const firstMessageAt = stats._min.sentAt ?? parsed.sentAt;
 				const lastMessageAt = stats._max.sentAt ?? parsed.sentAt;
 
-				const data: Prisma.EmailThreadUpdateInput = {
+				const data: Prisma.EmailThreadUncheckedUpdateInput = {
 					messageCount: stats._count._all,
 					firstMessageAt,
 					lastMessageAt,
+					matchStatus,
+					companyId,
+					contactId,
+					dealId,
 				};
 
 				if (parsed.sentAt <= firstMessageAt) data.subject = parsed.subject;
 
 				await tx.emailThread.update({ where: { id: record.id }, data });
 
-				return this.project(tx, record.id, row.userId, {
-					subject: parsed.subject ?? "(no subject)",
-					snippet: snippetOf(parsed.body),
-					lastMessageAt,
-					companyId,
-					contactId,
-					origin: options.origin,
-				});
+				if (companyId || contactId || dealId) {
+					return this.project(tx, record.id, row.userId, {
+						subject: parsed.subject ?? "(no subject)",
+						snippet: snippetOf(parsed.body),
+						lastMessageAt,
+						companyId,
+						contactId,
+						dealId,
+						origin: options.origin,
+					});
+				}
+
+				return lastMessageAt;
 			});
 		} catch (error) {
 			if (await this.storedElsewhere(error, parsed.rfcMessageId)) return false;
 			throw error;
 		}
 
-		await this.touch({ companyId, contactId }, occurredAt, parsed.rfcMessageId);
+		if (companyId || contactId || dealId) {
+			await this.touch(
+				{ companyId, contactId, dealId },
+				occurredAt,
+				parsed.rfcMessageId,
+			);
+		}
 
 		return !repair;
 	}
@@ -211,7 +275,7 @@ export class ThreadWriterService {
 		if (!duplicate) return false;
 
 		const winner = await this.db.emailMessage.findFirst({
-			where: { rfcMessageId, thread: { activity: { isNot: null } } },
+			where: { rfcMessageId },
 			select: { id: true },
 		});
 
@@ -219,7 +283,11 @@ export class ThreadWriterService {
 	}
 
 	private async touch(
-		target: { companyId: string | null; contactId: string | null },
+		target: {
+			companyId: string | null;
+			contactId: string | null;
+			dealId: string | null;
+		},
 		at: Date,
 		rfcMessageId: string,
 	): Promise<void> {
@@ -262,6 +330,7 @@ export class ThreadWriterService {
 			lastMessageAt: Date;
 			companyId: string | null;
 			contactId: string | null;
+			dealId: string | null;
 			origin: SyncSource;
 		},
 	): Promise<Date> {
@@ -274,6 +343,7 @@ export class ThreadWriterService {
 				occurredAt: summary.lastMessageAt,
 				companyId: summary.companyId,
 				contactId: summary.contactId,
+				dealId: summary.dealId,
 				createdById: userId,
 				emailThreadId,
 				meta: { synced: true, source: summary.origin },
@@ -281,10 +351,24 @@ export class ThreadWriterService {
 			update: {
 				body: summary.snippet,
 				occurredAt: summary.lastMessageAt,
+				companyId: summary.companyId,
+				contactId: summary.contactId,
+				dealId: summary.dealId,
 			},
 			select: { createdAt: true },
 		});
 
 		return activity.createdAt;
 	}
+}
+
+function matchStatusFor(target: {
+	companyId: string | null;
+	contactId: string | null;
+	dealId: string | null;
+}): MailboxMatchStatus {
+	if (target.dealId) return MailboxMatchStatus.MATCHED_DEAL;
+	if (target.contactId) return MailboxMatchStatus.MATCHED_CONTACT;
+	if (target.companyId) return MailboxMatchStatus.MATCHED_COMPANY;
+	return MailboxMatchStatus.UNMATCHED;
 }

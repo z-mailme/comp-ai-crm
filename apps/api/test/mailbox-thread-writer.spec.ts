@@ -1,9 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
-import { db, type MailboxSyncModel as MailboxSync } from "@crm/db";
+import {
+	db,
+	MailboxMatchStatus,
+	type MailboxSyncModel as MailboxSync,
+} from "@crm/db";
 import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
+import { MailboxDealMatchService } from "../src/mailbox/mailbox-deal-match.service";
 import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
 import {
 	type IncomingMessage,
@@ -16,7 +21,17 @@ const domain = `threads-${suffix}.test`;
 const userId = `user-${suffix}`;
 const mailbox = `rep-${suffix}@example.test`;
 const person = `buyer@${domain}`;
+const unmatchedPerson = `unknown-${suffix}@gmail.com`;
+const freeMailPerson = `known-free-${suffix}@gmail.com`;
+const ambiguousDomain = `ambiguous-${suffix}.test`;
+const ambiguousPerson = `buyer@${ambiguousDomain}`;
 const rootId = `<root-${suffix}@mail.test>`;
+const dealRootId = `<deal-root-${suffix}@mail.test>`;
+const ambiguousRootId = `<ambiguous-root-${suffix}@mail.test>`;
+const freeMailRootId = `<free-mail-root-${suffix}@mail.test>`;
+const duplicateRootId = `<duplicate-root-${suffix}@mail.test>`;
+const unmatchedRootId = `<unmatched-root-${suffix}@mail.test>`;
+const lateMatchRootId = `<late-match-root-${suffix}@mail.test>`;
 const movedRoot = `outlook-conversation:${suffix}`;
 
 const agent = {
@@ -30,9 +45,13 @@ const stamp = new ActivityStampService(db);
 const directory = new CompanyDirectoryService(agent);
 const log = new EnrichmentLogService(db, stamp);
 const match = new MailboxMatchService(db, directory, agent, log);
-const threads = new ThreadWriterService(db, match, stamp);
+const dealMatch = new MailboxDealMatchService(db);
+const threads = new ThreadWriterService(db, match, dealMatch, stamp);
 
 let row: MailboxSync;
+let companyId: string;
+let contactId: string;
+let dealId: string;
 
 function message(id: string, sentAt: Date, root = rootId): IncomingMessage {
 	return {
@@ -49,12 +68,107 @@ function message(id: string, sentAt: Date, root = rootId): IncomingMessage {
 	};
 }
 
+function unmatchedMessage(
+	id: string,
+	sentAt: Date,
+	root = unmatchedRootId,
+): IncomingMessage {
+	return {
+		rfcMessageId: id,
+		rootId: root,
+		subject: "Direct enquiry",
+		from: { email: unmatchedPerson, name: "Unknown Customer" },
+		recipients: [{ email: mailbox, name: "Test Rep", kind: "to" }],
+		body: "Can you help with an event?",
+		sentAt,
+		gmailMessageId: null,
+		outlookMessageId: null,
+		outlookWebLink: null,
+	};
+}
+
+function threadMessage(input: {
+	id: string;
+	sentAt: Date;
+	root: string;
+	from: string;
+	to: string;
+	name?: string | null;
+	subject?: string;
+	body?: string;
+}): IncomingMessage {
+	return {
+		rfcMessageId: input.id,
+		rootId: input.root,
+		subject: input.subject ?? "Event enquiry",
+		from: { email: input.from, name: input.name ?? null },
+		recipients: [{ email: input.to, name: null, kind: "to" }],
+		body: input.body ?? "Can you help with an event?",
+		sentAt: input.sentAt,
+		gmailMessageId: null,
+		outlookMessageId: null,
+		outlookWebLink: null,
+	};
+}
+
+async function createDealFor(
+	name: string,
+	companyId: string,
+	contactId: string | null,
+	createdAt: Date,
+) {
+	const deal = await db.deal.create({
+		data: {
+			name,
+			companyId,
+			ownerId: userId,
+			stage: "DEMO_BOOKED",
+			createdAt,
+		},
+		select: { id: true },
+	});
+
+	if (contactId) {
+		await db.dealContact.create({
+			data: { dealId: deal.id, contactId },
+		});
+	}
+
+	return deal;
+}
+
 async function clean() {
 	await db.emailThread.deleteMany({
-		where: { rootMessageId: { in: [rootId, movedRoot] } },
+		where: {
+			rootMessageId: {
+				in: [
+					rootId,
+					dealRootId,
+					ambiguousRootId,
+					freeMailRootId,
+					duplicateRootId,
+					movedRoot,
+					unmatchedRootId,
+					lateMatchRootId,
+				],
+			},
+		},
 	});
-	await db.contact.deleteMany({ where: { email: person } });
-	await db.company.deleteMany({ where: { domain } });
+	await db.contact.deleteMany({
+		where: {
+			email: { in: [person, unmatchedPerson, freeMailPerson, ambiguousPerson] },
+		},
+	});
+	await db.company.deleteMany({
+		where: {
+			OR: [
+				{ domain },
+				{ domain: ambiguousDomain },
+				{ name: `Late Match Co ${suffix}` },
+				{ name: `Free Mail Co ${suffix}` },
+			],
+		},
+	});
 	await db.mailboxSync.deleteMany({ where: { userId } });
 	await db.user.deleteMany({ where: { id: userId } });
 }
@@ -73,14 +187,24 @@ beforeAll(async () => {
 		data: { name: "Buyer Co", domain },
 		select: { id: true },
 	});
-	await db.contact.create({
+	companyId = company.id;
+	const contact = await db.contact.create({
 		data: {
 			firstName: "A",
 			lastName: "Buyer",
 			email: person,
 			companyId: company.id,
 		},
+		select: { id: true },
 	});
+	contactId = contact.id;
+	const deal = await createDealFor(
+		`Clear Deal ${suffix}`,
+		companyId,
+		contactId,
+		new Date("2025-12-31T10:00:00Z"),
+	);
+	dealId = deal.id;
 });
 
 afterAll(clean);
@@ -100,13 +224,17 @@ describe("storing a synced email", () => {
 			where: { rootMessageId: rootId },
 			select: {
 				id: true,
+				dealId: true,
+				matchStatus: true,
 				messageCount: true,
-				activity: { select: { id: true } },
+				activity: { select: { id: true, dealId: true } },
 			},
 		});
 
+		expect(thread?.dealId).toBe(dealId);
+		expect(thread?.matchStatus).toBe(MailboxMatchStatus.MATCHED_DEAL);
 		expect(thread?.messageCount).toBe(1);
-		expect(thread?.activity).not.toBeNull();
+		expect(thread?.activity?.dealId).toBe(dealId);
 	});
 
 	it("repairs a thread whose projection was lost rather than skipping it forever", async () => {
@@ -204,5 +332,319 @@ describe("storing a synced email", () => {
 
 		expect(repaired?.messageCount).toBe(2);
 		expect(repaired?.activity).not.toBeNull();
+	});
+
+	it("stores an unmatched free-mail thread without CRM activity", async () => {
+		const stored = await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			unmatchedMessage(
+				`<unmatched-one-${suffix}@mail.test>`,
+				new Date("2026-01-03T10:00:00Z"),
+			),
+			await threads.context(),
+		);
+
+		expect(stored).toBe(true);
+
+		const thread = await db.emailThread.findUnique({
+			where: { rootMessageId: unmatchedRootId },
+			select: {
+				companyId: true,
+				contactId: true,
+				matchStatus: true,
+				messageCount: true,
+				activity: { select: { id: true } },
+			},
+		});
+
+		expect(thread).toEqual({
+			companyId: null,
+			contactId: null,
+			matchStatus: MailboxMatchStatus.UNMATCHED,
+			messageCount: 1,
+			activity: null,
+		});
+	});
+
+	it("keeps inbound and outbound Gmail on the same deal thread", async () => {
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			threadMessage({
+				id: `<deal-inbound-${suffix}@mail.test>`,
+				root: dealRootId,
+				from: person,
+				to: mailbox,
+				name: "A Buyer",
+				sentAt: new Date("2026-01-02T10:00:00Z"),
+			}),
+			await threads.context(),
+		);
+
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			threadMessage({
+				id: `<deal-outbound-${suffix}@mail.test>`,
+				root: dealRootId,
+				from: mailbox,
+				to: person,
+				name: "Test Rep",
+				sentAt: new Date("2026-01-02T11:00:00Z"),
+			}),
+			await threads.context(),
+		);
+
+		const thread = await db.emailThread.findUnique({
+			where: { rootMessageId: dealRootId },
+			select: {
+				dealId: true,
+				messageCount: true,
+				messages: { orderBy: { sentAt: "asc" }, select: { direction: true } },
+				activity: { select: { dealId: true } },
+			},
+		});
+
+		expect(thread?.dealId).toBe(dealId);
+		expect(thread?.activity?.dealId).toBe(dealId);
+		expect(thread?.messageCount).toBe(2);
+		expect(thread?.messages.map((message) => message.direction)).toEqual([
+			"INBOUND",
+			"OUTBOUND",
+		]);
+		expect(
+			await db.activity.count({ where: { dealId, type: "EMAIL" } }),
+		).toBeGreaterThan(0);
+	});
+
+	it("does not choose a deal when more than one active deal is plausible", async () => {
+		const company = await db.company.create({
+			data: { name: `Ambiguous Co ${suffix}`, domain: ambiguousDomain },
+			select: { id: true },
+		});
+		const contact = await db.contact.create({
+			data: {
+				firstName: "Many",
+				lastName: "Deals",
+				email: ambiguousPerson,
+				companyId: company.id,
+			},
+			select: { id: true },
+		});
+		await createDealFor(
+			`Ambiguous First ${suffix}`,
+			company.id,
+			contact.id,
+			new Date("2026-01-01T09:00:00Z"),
+		);
+		await createDealFor(
+			`Ambiguous Second ${suffix}`,
+			company.id,
+			contact.id,
+			new Date("2026-01-01T09:05:00Z"),
+		);
+
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			threadMessage({
+				id: `<ambiguous-${suffix}@mail.test>`,
+				root: ambiguousRootId,
+				from: ambiguousPerson,
+				to: mailbox,
+				name: "Many Deals",
+				sentAt: new Date("2026-01-02T10:00:00Z"),
+			}),
+			await threads.context(),
+		);
+
+		const thread = await db.emailThread.findUnique({
+			where: { rootMessageId: ambiguousRootId },
+			select: {
+				companyId: true,
+				contactId: true,
+				dealId: true,
+				matchStatus: true,
+				activity: { select: { dealId: true } },
+			},
+		});
+
+		expect(thread?.companyId).toBe(company.id);
+		expect(thread?.contactId).toBe(contact.id);
+		expect(thread?.dealId).toBeNull();
+		expect(thread?.matchStatus).toBe(MailboxMatchStatus.MATCHED_CONTACT);
+		expect(thread?.activity?.dealId).toBeNull();
+	});
+
+	it("matches a known free-mail contact to one clear deal", async () => {
+		const company = await db.company.create({
+			data: { name: `Free Mail Co ${suffix}`, domain: null },
+			select: { id: true },
+		});
+		const contact = await db.contact.create({
+			data: {
+				firstName: "Free",
+				lastName: "Mail",
+				email: freeMailPerson,
+				companyId: company.id,
+			},
+			select: { id: true },
+		});
+		const deal = await createDealFor(
+			`Free Mail Deal ${suffix}`,
+			company.id,
+			contact.id,
+			new Date("2026-01-01T09:00:00Z"),
+		);
+
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			threadMessage({
+				id: `<free-mail-${suffix}@mail.test>`,
+				root: freeMailRootId,
+				from: freeMailPerson,
+				to: mailbox,
+				name: "Free Mail",
+				sentAt: new Date("2026-01-02T10:00:00Z"),
+			}),
+			await threads.context(),
+		);
+
+		const thread = await db.emailThread.findUnique({
+			where: { rootMessageId: freeMailRootId },
+			select: {
+				companyId: true,
+				contactId: true,
+				dealId: true,
+				matchStatus: true,
+				activity: { select: { dealId: true } },
+			},
+		});
+
+		expect(thread?.companyId).toBe(company.id);
+		expect(thread?.contactId).toBe(contact.id);
+		expect(thread?.dealId).toBe(deal.id);
+		expect(thread?.matchStatus).toBe(MailboxMatchStatus.MATCHED_DEAL);
+		expect(thread?.activity?.dealId).toBe(deal.id);
+	});
+
+	it("does not duplicate a deal activity projection", async () => {
+		const parsed = threadMessage({
+			id: `<duplicate-${suffix}@mail.test>`,
+			root: duplicateRootId,
+			from: person,
+			to: mailbox,
+			name: "A Buyer",
+			sentAt: new Date("2026-01-02T12:00:00Z"),
+		});
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			parsed,
+			await threads.context(),
+		);
+		const stored = await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			parsed,
+			await threads.context(),
+		);
+
+		const thread = await db.emailThread.findUnique({
+			where: { rootMessageId: duplicateRootId },
+			select: { id: true, dealId: true },
+		});
+
+		expect(stored).toBe(false);
+		expect(thread?.dealId).toBe(dealId);
+		expect(
+			await db.emailMessage.count({ where: { threadId: thread?.id } }),
+		).toBe(1);
+		expect(
+			await db.activity.count({ where: { emailThreadId: thread?.id } }),
+		).toBe(1);
+	});
+
+	it("projects a stored unmatched thread after an exact contact and deal become known", async () => {
+		await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			unmatchedMessage(
+				`<late-match-one-${suffix}@mail.test>`,
+				new Date("2026-01-03T10:00:00Z"),
+				lateMatchRootId,
+			),
+			await threads.context(),
+		);
+
+		const company = await db.company.create({
+			data: { name: `Late Match Co ${suffix}`, domain: null },
+			select: { id: true },
+		});
+		const contact = await db.contact.create({
+			data: {
+				firstName: "Known",
+				lastName: "Customer",
+				email: unmatchedPerson,
+				companyId: company.id,
+			},
+			select: { id: true },
+		});
+		const deal = await createDealFor(
+			`Late Match Deal ${suffix}`,
+			company.id,
+			contact.id,
+			new Date("2026-01-03T10:05:00Z"),
+		);
+
+		const stored = await threads.store(
+			row,
+			{ mailbox, origin: "gmail" },
+			unmatchedMessage(
+				`<late-match-two-${suffix}@mail.test>`,
+				new Date("2026-01-04T10:00:00Z"),
+				lateMatchRootId,
+			),
+			await threads.context(),
+		);
+
+		expect(stored).toBe(true);
+
+		const thread = await db.emailThread.findUnique({
+			where: { rootMessageId: lateMatchRootId },
+			select: {
+				companyId: true,
+				contactId: true,
+				dealId: true,
+				matchStatus: true,
+				messageCount: true,
+				activity: {
+					select: {
+						companyId: true,
+						contactId: true,
+						dealId: true,
+						emailThreadId: true,
+					},
+				},
+			},
+		});
+
+		expect(thread?.companyId).toBe(company.id);
+		expect(thread?.contactId).toBe(contact.id);
+		expect(thread?.dealId).toBe(deal.id);
+		expect(thread?.matchStatus).toBe(MailboxMatchStatus.MATCHED_DEAL);
+		expect(thread?.messageCount).toBe(2);
+		expect(thread?.activity).toMatchObject({
+			companyId: company.id,
+			contactId: contact.id,
+			dealId: deal.id,
+		});
+		expect(
+			await db.activity.count({
+				where: { emailThreadId: thread?.activity?.emailThreadId },
+			}),
+		).toBe(1);
 	});
 });
