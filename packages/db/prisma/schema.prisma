@@ -990,13 +990,13 @@ model Deal {
   lastActivityAt DateTime?
   archivedAt     DateTime?
 
-  contacts    DealContact[]
-  bookings    Booking[]
-  activities  Activity[]
+  contacts     DealContact[]
+  bookings     Booking[]
+  activities   Activity[]
   emailThreads EmailThread[]
-  fieldValues FieldValue[]
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  fieldValues  FieldValue[]
+  createdAt    DateTime      @default(now())
+  updatedAt    DateTime      @updatedAt
 
   @@index([companyId])
   @@index([ownerId])
@@ -1010,9 +1010,10 @@ model Deal {
 }
 
 model Booking {
-  id     String @id @default(cuid())
-  dealId String
-  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  id         String @id @default(cuid())
+  dealId     String
+  deal       Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+  bookingKey String @default("primary")
 
   status BookingStatus @default(PROVISIONAL)
 
@@ -1036,6 +1037,7 @@ model Booking {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
+  @@unique([dealId, bookingKey])
   @@index([dealId])
   @@index([status, eventDate])
   @@index([googleCalendarEventId])
@@ -1297,8 +1299,8 @@ model MailboxSync {
 }
 
 model EmailThread {
-  id            String  @id @default(cuid())
-  rootMessageId String  @unique
+  id            String             @id @default(cuid())
+  rootMessageId String             @unique
   subject       String?
   matchStatus   MailboxMatchStatus @default(UNMATCHED)
 

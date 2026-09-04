@@ -2,11 +2,11 @@ import {
 	BadRequestException,
 	Body,
 	Controller,
-	ForbiddenException,
+	Get,
 	Headers,
 	Logger,
+	Param,
 	Post,
-	ServiceUnavailableException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
@@ -20,8 +20,9 @@ import {
 } from "@nestjs/swagger";
 import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
 import type { EnvironmentVariables } from "../config/env.validation";
-import { availabilityInput } from "./bookings.contracts";
+import { availabilityInput, bookingUpsertInput } from "./bookings.contracts";
 import { BookingsService } from "./bookings.service";
+import { authorizeBookingInternalRequest } from "./bookings-auth";
 
 @ApiTags("Internal — Bookings")
 @ApiHeader({
@@ -93,30 +94,121 @@ export class BookingsController {
 		return this.bookings.availability(parsed.data);
 	}
 
-	private authorize(authorization?: string): void {
-		if (!this.secret) {
-			this.logger.error({
-				message:
-					"CRON_SECRET is not set — refusing to run booking availability.",
-			});
-			throw new ServiceUnavailableException(
-				"Booking availability is not configured.",
+	@Post("upsert")
+	@AllowAnonymous()
+	@ApiOperation({
+		summary: "Create or update an idempotent booking for a deal",
+	})
+	@ApiBody({
+		schema: {
+			type: "object",
+			required: ["dealId", "status", "eventDate", "resource"],
+			properties: {
+				dealId: { type: "string" },
+				bookingKey: { type: "string", example: "primary" },
+				status: {
+					type: "string",
+					enum: ["PROVISIONAL", "HELD", "CONFIRMED", "COMPLETED", "CANCELLED"],
+				},
+				eventDate: { type: "string", example: "2026-09-23" },
+				resource: {
+					type: "object",
+					required: ["resourceType", "quantity"],
+					properties: {
+						resourceType: { type: "string", enum: ["360_PHOTO_BOOTH"] },
+						quantity: { type: "integer", example: 1 },
+					},
+				},
+				requestedStartAt: {
+					type: "string",
+					nullable: true,
+					example: "2026-09-23T16:00:00+02:00",
+				},
+				requestedEndAt: {
+					type: "string",
+					nullable: true,
+					example: "2026-09-23T18:00:00+02:00",
+				},
+				confirmedStartAt: {
+					type: "string",
+					nullable: true,
+					example: "2026-09-23T18:30:00+02:00",
+				},
+				confirmedEndAt: {
+					type: "string",
+					nullable: true,
+					example: "2026-09-23T20:30:00+02:00",
+				},
+				operationalStartAt: {
+					type: "string",
+					nullable: true,
+					example: "2026-09-23T18:30:00+02:00",
+				},
+				operationalEndAt: {
+					type: "string",
+					nullable: true,
+					example: "2026-09-23T20:30:00+02:00",
+				},
+				googleCalendarEventId: { type: "string", nullable: true },
+				calendarStatus: {
+					type: "string",
+					enum: ["NOT_ADDED", "ADDED", "FAILED"],
+				},
+				emailThreadId: { type: "string" },
+			},
+		},
+	})
+	@ApiOkResponse({
+		description: "The canonical booking after the write.",
+	})
+	async upsert(
+		@Headers("authorization") authorization?: string,
+		@Body() body?: unknown,
+	) {
+		this.authorize(authorization);
+
+		const parsed = bookingUpsertInput.safeParse(body);
+
+		if (!parsed.success) {
+			throw new BadRequestException(
+				parsed.error.issues.map((issue) => issue.message).join(" "),
 			);
 		}
 
-		if (!timingSafeEquals(authorization ?? "", `Bearer ${this.secret}`)) {
-			throw new ForbiddenException();
+		return this.bookings.upsert(parsed.data);
+	}
+
+	@Get("by-deal/:dealId")
+	@AllowAnonymous()
+	@ApiOperation({
+		summary: "List all bookings associated with a deal",
+	})
+	@ApiOkResponse({
+		description:
+			"All bookings for the deal, ordered by event date and booking key.",
+	})
+	async byDeal(
+		@Headers("authorization") authorization: string | undefined,
+		@Param("dealId") dealId: string,
+	) {
+		this.authorize(authorization);
+
+		const parsed = bookingUpsertInput.shape.dealId.safeParse(dealId);
+
+		if (!parsed.success) {
+			throw new BadRequestException(
+				parsed.error.issues.map((issue) => issue.message).join(" "),
+			);
 		}
-	}
-}
 
-function timingSafeEquals(a: string, b: string): boolean {
-	if (a.length !== b.length) return false;
-
-	let mismatch = 0;
-	for (let index = 0; index < a.length; index += 1) {
-		mismatch |= a.charCodeAt(index) ^ b.charCodeAt(index);
+		return this.bookings.byDeal(parsed.data);
 	}
 
-	return mismatch === 0;
+	private authorize(authorization?: string): void {
+		authorizeBookingInternalRequest({
+			secret: this.secret,
+			authorization,
+			logger: this.logger,
+		});
+	}
 }

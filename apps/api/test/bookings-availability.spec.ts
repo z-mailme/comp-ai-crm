@@ -162,7 +162,9 @@ function serviceWith(rows: ResourceRow[], totalUnits = 5) {
 		},
 	} as unknown as Db;
 
-	return new BookingsService(fake);
+	return new BookingsService(fake, {
+		touch: async () => undefined,
+	} as never);
 }
 
 function booking(input: {
