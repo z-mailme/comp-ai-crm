@@ -28,6 +28,7 @@ import { ThreadWriterService } from "../src/mailbox/thread-writer.service";
 import { withDiscardedCrmEvents } from "./agent-trigger.stub";
 
 type Ok<T> = { outcome: "ok"; data: T };
+type Failure<T> = Exclude<MailboxResult<T>, Ok<T>>;
 
 type ListMessagesCall = Parameters<GmailClient["listMessages"]>[1];
 type ListHistoryCall = Parameters<GmailClient["listHistory"]>[1];
@@ -48,23 +49,37 @@ class FakeGmail {
 	readonly historyCalls: ListHistoryCall[] = [];
 	readonly getMessageIds: string[] = [];
 	readonly messages = new Map<string, GmailMessage>();
-	private readonly listPages = new Map<string, MessageList>();
+	readonly messageFailures = new Map<string, Failure<GmailMessage>>();
+	private readonly listPages = new Map<string, MailboxResult<MessageList>>();
 	private readonly historyPages = new Map<string, HistoryList>();
 	private readonly profileData: Profile;
+	private profileResult: MailboxResult<Profile> | null = null;
 
 	constructor(mailbox: string) {
 		this.profileData = { emailAddress: mailbox, historyId: "history-start" };
 	}
 
 	setListPage(pageToken: string | undefined, page: MessageList): void {
-		this.listPages.set(pageToken ?? "", page);
+		this.listPages.set(pageToken ?? "", ok(page));
+	}
+
+	setListFailure(
+		pageToken: string | undefined,
+		failure: Failure<MessageList>,
+	): void {
+		this.listPages.set(pageToken ?? "", failure);
 	}
 
 	setHistoryPage(pageToken: string | undefined, page: HistoryList): void {
 		this.historyPages.set(pageToken ?? "", page);
 	}
 
+	setProfileFailure(failure: Failure<Profile>): void {
+		this.profileResult = failure;
+	}
+
 	async profile(): Promise<MailboxResult<Profile>> {
+		if (this.profileResult) return this.profileResult;
 		return ok(this.profileData);
 	}
 
@@ -73,7 +88,7 @@ class FakeGmail {
 		options: ListMessagesCall,
 	): Promise<MailboxResult<MessageList>> {
 		this.listMessageCalls.push(options);
-		return ok(this.listPages.get(options.pageToken ?? "") ?? {});
+		return this.listPages.get(options.pageToken ?? "") ?? ok({});
 	}
 
 	async listHistory(
@@ -89,6 +104,9 @@ class FakeGmail {
 		id: string,
 	): Promise<MailboxResult<GmailMessage>> {
 		this.getMessageIds.push(id);
+		const failure = this.messageFailures.get(id);
+		if (failure) return failure;
+
 		const message = this.messages.get(id);
 		if (message) return ok(message);
 
@@ -336,6 +354,9 @@ describe("GmailSyncService backfill", () => {
 
 		expect(outcome.messagesWritten).toBe(1);
 		expect(outcome.messagesMatched).toBe(1);
+		expect(outcome.messagesAttempted).toBe(1);
+		expect(outcome.messagesRemaining).toBe(0);
+		expect(outcome.messagesIgnored).toBe(0);
 		const saved = await stored(rfc);
 		expect(saved?.gmailMessageId).toBe("gmail-backfill-1");
 		expect(saved?.thread.contactId).toBe(contact.id);
@@ -375,6 +396,9 @@ describe("GmailSyncService backfill", () => {
 		const outcome = await setup.service.backfill(backfillInput(setup));
 
 		expect(outcome.messagesWritten).toBe(0);
+		expect(outcome.messagesAlreadyStored).toBe(1);
+		expect(outcome.messagesAttempted).toBe(0);
+		expect(outcome.messagesRemaining).toBe(0);
 		expect(setup.gmail.getMessageIds).toEqual(["gmail-duplicate-1"]);
 		expect(await db.emailMessage.count({ where: { rfcMessageId: rfc } })).toBe(
 			1,
@@ -421,9 +445,231 @@ describe("GmailSyncService backfill", () => {
 		const outcome = await setup.service.backfill(backfillInput(setup));
 
 		expect(outcome.messagesWritten).toBe(0);
+		expect(outcome.messagesAlreadyStored).toBe(1);
+		expect(outcome.messagesRemaining).toBe(0);
 		expect(await db.emailMessage.count({ where: { rfcMessageId: rfc } })).toBe(
 			1,
 		);
+	});
+
+	it("stops and returns rate-limited when getMessage is rate-limited halfway", async () => {
+		const setup = await kit("backfill-rate-limited", { cursor: "live-cursor" });
+		const email = `customer-${setup.marker}@gmail.com`;
+		await addContact(setup.marker, email);
+		const firstRfc = `rate-limited-first-${setup.marker}@mail.test`;
+		const secondRfc = `rate-limited-second-${setup.marker}@mail.test`;
+
+		setup.gmail.setListPage(undefined, {
+			messages: [
+				{ id: "gmail-rate-1" },
+				{ id: "gmail-rate-2" },
+				{ id: "gmail-rate-3" },
+			],
+			resultSizeEstimate: 3,
+		});
+		setup.gmail.messages.set(
+			"gmail-rate-1",
+			message({
+				id: "gmail-rate-1",
+				rfc: `<${firstRfc}>`,
+				from: setup.mailbox,
+				to: email,
+			}),
+		);
+		setup.gmail.messages.set(
+			"gmail-rate-3",
+			message({
+				id: "gmail-rate-3",
+				rfc: `<${secondRfc}>`,
+				from: setup.mailbox,
+				to: email,
+			}),
+		);
+		setup.gmail.messageFailures.set("gmail-rate-2", {
+			outcome: "rate-limited",
+			reason: "User-rate limit.",
+			retryAfterMs: 45_000,
+		});
+
+		const outcome = await setup.service.backfill(backfillInput(setup));
+
+		expect(outcome.status).toBe("rate-limited");
+		expect(outcome.retryAfterMs).toBe(45_000);
+		expect(outcome.failedMessageId).toBe("gmail-rate-2");
+		expect(outcome.messagesAttempted).toBe(2);
+		expect(outcome.messagesWritten).toBe(1);
+		expect(outcome.messagesRemaining).toBe(2);
+		expect(await stored(firstRfc)).not.toBeNull();
+		expect(await stored(secondRfc)).toBeNull();
+		expect(setup.gmail.getMessageIds).toEqual(["gmail-rate-1", "gmail-rate-2"]);
+
+		const row = await db.mailboxSync.findUnique({
+			where: { id: setup.row.id },
+			select: { cursor: true, retryAfter: true },
+		});
+		expect(row?.cursor).toBe("live-cursor");
+		expect(row?.retryAfter).not.toBeNull();
+	});
+
+	it("resumes a rate-limited range without duplicating stored messages", async () => {
+		const setup = await kit("backfill-rate-resume", { cursor: "live-cursor" });
+		const email = `customer-${setup.marker}@gmail.com`;
+		await addContact(setup.marker, email);
+		const firstRfc = `rate-resume-first-${setup.marker}@mail.test`;
+		const secondRfc = `rate-resume-second-${setup.marker}@mail.test`;
+		const thirdRfc = `rate-resume-third-${setup.marker}@mail.test`;
+
+		setup.gmail.setListPage(undefined, {
+			messages: [
+				{ id: "gmail-resume-1" },
+				{ id: "gmail-resume-2" },
+				{ id: "gmail-resume-3" },
+			],
+			resultSizeEstimate: 3,
+		});
+		for (const [id, rfc] of [
+			["gmail-resume-1", firstRfc],
+			["gmail-resume-2", secondRfc],
+			["gmail-resume-3", thirdRfc],
+		] as const) {
+			setup.gmail.messages.set(
+				id,
+				message({ id, rfc: `<${rfc}>`, from: setup.mailbox, to: email }),
+			);
+		}
+		setup.gmail.messageFailures.set("gmail-resume-2", {
+			outcome: "rate-limited",
+			reason: "User-rate limit.",
+			retryAfterMs: 45_000,
+		});
+
+		await setup.service.backfill(backfillInput(setup));
+		setup.gmail.messageFailures.delete("gmail-resume-2");
+		const outcome = await setup.service.backfill(backfillInput(setup));
+
+		expect(outcome.status).toBe("synced");
+		expect(outcome.messagesAlreadyStored).toBe(1);
+		expect(outcome.messagesAttempted).toBe(2);
+		expect(outcome.messagesWritten).toBe(2);
+		expect(outcome.messagesRemaining).toBe(0);
+		expect(await stored(firstRfc)).not.toBeNull();
+		expect(await stored(secondRfc)).not.toBeNull();
+		expect(await stored(thirdRfc)).not.toBeNull();
+		expect(
+			await db.emailMessage.count({ where: { syncedByUserId: setup.userId } }),
+		).toBe(3);
+	});
+
+	it("returns reconnect when getMessage is unauthorized", async () => {
+		const setup = await kit("backfill-unauthorized", { cursor: "live-cursor" });
+
+		setup.gmail.setListPage(undefined, {
+			messages: [{ id: "gmail-unauthorized-1" }],
+			resultSizeEstimate: 1,
+		});
+		setup.gmail.messageFailures.set("gmail-unauthorized-1", {
+			outcome: "unauthorized",
+			reason: "Token expired.",
+		});
+
+		const outcome = await setup.service.backfill(backfillInput(setup));
+
+		expect(outcome.status).toBe("reconnect");
+		expect(outcome.failedMessageId).toBe("gmail-unauthorized-1");
+		expect(outcome.messagesRemaining).toBe(1);
+
+		const row = await db.mailboxSync.findUnique({
+			where: { id: setup.row.id },
+			select: { status: true, cursor: true },
+		});
+		expect(row?.status).toBe(GoogleSyncStatus.NEEDS_RECONNECT);
+		expect(row?.cursor).toBe("live-cursor");
+	});
+
+	it("returns retryable-failed when getMessage has a retryable failure", async () => {
+		const setup = await kit("backfill-retryable-failure", {
+			cursor: "live-cursor",
+		});
+
+		setup.gmail.setListPage(undefined, {
+			messages: [{ id: "gmail-retryable-1" }],
+			resultSizeEstimate: 1,
+		});
+		setup.gmail.messageFailures.set("gmail-retryable-1", {
+			outcome: "failed",
+			reason: "HTTP 503",
+			retryable: true,
+		});
+
+		const outcome = await setup.service.backfill(backfillInput(setup));
+
+		expect(outcome.status).toBe("retryable-failed");
+		expect(outcome.reason).toBe("HTTP 503");
+		expect(outcome.failedMessageId).toBe("gmail-retryable-1");
+		expect(outcome.messagesRemaining).toBe(1);
+
+		const row = await db.mailboxSync.findUnique({
+			where: { id: setup.row.id },
+			select: { status: true, cursor: true, lastError: true },
+		});
+		expect(row?.status).toBe(GoogleSyncStatus.FAILED);
+		expect(row?.cursor).toBe("live-cursor");
+		expect(row?.lastError).toBe("HTTP 503");
+	});
+
+	it("returns failed when getMessage has a permanent failure", async () => {
+		const setup = await kit("backfill-permanent-failure", {
+			cursor: "live-cursor",
+		});
+
+		setup.gmail.setListPage(undefined, {
+			messages: [{ id: "gmail-permanent-1" }],
+			resultSizeEstimate: 1,
+		});
+		setup.gmail.messageFailures.set("gmail-permanent-1", {
+			outcome: "failed",
+			reason: "HTTP 400",
+			retryable: false,
+		});
+
+		const outcome = await setup.service.backfill(backfillInput(setup));
+
+		expect(outcome.status).toBe("failed");
+		expect(outcome.reason).toBe("HTTP 400");
+		expect(outcome.failedMessageId).toBe("gmail-permanent-1");
+		expect(outcome.messagesRemaining).toBe(1);
+
+		const row = await db.mailboxSync.findUnique({
+			where: { id: setup.row.id },
+			select: { status: true, cursor: true, lastError: true },
+		});
+		expect(row?.status).toBe(GoogleSyncStatus.FAILED);
+		expect(row?.cursor).toBe("live-cursor");
+		expect(row?.lastError).toBe("HTTP 400");
+	});
+
+	it("counts malformed messages as ignored instead of failed", async () => {
+		const setup = await kit("backfill-malformed", { cursor: "live-cursor" });
+
+		setup.gmail.setListPage(undefined, {
+			messages: [{ id: "gmail-malformed-1" }],
+			resultSizeEstimate: 1,
+		});
+		setup.gmail.messages.set("gmail-malformed-1", {
+			id: "gmail-malformed-1",
+			internalDate: String(new Date("2025-01-01T10:00:00.000Z").getTime()),
+			payload: {
+				headers: [{ name: "Message-ID", value: `<bad-${setup.marker}>` }],
+			},
+		});
+
+		const outcome = await setup.service.backfill(backfillInput(setup));
+
+		expect(outcome.status).toBe("synced");
+		expect(outcome.messagesAttempted).toBe(1);
+		expect(outcome.messagesWritten).toBe(0);
+		expect(outcome.messagesIgnored).toBe(1);
+		expect(outcome.messagesRemaining).toBe(0);
 	});
 
 	it("does not write records during a dry run", async () => {
