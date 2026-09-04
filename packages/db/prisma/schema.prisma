@@ -203,6 +203,18 @@ enum CalendarStatus {
   FAILED
 }
 
+enum BookingStatus {
+  PROVISIONAL
+  HELD
+  CONFIRMED
+  COMPLETED
+  CANCELLED
+}
+
+enum BookingResourceType {
+  PHOTO_BOOTH_360 @map("360_PHOTO_BOOTH")
+}
+
 enum ActivityType {
   NOTE
   CALL
@@ -979,6 +991,7 @@ model Deal {
   archivedAt     DateTime?
 
   contacts    DealContact[]
+  bookings    Booking[]
   activities  Activity[]
   emailThreads EmailThread[]
   fieldValues FieldValue[]
@@ -994,6 +1007,65 @@ model Deal {
   @@index([currency])
   @@index([archivedAt])
   @@map("deal")
+}
+
+model Booking {
+  id     String @id @default(cuid())
+  dealId String
+  deal   Deal   @relation(fields: [dealId], references: [id], onDelete: Cascade)
+
+  status BookingStatus @default(PROVISIONAL)
+
+  eventDate          DateTime  @db.Date
+  requestedStartAt   DateTime?
+  requestedEndAt     DateTime?
+  confirmedStartAt   DateTime?
+  confirmedEndAt     DateTime?
+  operationalStartAt DateTime?
+  operationalEndAt   DateTime?
+
+  googleCalendarEventId String?
+  calendarStatus        CalendarStatus @default(NOT_ADDED)
+  calendarSyncedAt      DateTime?
+
+  source RecordSource @default(MANUAL)
+
+  resources    BookingResource[]
+  emailThreads EmailThread[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([dealId])
+  @@index([status, eventDate])
+  @@index([googleCalendarEventId])
+  @@map("booking")
+}
+
+model BookingResource {
+  id        String  @id @default(cuid())
+  bookingId String
+  booking   Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  resourceType BookingResourceType
+  quantity     Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([bookingId, resourceType])
+  @@index([resourceType])
+  @@map("bookingResource")
+}
+
+model BookingResourceCapacity {
+  resourceType BookingResourceType @id
+  totalUnits   Int
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@map("bookingResourceCapacity")
 }
 
 enum RateSource {
@@ -1236,6 +1308,8 @@ model EmailThread {
   contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
   dealId    String?
   deal      Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
 
   firstMessageAt DateTime
   lastMessageAt  DateTime
@@ -1250,6 +1324,7 @@ model EmailThread {
   @@index([companyId, lastMessageAt])
   @@index([contactId, lastMessageAt])
   @@index([dealId, lastMessageAt])
+  @@index([bookingId, lastMessageAt])
   @@index([matchStatus, lastMessageAt])
   @@map("emailThread")
 }
