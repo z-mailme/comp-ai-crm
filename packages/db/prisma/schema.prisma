@@ -1935,7 +1935,7 @@ model CommunicationMessage {
   createdAt        DateTime          @default(now())
   approvalRequests ApprovalRequest[]
 
-  @@unique([channel, providerMessageId])
+  @@index([channel, providerMessageId])
   @@index([conversationId, sentAt])
   @@index([channel, sentAt])
   @@map("communicationMessage")

@@ -68,7 +68,7 @@ CREATE INDEX "mailboxHistoricalImportJob_status_retryAfterAt_idx" ON "mailboxHis
 
 CREATE INDEX "mailboxHistoricalImportJob_status_leaseExpiresAt_idx" ON "mailboxHistoricalImportJob"("status", "leaseExpiresAt");
 
-CREATE INDEX "mailboxHistoricalImportJob_userId_source_requestedAfter_requestedBefore_idx" ON "mailboxHistoricalImportJob"("userId", "source", "requestedAfter", "requestedBefore");
+CREATE INDEX "mailboxHistoricalImportJob_userId_source_requestedAfter_req_idx" ON "mailboxHistoricalImportJob"("userId", "source", "requestedAfter", "requestedBefore");
 
 CREATE INDEX "mailboxHistoricalImportChunk_jobId_sortIndex_idx" ON "mailboxHistoricalImportChunk"("jobId", "sortIndex");
 

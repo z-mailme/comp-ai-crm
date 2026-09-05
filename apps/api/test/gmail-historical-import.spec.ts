@@ -55,7 +55,7 @@ class FakeGmailBackfill {
 
 async function kit(name: string) {
 	const marker = `${suffix}-${name}`;
-	await clean(marker);
+	await clean(suffix);
 
 	const userId = `user-${marker}`;
 	await db.user.create({

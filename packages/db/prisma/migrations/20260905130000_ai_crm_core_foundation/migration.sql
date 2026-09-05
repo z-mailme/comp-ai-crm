@@ -127,6 +127,7 @@ CREATE TABLE "communicationParticipant" (
     "messageId" TEXT,
     "customerIdentityId" TEXT,
     "contactId" TEXT,
+    "companyId" TEXT,
     "role" "CommunicationParticipantRole" NOT NULL,
     "name" TEXT,
     "email" TEXT,
@@ -447,7 +448,7 @@ CREATE INDEX "conversation_companyId_lastMessageAt_idx" ON "conversation"("compa
 CREATE INDEX "conversation_dealId_lastMessageAt_idx" ON "conversation"("dealId", "lastMessageAt");
 CREATE INDEX "conversation_bookingId_lastMessageAt_idx" ON "conversation"("bookingId", "lastMessageAt");
 CREATE UNIQUE INDEX "communicationMessage_emailMessageId_key" ON "communicationMessage"("emailMessageId");
-CREATE UNIQUE INDEX "communicationMessage_channel_providerMessageId_key" ON "communicationMessage"("channel", "providerMessageId");
+CREATE INDEX "communicationMessage_channel_providerMessageId_idx" ON "communicationMessage"("channel", "providerMessageId");
 CREATE INDEX "communicationMessage_conversationId_sentAt_idx" ON "communicationMessage"("conversationId", "sentAt");
 CREATE INDEX "communicationMessage_channel_sentAt_idx" ON "communicationMessage"("channel", "sentAt");
 CREATE INDEX "communicationParticipant_conversationId_role_idx" ON "communicationParticipant"("conversationId", "role");
@@ -474,7 +475,6 @@ CREATE UNIQUE INDEX "agentCapability_agentId_key_key" ON "agentCapability"("agen
 CREATE INDEX "agentCapability_enabled_key_idx" ON "agentCapability"("enabled", "key");
 CREATE UNIQUE INDEX "agentPermission_agentId_scope_target_key" ON "agentPermission"("agentId", "scope", "target");
 CREATE INDEX "agentPermission_scope_allowed_idx" ON "agentPermission"("scope", "allowed");
-CREATE INDEX "agentRun_businessEventId_idx" ON "agentRun"("businessEventId");
 CREATE INDEX "agentDecision_agentId_createdAt_idx" ON "agentDecision"("agentId", "createdAt");
 CREATE INDEX "agentDecision_runId_createdAt_idx" ON "agentDecision"("runId", "createdAt");
 CREATE INDEX "agentDecision_status_createdAt_idx" ON "agentDecision"("status", "createdAt");
@@ -535,6 +535,7 @@ ALTER TABLE "communicationParticipant" ADD CONSTRAINT "communicationParticipant_
 ALTER TABLE "communicationParticipant" ADD CONSTRAINT "communicationParticipant_messageId_fkey" FOREIGN KEY ("messageId") REFERENCES "communicationMessage"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "communicationParticipant" ADD CONSTRAINT "communicationParticipant_customerIdentityId_fkey" FOREIGN KEY ("customerIdentityId") REFERENCES "customerIdentity"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE "communicationParticipant" ADD CONSTRAINT "communicationParticipant_contactId_fkey" FOREIGN KEY ("contactId") REFERENCES "contact"("id") ON DELETE SET NULL ON UPDATE CASCADE;
+ALTER TABLE "communicationParticipant" ADD CONSTRAINT "communicationParticipant_companyId_fkey" FOREIGN KEY ("companyId") REFERENCES "company"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE "conversationInsight" ADD CONSTRAINT "conversationInsight_conversationId_fkey" FOREIGN KEY ("conversationId") REFERENCES "conversation"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 ALTER TABLE "conversationInsight" ADD CONSTRAINT "conversationInsight_messageId_fkey" FOREIGN KEY ("messageId") REFERENCES "communicationMessage"("id") ON DELETE SET NULL ON UPDATE CASCADE;
 ALTER TABLE "conversationInsight" ADD CONSTRAINT "conversationInsight_contactId_fkey" FOREIGN KEY ("contactId") REFERENCES "contact"("id") ON DELETE SET NULL ON UPDATE CASCADE;
