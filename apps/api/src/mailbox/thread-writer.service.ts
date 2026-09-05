@@ -271,6 +271,7 @@ export class ThreadWriterService {
 					contactId,
 					dealId,
 					origin: options.origin,
+					mailbox: options.mailbox,
 				});
 
 				if (companyId || contactId || dealId) {
@@ -420,11 +421,24 @@ export class ThreadWriterService {
 			contactId: string | null;
 			dealId: string | null;
 			origin: SyncSource;
+			mailbox: string;
 		},
 	): Promise<void> {
+		const channelAccount = await tx.channelAccount.findFirst({
+			where: {
+				userId: input.userId,
+				channel: CommunicationChannel.EMAIL,
+				provider: input.origin,
+				OR: [{ externalAccountId: input.mailbox }, { externalAccountId: null }],
+			},
+			orderBy: [{ externalAccountId: "desc" }, { createdAt: "asc" }],
+			select: { id: true, businessUnitId: true },
+		});
 		const conversation = await tx.conversation.upsert({
 			where: { emailThreadId: input.emailThreadId },
 			create: {
+				businessUnitId: channelAccount?.businessUnitId ?? null,
+				channelAccountId: channelAccount?.id ?? null,
 				channel: CommunicationChannel.EMAIL,
 				subject: input.subject,
 				preview: input.snippet,
@@ -442,6 +456,8 @@ export class ThreadWriterService {
 				} satisfies Prisma.InputJsonValue,
 			},
 			update: {
+				businessUnitId: channelAccount?.businessUnitId,
+				channelAccountId: channelAccount?.id,
 				subject: input.subject,
 				preview: input.snippet,
 				companyId: input.companyId,
@@ -536,6 +552,7 @@ export class ThreadWriterService {
 				idempotencyKey: `communication:${input.emailMessageId}:${input.direction.toLowerCase()}`,
 			},
 			create: {
+				businessUnitId: channelAccount?.businessUnitId ?? null,
 				type:
 					input.direction === CommunicationDirection.OUTBOUND
 						? "communication.sent"
@@ -577,12 +594,14 @@ export class ThreadWriterService {
 							entityType: "MESSAGE",
 							entityId: message.id,
 							conversationId: conversation.id,
+							businessUnitId: channelAccount?.businessUnitId ?? null,
 							source: input.origin,
 						} satisfies Prisma.InputJsonValue,
 					},
 				},
 			},
 			update: {
+				businessUnitId: channelAccount?.businessUnitId,
 				companyId: input.companyId,
 				contactId: input.contactId,
 				dealId: input.dealId,

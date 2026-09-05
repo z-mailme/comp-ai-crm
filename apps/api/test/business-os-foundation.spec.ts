@@ -26,6 +26,7 @@ import {
 	MemoryEntityType,
 	MemoryProvider,
 } from "@crm/db";
+import { WORKSPACE_ID } from "@crm/db/workspace";
 import { BusinessOsService } from "../src/business-os/business-os.service";
 
 const suffix = process.env.TEST_RUN_ID ?? crypto.randomUUID();
@@ -51,6 +52,7 @@ const runId = `run-${marker}`;
 const actionId = `action-${marker}`;
 const decisionId = `decision-${marker}`;
 const service = new BusinessOsService(db);
+const contextA = { userId, businessUnitId: unitAId };
 
 beforeAll(async () => {
 	await clean();
@@ -63,18 +65,27 @@ afterAll(async () => {
 
 describe("Business OS foundation", () => {
 	it("reads conversations, events, approvals, knowledge, automation, inbox, search and Customer 360", async () => {
-		const overview = await service.overview();
-		const inbox = await service.inbox({
-			channel: CommunicationChannel.EMAIL,
-			status: ConversationStatus.OPEN,
-			limit: 20,
+		const overview = await service.overview(contextA);
+		const inbox = await service.inbox(
+			{
+				userId,
+				businessUnitId: unitAId,
+			},
+			{
+				channel: CommunicationChannel.EMAIL,
+				status: ConversationStatus.OPEN,
+				limit: 20,
+			},
+		);
+		const conversation = await service.conversation(contextA, conversationId);
+		const customer = await service.customer360(contextA, contactId);
+		const approvals = await service.approvals(contextA);
+		const knowledge = await service.knowledge(contextA);
+		const observability = await service.observability(contextA);
+		const search = await service.globalSearch(contextA, {
+			q: marker,
+			limit: 25,
 		});
-		const conversation = await service.conversation(conversationId);
-		const customer = await service.customer360(contactId);
-		const approvals = await service.approvals();
-		const knowledge = await service.knowledge();
-		const observability = await service.observability();
-		const search = await service.globalSearch({ q: marker, limit: 25 });
 
 		expect(overview.killSwitch).toBe(false);
 		expect(overview.counts.openConversations).toBeGreaterThanOrEqual(1);
@@ -188,11 +199,30 @@ describe("Business OS foundation", () => {
 });
 
 async function seed(): Promise<void> {
+	await db.organization.upsert({
+		where: { id: WORKSPACE_ID },
+		create: {
+			id: WORKSPACE_ID,
+			name: "CRM",
+			slug: "crm",
+			createdAt: new Date(),
+		},
+		update: {},
+	});
 	await db.user.create({
 		data: {
 			id: userId,
 			name: "Business OS Stabilizer",
 			email: `${userId}@example.test`,
+		},
+	});
+	await db.member.create({
+		data: {
+			id: `member-${marker}`,
+			organizationId: WORKSPACE_ID,
+			userId,
+			role: "owner",
+			createdAt: new Date(),
 		},
 	});
 	await db.appSetting.create({
@@ -708,6 +738,9 @@ async function clean(): Promise<void> {
 	});
 	await db.appSetting.deleteMany({
 		where: { id: `settings-${marker}` },
+	});
+	await db.member.deleteMany({
+		where: { userId },
 	});
 	await db.user.deleteMany({
 		where: { id: userId },

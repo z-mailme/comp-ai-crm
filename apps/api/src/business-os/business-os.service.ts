@@ -10,6 +10,11 @@ import {
 } from "@crm/db";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
+import {
+	type BusinessContext,
+	type BusinessContextSource,
+	resolveBusinessContext,
+} from "./business-context";
 import type {
 	ApprovalsOutput,
 	BusinessOsOverviewOutput,
@@ -98,8 +103,15 @@ const EVENT_SELECT = {
 export class BusinessOsService {
 	constructor(@InjectDatabase() private readonly db: Db) {}
 
-	async overview(): Promise<BusinessOsOverviewOutput> {
+	async overview(
+		source: BusinessContextSource,
+	): Promise<BusinessOsOverviewOutput> {
+		const context = await resolveBusinessContext(this.db, source);
 		const since = new Date(Date.now() - RECENT_WINDOW_MS);
+		const conversationsWhere = conversationScope(context);
+		const approvalsWhere = approvalScope(context);
+		const eventsWhere = businessEventScope(context);
+		const automationsWhere = automationRuleScope(context);
 
 		const [
 			openConversations,
@@ -119,48 +131,84 @@ export class BusinessOsService {
 			settings,
 		] = await Promise.all([
 			this.db.conversation.count({
-				where: { status: ConversationStatus.OPEN },
+				where: {
+					AND: [conversationsWhere, { status: ConversationStatus.OPEN }],
+				},
 			}),
 			this.db.conversation.count({
-				where: { status: ConversationStatus.WAITING_ON_US },
+				where: {
+					AND: [
+						conversationsWhere,
+						{ status: ConversationStatus.WAITING_ON_US },
+					],
+				},
 			}),
-			this.db.conversationInsight.count({ where: { needsHumanReview: true } }),
+			this.db.conversationInsight.count({
+				where: {
+					AND: [conversationInsightScope(context), { needsHumanReview: true }],
+				},
+			}),
 			this.db.approvalRequest.count({
-				where: { status: ApprovalRequestStatus.PENDING },
+				where: {
+					AND: [approvalsWhere, { status: ApprovalRequestStatus.PENDING }],
+				},
 			}),
 			this.db.businessTask.count({
 				where: {
-					status: {
-						in: [BusinessTaskStatus.TODO, BusinessTaskStatus.IN_PROGRESS],
-					},
+					AND: [
+						businessTaskScope(context),
+						{
+							status: {
+								in: [BusinessTaskStatus.TODO, BusinessTaskStatus.IN_PROGRESS],
+							},
+						},
+					],
 				},
 			}),
 			this.db.businessEventOutbox.count({
-				where: { status: BusinessEventOutboxStatus.PENDING },
+				where: {
+					AND: [
+						businessEventOutboxScope(context),
+						{ status: BusinessEventOutboxStatus.PENDING },
+					],
+				},
 			}),
-			this.db.knowledgeItem.count({ where: { active: true } }),
-			this.db.businessRule.count({ where: { active: true } }),
+			this.db.knowledgeItem.count({
+				where: { AND: [knowledgeItemScope(context), { active: true }] },
+			}),
+			this.db.businessRule.count({
+				where: { AND: [businessRuleScope(context), { active: true }] },
+			}),
 			this.db.automationRule.count({
-				where: { status: AutomationRuleStatus.ACTIVE },
+				where: {
+					AND: [automationsWhere, { status: AutomationRuleStatus.ACTIVE }],
+				},
 			}),
-			this.db.businessEvent.count({ where: { occurredAt: { gte: since } } }),
+			this.db.businessEvent.count({
+				where: { AND: [eventsWhere, { occurredAt: { gte: since } }] },
+			}),
 			this.db.conversation.findMany({
+				where: conversationsWhere,
 				orderBy: [{ lastMessageAt: "desc" }, { updatedAt: "desc" }],
 				take: 8,
 				select: CONVERSATION_SELECT,
 			}),
 			this.db.approvalRequest.findMany({
-				where: { status: ApprovalRequestStatus.PENDING },
+				where: {
+					AND: [approvalsWhere, { status: ApprovalRequestStatus.PENDING }],
+				},
 				orderBy: { createdAt: "desc" },
 				take: 8,
 				select: APPROVAL_SELECT,
 			}),
 			this.db.businessEvent.findMany({
+				where: eventsWhere,
 				orderBy: { occurredAt: "desc" },
 				take: 10,
 				select: EVENT_SELECT,
 			}),
 			this.db.automationExecution.findMany({
+				where: automationExecutionScope(context),
 				orderBy: { createdAt: "desc" },
 				take: 8,
 				select: {
@@ -201,11 +249,20 @@ export class BusinessOsService {
 		};
 	}
 
-	async inbox(input: InboxInput): Promise<InboxOutput> {
+	async inbox(
+		source: BusinessContextSource,
+		input: InboxInput,
+	): Promise<InboxOutput> {
+		const context = await resolveBusinessContext(this.db, source);
 		const conversations = await this.db.conversation.findMany({
 			where: {
-				status: input.status,
-				channel: input.channel,
+				AND: [
+					conversationScope(context),
+					{
+						status: input.status,
+						channel: input.channel,
+					},
+				],
 			},
 			orderBy: [{ lastMessageAt: "desc" }, { updatedAt: "desc" }],
 			take: input.limit,
@@ -215,9 +272,13 @@ export class BusinessOsService {
 		return { conversations: conversations.map(conversationSummary) };
 	}
 
-	async conversation(id: string): Promise<ConversationDetailOutput> {
-		const conversation = await this.db.conversation.findUnique({
-			where: { id },
+	async conversation(
+		source: BusinessContextSource,
+		id: string,
+	): Promise<ConversationDetailOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const conversation = await this.db.conversation.findFirst({
+			where: { AND: [conversationScope(context), { id }] },
 			select: CONVERSATION_SELECT,
 		});
 
@@ -226,7 +287,9 @@ export class BusinessOsService {
 		const [messages, participants, insights, approvals, events] =
 			await Promise.all([
 				this.db.communicationMessage.findMany({
-					where: { conversationId: id },
+					where: {
+						AND: [communicationMessageScope(context), { conversationId: id }],
+					},
 					orderBy: { sentAt: "asc" },
 					select: {
 						id: true,
@@ -242,7 +305,12 @@ export class BusinessOsService {
 					},
 				}),
 				this.db.communicationParticipant.findMany({
-					where: { conversationId: id },
+					where: {
+						AND: [
+							communicationParticipantScope(context),
+							{ conversationId: id },
+						],
+					},
 					orderBy: { createdAt: "asc" },
 					take: 100,
 					select: {
@@ -273,19 +341,21 @@ export class BusinessOsService {
 					},
 				}),
 				this.db.conversationInsight.findMany({
-					where: { conversationId: id },
+					where: {
+						AND: [conversationInsightScope(context), { conversationId: id }],
+					},
 					orderBy: { createdAt: "desc" },
 					take: 20,
 					select: INSIGHT_SELECT,
 				}),
 				this.db.approvalRequest.findMany({
-					where: { conversationId: id },
+					where: { AND: [approvalScope(context), { conversationId: id }] },
 					orderBy: { createdAt: "desc" },
 					take: 20,
 					select: APPROVAL_SELECT,
 				}),
 				this.db.businessEvent.findMany({
-					where: { conversationId: id },
+					where: { AND: [businessEventScope(context), { conversationId: id }] },
 					orderBy: { occurredAt: "desc" },
 					take: 50,
 					select: EVENT_SELECT,
@@ -315,9 +385,13 @@ export class BusinessOsService {
 		};
 	}
 
-	async customer360(contactId: string): Promise<Customer360Output> {
-		const contact = await this.db.contact.findUnique({
-			where: { id: contactId },
+	async customer360(
+		source: BusinessContextSource,
+		contactId: string,
+	): Promise<Customer360Output> {
+		const context = await resolveBusinessContext(this.db, source);
+		const contact = await this.db.contact.findFirst({
+			where: { AND: [contactScope(context), { id: contactId }] },
 			select: {
 				id: true,
 				firstName: true,
@@ -335,6 +409,7 @@ export class BusinessOsService {
 					},
 				},
 				deals: {
+					where: { deal: dealScope(context) },
 					take: 20,
 					select: {
 						role: true,
@@ -350,6 +425,7 @@ export class BusinessOsService {
 					},
 				},
 				activities: {
+					where: activityScope(context),
 					orderBy: { createdAt: "desc" },
 					take: 20,
 					select: {
@@ -376,7 +452,7 @@ export class BusinessOsService {
 			ruleCount,
 		] = await Promise.all([
 			this.db.customerIdentity.findMany({
-				where: { contactId },
+				where: { AND: [customerIdentityScope(context), { contactId }] },
 				orderBy: { createdAt: "desc" },
 				take: 20,
 				select: {
@@ -389,19 +465,19 @@ export class BusinessOsService {
 				},
 			}),
 			this.db.conversation.findMany({
-				where: { contactId },
+				where: { AND: [conversationScope(context), { contactId }] },
 				orderBy: [{ lastMessageAt: "desc" }, { updatedAt: "desc" }],
 				take: 20,
 				select: CONVERSATION_SELECT,
 			}),
 			this.db.conversationInsight.findMany({
-				where: { contactId },
+				where: { AND: [conversationInsightScope(context), { contactId }] },
 				orderBy: { createdAt: "desc" },
 				take: 20,
 				select: INSIGHT_SELECT,
 			}),
 			this.db.businessTask.findMany({
-				where: { contactId },
+				where: { AND: [businessTaskScope(context), { contactId }] },
 				orderBy: [{ dueAt: "asc" }, { createdAt: "desc" }],
 				take: 20,
 				select: {
@@ -415,19 +491,23 @@ export class BusinessOsService {
 				},
 			}),
 			this.db.businessEvent.findMany({
-				where: { contactId },
+				where: { AND: [businessEventScope(context), { contactId }] },
 				orderBy: { occurredAt: "desc" },
 				take: 20,
 				select: EVENT_SELECT,
 			}),
 			this.db.approvalRequest.findMany({
-				where: { contactId },
+				where: { AND: [approvalScope(context), { contactId }] },
 				orderBy: { createdAt: "desc" },
 				take: 20,
 				select: APPROVAL_SELECT,
 			}),
-			this.db.knowledgeItem.count({ where: { active: true } }),
-			this.db.businessRule.count({ where: { active: true } }),
+			this.db.knowledgeItem.count({
+				where: { AND: [knowledgeItemScope(context), { active: true }] },
+			}),
+			this.db.businessRule.count({
+				where: { AND: [businessRuleScope(context), { active: true }] },
+			}),
 		]);
 
 		return {
@@ -504,8 +584,10 @@ export class BusinessOsService {
 		};
 	}
 
-	async approvals(): Promise<ApprovalsOutput> {
+	async approvals(source: BusinessContextSource): Promise<ApprovalsOutput> {
+		const context = await resolveBusinessContext(this.db, source);
 		const approvals = await this.db.approvalRequest.findMany({
+			where: approvalScope(context),
 			orderBy: { createdAt: "desc" },
 			take: 50,
 			select: APPROVAL_SELECT,
@@ -514,9 +596,11 @@ export class BusinessOsService {
 		return { approvals: approvals.map(approvalSummary) };
 	}
 
-	async knowledge(): Promise<KnowledgeOutput> {
+	async knowledge(source: BusinessContextSource): Promise<KnowledgeOutput> {
+		const context = await resolveBusinessContext(this.db, source);
 		const [items, rules] = await Promise.all([
 			this.db.knowledgeItem.findMany({
+				where: knowledgeItemScope(context),
 				orderBy: [{ active: "desc" }, { updatedAt: "desc" }],
 				take: 100,
 				select: {
@@ -533,6 +617,7 @@ export class BusinessOsService {
 				},
 			}),
 			this.db.businessRule.findMany({
+				where: businessRuleScope(context),
 				orderBy: [{ active: "desc" }, { priority: "desc" }],
 				take: 100,
 				select: {
@@ -562,18 +647,24 @@ export class BusinessOsService {
 		};
 	}
 
-	async observability(): Promise<ObservabilityOutput> {
+	async observability(
+		source: BusinessContextSource,
+	): Promise<ObservabilityOutput> {
+		const context = await resolveBusinessContext(this.db, source);
 		const [outbox, executions, rules] = await Promise.all([
 			this.db.businessEventOutbox.groupBy({
 				by: ["status"],
+				where: businessEventOutboxScope(context),
 				_count: { _all: true },
 			}),
 			this.db.automationExecution.groupBy({
 				by: ["status"],
+				where: automationExecutionScope(context),
 				_count: { _all: true },
 			}),
 			this.db.automationRule.groupBy({
 				by: ["status"],
+				where: automationRuleScope(context),
 				_count: { _all: true },
 			}),
 		]);
@@ -606,7 +697,11 @@ export class BusinessOsService {
 		};
 	}
 
-	async globalSearch(input: GlobalSearchInput): Promise<GlobalSearchOutput> {
+	async globalSearch(
+		source: BusinessContextSource,
+		input: GlobalSearchInput,
+	): Promise<GlobalSearchOutput> {
+		const context = await resolveBusinessContext(this.db, source);
 		const term = input.q.trim();
 		if (term.length < 2) return { hits: [] };
 
@@ -624,7 +719,16 @@ export class BusinessOsService {
 		] = await Promise.all([
 			this.db.company.findMany({
 				where: {
-					OR: [{ name: contains }, { domain: contains }, { email: contains }],
+					AND: [
+						companyScope(context),
+						{
+							OR: [
+								{ name: contains },
+								{ domain: contains },
+								{ email: contains },
+							],
+						},
+					],
 				},
 				orderBy: { name: "asc" },
 				take: input.limit,
@@ -632,11 +736,16 @@ export class BusinessOsService {
 			}),
 			this.db.contact.findMany({
 				where: {
-					OR: [
-						{ firstName: contains },
-						{ lastName: contains },
-						{ email: contains },
-						{ phone: contains },
+					AND: [
+						contactScope(context),
+						{
+							OR: [
+								{ firstName: contains },
+								{ lastName: contains },
+								{ email: contains },
+								{ phone: contains },
+							],
+						},
 					],
 				},
 				orderBy: [{ lastName: "asc" }, { firstName: "asc" }],
@@ -650,17 +759,22 @@ export class BusinessOsService {
 				},
 			}),
 			this.db.deal.findMany({
-				where: { name: contains },
+				where: { AND: [dealScope(context), { name: contains }] },
 				orderBy: { name: "asc" },
 				take: input.limit,
 				select: { id: true, name: true, stage: true },
 			}),
 			this.db.booking.findMany({
 				where: {
-					OR: [
-						{ bookingKey: contains },
-						{ deal: { name: contains } },
-						{ googleCalendarEventId: contains },
+					AND: [
+						bookingScope(context),
+						{
+							OR: [
+								{ bookingKey: contains },
+								{ deal: { name: contains } },
+								{ googleCalendarEventId: contains },
+							],
+						},
 					],
 				},
 				orderBy: { eventDate: "desc" },
@@ -673,17 +787,27 @@ export class BusinessOsService {
 				},
 			}),
 			this.db.conversation.findMany({
-				where: { OR: [{ subject: contains }, { preview: contains }] },
+				where: {
+					AND: [
+						conversationScope(context),
+						{ OR: [{ subject: contains }, { preview: contains }] },
+					],
+				},
 				orderBy: [{ lastMessageAt: "desc" }, { updatedAt: "desc" }],
 				take: input.limit,
 				select: { id: true, subject: true, preview: true, lastMessageAt: true },
 			}),
 			this.db.communicationMessage.findMany({
 				where: {
-					OR: [
-						{ subject: contains },
-						{ snippet: contains },
-						{ body: contains },
+					AND: [
+						communicationMessageScope(context),
+						{
+							OR: [
+								{ subject: contains },
+								{ snippet: contains },
+								{ body: contains },
+							],
+						},
 					],
 				},
 				orderBy: { sentAt: "desc" },
@@ -691,7 +815,12 @@ export class BusinessOsService {
 				select: { id: true, subject: true, snippet: true, sentAt: true },
 			}),
 			this.db.activity.findMany({
-				where: { OR: [{ subject: contains }, { body: contains }] },
+				where: {
+					AND: [
+						activityScope(context),
+						{ OR: [{ subject: contains }, { body: contains }] },
+					],
+				},
 				orderBy: { createdAt: "desc" },
 				take: input.limit,
 				select: {
@@ -703,13 +832,13 @@ export class BusinessOsService {
 				},
 			}),
 			this.db.knowledgeItem.findMany({
-				where: { title: contains },
+				where: { AND: [knowledgeItemScope(context), { title: contains }] },
 				orderBy: { updatedAt: "desc" },
 				take: input.limit,
 				select: { id: true, type: true, title: true, updatedAt: true },
 			}),
 			this.db.businessEvent.findMany({
-				where: { type: contains },
+				where: { AND: [businessEventScope(context), { type: contains }] },
 				orderBy: { occurredAt: "desc" },
 				take: input.limit,
 				select: { id: true, type: true, source: true, occurredAt: true },
@@ -784,6 +913,252 @@ export class BusinessOsService {
 			],
 		};
 	}
+}
+
+type DirectBusinessUnitScope = {
+	businessUnitId?: string | null;
+	OR?: { businessUnitId: string | null }[];
+};
+
+function directBusinessUnitScope(
+	context: BusinessContext,
+): DirectBusinessUnitScope {
+	if (context.includeUnscoped) {
+		return {
+			OR: [
+				{ businessUnitId: context.businessUnitId },
+				{ businessUnitId: null },
+			],
+		};
+	}
+
+	return { businessUnitId: context.businessUnitId };
+}
+
+function customerIdentityScope(
+	context: BusinessContext,
+): Prisma.CustomerIdentityWhereInput {
+	return directBusinessUnitScope(context);
+}
+
+function conversationScope(
+	context: BusinessContext,
+): Prisma.ConversationWhereInput {
+	if (context.includeUnscoped) {
+		return directBusinessUnitScope(context);
+	}
+
+	return {
+		OR: [
+			{ businessUnitId: context.businessUnitId },
+			{
+				businessUnitId: null,
+				channelAccount: { businessUnitId: context.businessUnitId },
+			},
+		],
+	};
+}
+
+function communicationMessageScope(
+	context: BusinessContext,
+): Prisma.CommunicationMessageWhereInput {
+	return { conversation: conversationScope(context) };
+}
+
+function communicationParticipantScope(
+	context: BusinessContext,
+): Prisma.CommunicationParticipantWhereInput {
+	return { conversation: conversationScope(context) };
+}
+
+function conversationInsightScope(
+	context: BusinessContext,
+): Prisma.ConversationInsightWhereInput {
+	return { conversation: conversationScope(context) };
+}
+
+function businessEventScope(
+	context: BusinessContext,
+): Prisma.BusinessEventWhereInput {
+	if (context.includeUnscoped) {
+		return directBusinessUnitScope(context);
+	}
+
+	return {
+		OR: [
+			{ businessUnitId: context.businessUnitId },
+			{
+				businessUnitId: null,
+				conversation: conversationScope(context),
+			},
+		],
+	};
+}
+
+function approvalScope(
+	context: BusinessContext,
+): Prisma.ApprovalRequestWhereInput {
+	if (context.includeUnscoped) {
+		return directBusinessUnitScope(context);
+	}
+
+	return {
+		OR: [
+			{ businessUnitId: context.businessUnitId },
+			{
+				businessUnitId: null,
+				conversation: conversationScope(context),
+			},
+			{
+				businessUnitId: null,
+				businessEvent: businessEventScope(context),
+			},
+		],
+	};
+}
+
+function knowledgeItemScope(
+	context: BusinessContext,
+): Prisma.KnowledgeItemWhereInput {
+	return directBusinessUnitScope(context);
+}
+
+function businessRuleScope(
+	context: BusinessContext,
+): Prisma.BusinessRuleWhereInput {
+	if (context.includeUnscoped) {
+		return directBusinessUnitScope(context);
+	}
+
+	return {
+		OR: [
+			{ businessUnitId: context.businessUnitId },
+			{
+				businessUnitId: null,
+				knowledgeItem: knowledgeItemScope(context),
+			},
+		],
+	};
+}
+
+function businessTaskScope(
+	context: BusinessContext,
+): Prisma.BusinessTaskWhereInput {
+	if (context.includeUnscoped) {
+		return directBusinessUnitScope(context);
+	}
+
+	return {
+		OR: [
+			{ businessUnitId: context.businessUnitId },
+			{
+				businessUnitId: null,
+				conversation: conversationScope(context),
+			},
+			{
+				businessUnitId: null,
+				sourceEvent: businessEventScope(context),
+			},
+		],
+	};
+}
+
+function automationRuleScope(
+	context: BusinessContext,
+): Prisma.AutomationRuleWhereInput {
+	return directBusinessUnitScope(context);
+}
+
+function automationExecutionScope(
+	context: BusinessContext,
+): Prisma.AutomationExecutionWhereInput {
+	return {
+		OR: [
+			{ rule: automationRuleScope(context) },
+			{ businessEvent: businessEventScope(context) },
+		],
+	};
+}
+
+function businessEventOutboxScope(
+	context: BusinessContext,
+): Prisma.BusinessEventOutboxWhereInput {
+	return { businessEvent: businessEventScope(context) };
+}
+
+function bookingScope(context: BusinessContext): Prisma.BookingWhereInput {
+	if (context.includeUnscoped) return {};
+
+	return {
+		OR: [
+			{ communicationConversations: { some: conversationScope(context) } },
+			{ businessEvents: { some: businessEventScope(context) } },
+			{ approvalRequests: { some: directBusinessUnitScope(context) } },
+			{ businessTasks: { some: directBusinessUnitScope(context) } },
+		],
+	};
+}
+
+function dealScope(context: BusinessContext): Prisma.DealWhereInput {
+	if (context.includeUnscoped) return {};
+
+	return {
+		OR: [
+			{ communicationConversations: { some: conversationScope(context) } },
+			{ businessEvents: { some: businessEventScope(context) } },
+			{ approvalRequests: { some: directBusinessUnitScope(context) } },
+			{ businessTasks: { some: directBusinessUnitScope(context) } },
+		],
+	};
+}
+
+function companyScope(context: BusinessContext): Prisma.CompanyWhereInput {
+	if (context.includeUnscoped) return {};
+
+	return {
+		OR: [
+			{ customerIdentities: { some: customerIdentityScope(context) } },
+			{ communicationConversations: { some: conversationScope(context) } },
+			{ businessEvents: { some: businessEventScope(context) } },
+			{ approvalRequests: { some: directBusinessUnitScope(context) } },
+			{ businessTasks: { some: directBusinessUnitScope(context) } },
+		],
+	};
+}
+
+function contactScope(context: BusinessContext): Prisma.ContactWhereInput {
+	if (context.includeUnscoped) return {};
+
+	return {
+		OR: [
+			{ customerIdentities: { some: customerIdentityScope(context) } },
+			{ communicationConversations: { some: conversationScope(context) } },
+			{ businessEvents: { some: businessEventScope(context) } },
+			{ approvalRequests: { some: directBusinessUnitScope(context) } },
+			{ businessTasks: { some: directBusinessUnitScope(context) } },
+		],
+	};
+}
+
+function activityScope(context: BusinessContext): Prisma.ActivityWhereInput {
+	if (context.includeUnscoped) return {};
+
+	return {
+		OR: [
+			{ emailThread: { conversation: conversationScope(context) } },
+			{
+				contact: {
+					customerIdentities: { some: customerIdentityScope(context) },
+				},
+			},
+			{
+				company: {
+					customerIdentities: { some: customerIdentityScope(context) },
+				},
+			},
+			{ deal: dealScope(context) },
+		],
+	};
 }
 
 function contactName(contact: {

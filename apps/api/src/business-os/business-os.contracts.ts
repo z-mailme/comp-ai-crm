@@ -16,19 +16,34 @@ import {
 import { z } from "zod";
 
 export const businessOsLimitInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
 	limit: z.number().int().min(1).max(100).default(50),
 });
+
+export const businessContextInput = z
+	.object({
+		businessUnitId: z.string().trim().min(1).optional(),
+	})
+	.optional()
+	.default({});
 
 export const inboxInput = businessOsLimitInput.extend({
 	status: z.nativeEnum(ConversationStatus).optional(),
 	channel: z.nativeEnum(CommunicationChannel).optional(),
 });
 
-export const conversationInput = z.object({ id: z.string() });
+export const conversationInput = z.object({
+	id: z.string(),
+	businessUnitId: z.string().trim().min(1).optional(),
+});
 
-export const customer360Input = z.object({ contactId: z.string() });
+export const customer360Input = z.object({
+	contactId: z.string(),
+	businessUnitId: z.string().trim().min(1).optional(),
+});
 
 export const globalSearchInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
 	q: z.string().default(""),
 	limit: z.number().int().min(1).max(25).default(8),
 });

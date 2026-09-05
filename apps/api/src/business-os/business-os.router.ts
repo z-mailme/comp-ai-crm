@@ -1,10 +1,12 @@
 import { Inject } from "@nestjs/common";
-import { Input, Query, Router, UseMiddlewares } from "nestjs-trpc";
+import { Ctx, Input, Query, Router, UseMiddlewares } from "nestjs-trpc";
 import type { z } from "zod";
+import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
 import {
 	approvalsOutput,
+	businessContextInput,
 	businessOsOverviewOutput,
 	conversationDetailOutput,
 	conversationInput,
@@ -27,11 +29,15 @@ export class BusinessOsRouter {
 	) {}
 
 	@Query({
+		input: businessContextInput,
 		output: businessOsOverviewOutput,
 		meta: restMeta("GET", "/business-os/overview", ["Business OS"]),
 	})
-	async overview() {
-		return this.businessOs.overview();
+	async overview(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof businessContextInput>,
+	) {
+		return this.businessOs.overview(sourceOf(ctx, input));
 	}
 
 	@Query({
@@ -39,8 +45,11 @@ export class BusinessOsRouter {
 		output: inboxOutput,
 		meta: restMeta("GET", "/business-os/inbox", ["Business OS"]),
 	})
-	async inbox(@Input() input: z.infer<typeof inboxInput>) {
-		return this.businessOs.inbox(input);
+	async inbox(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof inboxInput>,
+	) {
+		return this.businessOs.inbox(sourceOf(ctx, input), input);
 	}
 
 	@Query({
@@ -48,8 +57,11 @@ export class BusinessOsRouter {
 		output: conversationDetailOutput,
 		meta: restMeta("GET", "/business-os/conversations/{id}", ["Business OS"]),
 	})
-	async conversation(@Input("id") id: string) {
-		return this.businessOs.conversation(id);
+	async conversation(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof conversationInput>,
+	) {
+		return this.businessOs.conversation(sourceOf(ctx, input), input.id);
 	}
 
 	@Query({
@@ -59,8 +71,11 @@ export class BusinessOsRouter {
 			"Business OS",
 		]),
 	})
-	async customer360(@Input("contactId") contactId: string) {
-		return this.businessOs.customer360(contactId);
+	async customer360(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof customer360Input>,
+	) {
+		return this.businessOs.customer360(sourceOf(ctx, input), input.contactId);
 	}
 
 	@Query({
@@ -68,31 +83,59 @@ export class BusinessOsRouter {
 		output: globalSearchOutput,
 		meta: restMeta("GET", "/business-os/search", ["Business OS"]),
 	})
-	async globalSearch(@Input() input: z.infer<typeof globalSearchInput>) {
-		return this.businessOs.globalSearch(input);
+	async globalSearch(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof globalSearchInput>,
+	) {
+		return this.businessOs.globalSearch(sourceOf(ctx, input), input);
 	}
 
 	@Query({
+		input: businessContextInput,
 		output: approvalsOutput,
 		meta: restMeta("GET", "/business-os/approvals", ["Business OS"]),
 	})
-	async approvals() {
-		return this.businessOs.approvals();
+	async approvals(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof businessContextInput>,
+	) {
+		return this.businessOs.approvals(sourceOf(ctx, input));
 	}
 
 	@Query({
+		input: businessContextInput,
 		output: knowledgeOutput,
 		meta: restMeta("GET", "/business-os/knowledge", ["Business OS"]),
 	})
-	async knowledge() {
-		return this.businessOs.knowledge();
+	async knowledge(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof businessContextInput>,
+	) {
+		return this.businessOs.knowledge(sourceOf(ctx, input));
 	}
 
 	@Query({
+		input: businessContextInput,
 		output: observabilityOutput,
 		meta: restMeta("GET", "/business-os/observability", ["Business OS"]),
 	})
-	async observability() {
-		return this.businessOs.observability();
+	async observability(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof businessContextInput>,
+	) {
+		return this.businessOs.observability(sourceOf(ctx, input));
 	}
+}
+
+function sourceOf(ctx: AuthedTrpcContext, input?: { businessUnitId?: string }) {
+	return {
+		userId: ctx.user.id,
+		businessUnitId: input?.businessUnitId ?? businessUnitHeader(ctx),
+	};
+}
+
+function businessUnitHeader(ctx: AuthedTrpcContext): string | null {
+	const value = ctx.req?.headers["x-business-unit-id"];
+	if (Array.isArray(value)) return value[0] ?? null;
+	return value ?? null;
 }

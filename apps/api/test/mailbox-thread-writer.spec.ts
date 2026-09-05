@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
 	BusinessEventSource,
+	BusinessUnitStatus,
 	CommunicationChannel,
 	CommunicationDirection,
 	db,
@@ -23,6 +24,8 @@ const suffix = process.env.TEST_RUN_ID ?? "thread-writer-spec";
 const domain = `threads-${suffix}.test`;
 const userId = `user-${suffix}`;
 const mailbox = `rep-${suffix}@example.test`;
+const businessUnitId = `business-unit-${suffix}`;
+const channelAccountId = `channel-account-${suffix}`;
 const person = `buyer@${domain}`;
 const unmatchedPerson = `unknown-${suffix}@gmail.com`;
 const freeMailPerson = `known-free-${suffix}@gmail.com`;
@@ -175,6 +178,8 @@ async function clean() {
 			],
 		},
 	});
+	await db.channelAccount.deleteMany({ where: { id: channelAccountId } });
+	await db.businessUnit.deleteMany({ where: { id: businessUnitId } });
 	await db.mailboxSync.deleteMany({ where: { userId } });
 	await db.user.deleteMany({ where: { id: userId } });
 }
@@ -184,6 +189,26 @@ beforeAll(async () => {
 
 	await db.user.create({
 		data: { id: userId, name: "Test Rep", email: mailbox },
+	});
+	await db.businessUnit.create({
+		data: {
+			id: businessUnitId,
+			name: `Thread Writer ${suffix}`,
+			slug: `thread-writer-${suffix}`,
+			status: BusinessUnitStatus.ACTIVE,
+			ownerId: userId,
+		},
+	});
+	await db.channelAccount.create({
+		data: {
+			id: channelAccountId,
+			businessUnitId,
+			userId,
+			channel: CommunicationChannel.EMAIL,
+			provider: "gmail",
+			externalAccountId: mailbox,
+			label: `Thread Writer Gmail ${suffix}`,
+		},
 	});
 	row = await db.mailboxSync.create({
 		data: { userId, source: "gmail", autoCreate: false },
@@ -246,6 +271,8 @@ describe("storing a synced email", () => {
 		const conversation = await db.conversation.findUnique({
 			where: { emailThreadId: thread.id },
 			select: {
+				businessUnitId: true,
+				channelAccountId: true,
 				channel: true,
 				companyId: true,
 				contactId: true,
@@ -259,6 +286,7 @@ describe("storing a synced email", () => {
 				},
 				businessEvents: {
 					select: {
+						businessUnitId: true,
 						type: true,
 						source: true,
 						outbox: { select: { destination: true } },
@@ -268,6 +296,8 @@ describe("storing a synced email", () => {
 		});
 
 		expect(conversation).toMatchObject({
+			businessUnitId,
+			channelAccountId,
 			channel: CommunicationChannel.EMAIL,
 			companyId,
 			contactId,
@@ -283,6 +313,7 @@ describe("storing a synced email", () => {
 		]);
 		expect(conversation?.businessEvents).toEqual([
 			{
+				businessUnitId,
 				type: "communication.sent",
 				source: BusinessEventSource.GMAIL,
 				outbox: [{ destination: "memory-bridge" }],
