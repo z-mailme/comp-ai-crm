@@ -1,8 +1,10 @@
 "use client";
 
+import AiObservability from "@carbon/icons-react/es/AiObservability";
 import Building from "@carbon/icons-react/es/Building";
 import Close from "@carbon/icons-react/es/Close";
 import Dashboard from "@carbon/icons-react/es/Dashboard";
+import Email from "@carbon/icons-react/es/Email";
 import Partnership from "@carbon/icons-react/es/Partnership";
 import Settings from "@carbon/icons-react/es/Settings";
 import UserMultiple from "@carbon/icons-react/es/UserMultiple";
@@ -41,6 +43,13 @@ type RailItem = {
 
 const ITEMS: RailItem[] = [
 	{ title: "Overview", href: "/", icon: Dashboard, match: "exact" },
+	{ title: "Inbox", href: "/inbox", icon: Email, match: "prefix" },
+	{
+		title: "Command",
+		href: "/command",
+		icon: AiObservability,
+		match: "prefix",
+	},
 	{
 		title: "Chat",
 		href: "/chat",

@@ -1,5 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "bun:test";
 import {
+	BusinessEventSource,
+	CommunicationChannel,
+	CommunicationDirection,
 	db,
 	MailboxMatchStatus,
 	type MailboxSyncModel as MailboxSync,
@@ -33,6 +36,16 @@ const duplicateRootId = `<duplicate-root-${suffix}@mail.test>`;
 const unmatchedRootId = `<unmatched-root-${suffix}@mail.test>`;
 const lateMatchRootId = `<late-match-root-${suffix}@mail.test>`;
 const movedRoot = `outlook-conversation:${suffix}`;
+const rootIds = [
+	rootId,
+	dealRootId,
+	ambiguousRootId,
+	freeMailRootId,
+	duplicateRootId,
+	movedRoot,
+	unmatchedRootId,
+	lateMatchRootId,
+];
 
 const agent = {
 	contactCreated: async () => true,
@@ -138,21 +151,14 @@ async function createDealFor(
 }
 
 async function clean() {
+	await db.businessEvent.deleteMany({
+		where: { correlationId: { in: rootIds } },
+	});
+	await db.conversation.deleteMany({
+		where: { externalThreadId: { in: rootIds } },
+	});
 	await db.emailThread.deleteMany({
-		where: {
-			rootMessageId: {
-				in: [
-					rootId,
-					dealRootId,
-					ambiguousRootId,
-					freeMailRootId,
-					duplicateRootId,
-					movedRoot,
-					unmatchedRootId,
-					lateMatchRootId,
-				],
-			},
-		},
+		where: { rootMessageId: { in: rootIds } },
 	});
 	await db.contact.deleteMany({
 		where: {
@@ -235,6 +241,53 @@ describe("storing a synced email", () => {
 		expect(thread?.matchStatus).toBe(MailboxMatchStatus.MATCHED_DEAL);
 		expect(thread?.messageCount).toBe(1);
 		expect(thread?.activity?.dealId).toBe(dealId);
+		if (!thread) throw new Error("the email thread was not stored");
+
+		const conversation = await db.conversation.findUnique({
+			where: { emailThreadId: thread.id },
+			select: {
+				channel: true,
+				companyId: true,
+				contactId: true,
+				dealId: true,
+				messages: {
+					select: {
+						direction: true,
+						emailMessageId: true,
+						participants: { select: { role: true, email: true } },
+					},
+				},
+				businessEvents: {
+					select: {
+						type: true,
+						source: true,
+						outbox: { select: { destination: true } },
+					},
+				},
+			},
+		});
+
+		expect(conversation).toMatchObject({
+			channel: CommunicationChannel.EMAIL,
+			companyId,
+			contactId,
+			dealId,
+		});
+		expect(conversation?.messages).toHaveLength(1);
+		expect(conversation?.messages[0]?.direction).toBe(
+			CommunicationDirection.OUTBOUND,
+		);
+		expect(conversation?.messages[0]?.participants.map((p) => p.role)).toEqual([
+			"SENDER",
+			"RECIPIENT",
+		]);
+		expect(conversation?.businessEvents).toEqual([
+			{
+				type: "communication.sent",
+				source: BusinessEventSource.GMAIL,
+				outbox: [{ destination: "memory-bridge" }],
+			},
+		]);
 	});
 
 	it("repairs a thread whose projection was lost rather than skipping it forever", async () => {
@@ -545,6 +598,20 @@ describe("storing a synced email", () => {
 			parsed,
 			await threads.context(),
 		);
+		const projectedThread = await db.emailThread.findUnique({
+			where: { rootMessageId: duplicateRootId },
+			select: { id: true },
+		});
+		if (!projectedThread)
+			throw new Error("the projected thread was not stored");
+
+		await db.businessEvent.deleteMany({
+			where: { correlationId: duplicateRootId },
+		});
+		await db.conversation.deleteMany({
+			where: { emailThreadId: projectedThread.id },
+		});
+
 		const stored = await threads.store(
 			row,
 			{ mailbox, origin: "gmail" },
@@ -564,6 +631,16 @@ describe("storing a synced email", () => {
 		).toBe(1);
 		expect(
 			await db.activity.count({ where: { emailThreadId: thread?.id } }),
+		).toBe(1);
+		expect(
+			await db.communicationMessage.count({
+				where: { conversation: { emailThreadId: thread?.id } },
+			}),
+		).toBe(1);
+		expect(
+			await db.businessEvent.count({
+				where: { correlationId: duplicateRootId },
+			}),
 		).toBe(1);
 	});
 

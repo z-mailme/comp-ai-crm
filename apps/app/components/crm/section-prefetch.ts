@@ -7,7 +7,14 @@ import { contactsSearchParams } from "@/app/(app)/[slug]/contacts/contacts-searc
 import { dealsSearchParams } from "@/app/(app)/[slug]/deals/deals-search-params";
 import { useTRPC } from "@/lib/trpc/client";
 
-export type Section = "/" | "/companies" | "/contacts" | "/deals" | "/settings";
+export type Section =
+	| "/"
+	| "/inbox"
+	| "/command"
+	| "/companies"
+	| "/contacts"
+	| "/deals"
+	| "/settings";
 
 export function usePrefetchSection(): (section: string) => void {
 	const trpc = useTRPC();
@@ -19,6 +26,25 @@ export function usePrefetchSection(): (section: string) => void {
 				case "/":
 					void queryClient.prefetchQuery(
 						trpc.dashboard.summary.queryOptions({ scope: "me" }),
+					);
+					return;
+				case "/inbox":
+					void queryClient.prefetchQuery(
+						trpc.businessOs.inbox.queryOptions({ limit: 50 }),
+					);
+					void queryClient.prefetchQuery(
+						trpc.businessOs.overview.queryOptions(),
+					);
+					return;
+				case "/command":
+					void queryClient.prefetchQuery(
+						trpc.businessOs.overview.queryOptions(),
+					);
+					void queryClient.prefetchQuery(
+						trpc.businessOs.observability.queryOptions(),
+					);
+					void queryClient.prefetchQuery(
+						trpc.businessOs.knowledge.queryOptions(),
 					);
 					return;
 				case "/companies":

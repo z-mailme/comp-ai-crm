@@ -16,6 +16,7 @@ const publicProcedure = t.procedure;
 import { timelineInput, timelineOutput, timelineCountsInput, timelineCountsOutput, myTasksInput, myTasksOutput, activityCreateInput, activityCreateOutput, completeInput, completeOutput } from "../activities/activities.contracts";
 import { agentListOutput, agentReviseInput, agentReviseOutput, agentIdInput, agentFilesOutput, agentSaveFileInput, agentSaveFileOutput, agentByIdOutput, agentHistoryInput, agentHistoryOutput, agentActivityOutput, agentUpdateInput, agentUpdateOutput, agentDeployInput, agentDeployOutput, agentPauseOutput, agentResumeOutput, agentArchiveOutput, agentRestoreOutput, agentRemoveOutput, agentRunNowInput, agentRunNowOutput, agentRetryRunInput, agentRetryRunOutput, agentCancelRunInput, agentCancelRunOutput } from "../agent/agents.contracts";
 import { apiKeyListInput, apiKeyListOutput, createApiKeyInput, createApiKeyOutput, revokeApiKeyInput, revokeApiKeyOutput } from "../api-keys/api-keys.contracts";
+import { businessOsOverviewOutput, inboxInput, inboxOutput, conversationInput, conversationDetailOutput, customer360Input, customer360Output, globalSearchInput, globalSearchOutput, approvalsOutput, knowledgeOutput, observabilityOutput } from "../business-os/business-os.contracts";
 import { companyListInput, companyListOutput, companyIdInput, companyDetailOutput, companyOptionsInput, companyOptionOutput, companyCreateInput, companySummaryOutput, companyUpdateArgs, companyArchiveResultOutput, companyBulkOwnerInput, companyBulkResultOutput, companyBulkInput, companyEnrichOutput, companyResearchOutput, setPrimaryContactInput, companySetPrimaryContactOutput } from "../companies/companies.contracts";
 import { contactListInput, contactListOutput, contactIdInput, contactByIdOutput, contactCreateInput, contactBasicOutput, contactUpdateArgs, contactNameOutput, contactEnrichOutput, contactBulkOwnerInput, bulkResultOutput, contactBulkCompanyInput, contactBulkInput, factDecisionInput, decideFactOutput } from "../contacts/contacts.contracts";
 import { conversationListInput, conversationListOutput, builderListOutput, builderResourceSearchInput, builderResourcesOutput, conversationIdInput, builderConversationDetailOutput, conversationEventsInput, conversationEventsOutput, conversationSaveInput, conversationIdOutput, builderConversationCreateInput, builderConversationSubmitInput, builderQuestionResponseInput, builderResponseRatingInput, builderResponseRatingOutput, conversationShareStatusOutput, conversationShareTokenOutput, sharedConversationInput, sharedConversationOutput } from "../conversations/conversations.contracts";
@@ -139,6 +140,36 @@ const appRouter = t.router({
       .input(revokeApiKeyInput)
       .output(revokeApiKeyOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  businessOs: t.router({
+    overview: publicProcedure
+      .output(businessOsOverviewOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    inbox: publicProcedure
+      .input(inboxInput)
+      .output(inboxOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    conversation: publicProcedure
+      .input(conversationInput)
+      .output(conversationDetailOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    customer360: publicProcedure
+      .input(customer360Input)
+      .output(customer360Output)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    globalSearch: publicProcedure
+      .input(globalSearchInput)
+      .output(globalSearchOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    approvals: publicProcedure
+      .output(approvalsOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    knowledge: publicProcedure
+      .output(knowledgeOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    observability: publicProcedure
+      .output(observabilityOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   companies: t.router({
     list: publicProcedure

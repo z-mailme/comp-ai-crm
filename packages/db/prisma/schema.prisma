@@ -26,6 +26,7 @@ model User {
   ownedCompanies              Company[]                    @relation("CompanyOwner")
   ownedContacts               Contact[]                    @relation("ContactOwner")
   ownedDeals                  Deal[]                       @relation("DealOwner")
+  ownedBusinessUnits          BusinessUnit[]               @relation("BusinessUnitOwner")
   activities                  Activity[]                   @relation("ActivityAuthor")
   mailboxSyncs                MailboxSync[]
   mailboxHistoricalImportJobs MailboxHistoricalImportJob[]
@@ -34,15 +35,24 @@ model User {
   fieldValues                 FieldValue[]                 @relation("FieldValueUser")
   savedViews                  SavedView[]                  @relation("SavedViewOwner")
 
-  createdAgentDefinitions AgentDefinition[]             @relation("AgentDefinitionCreator")
-  createdAgentVersions    AgentVersion[]                @relation("AgentVersionCreator")
-  createdAgentTriggers    AgentTrigger[]                @relation("AgentTriggerCreator")
-  initiatedAgentRuns      AgentRun[]                    @relation("AgentRunInitiator")
-  agentAuditEvents        AgentAuditEvent[]             @relation("AgentAuditActor")
-  conversationShares      AgentConversationShare[]      @relation("ConversationShareCreator")
-  conversationSubmissions AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
-  conversationFeedback    AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
-  slackMemberMatch        SlackMemberMatch?
+  createdAgentDefinitions            AgentDefinition[]             @relation("AgentDefinitionCreator")
+  createdAgentVersions               AgentVersion[]                @relation("AgentVersionCreator")
+  createdAgentTriggers               AgentTrigger[]                @relation("AgentTriggerCreator")
+  initiatedAgentRuns                 AgentRun[]                    @relation("AgentRunInitiator")
+  agentAuditEvents                   AgentAuditEvent[]             @relation("AgentAuditActor")
+  approvedRequests                   ApprovalRequest[]             @relation("ApprovalApprover")
+  ownedBusinessTasks                 BusinessTask[]                @relation("BusinessTaskOwner")
+  assignedBusinessTasks              BusinessTask[]                @relation("BusinessTaskUserAssignee")
+  assignedCommunicationConversations Conversation[]                @relation("ConversationOwnerAssignment")
+  channelAccounts                    ChannelAccount[]
+  createdKnowledgeVersions           KnowledgeVersion[]            @relation("KnowledgeVersionCreator")
+  approvedKnowledgeVersions          KnowledgeVersion[]            @relation("KnowledgeVersionApprover")
+  createdBusinessRules               BusinessRule[]                @relation("BusinessRuleCreator")
+  createdAutomationRules             AutomationRule[]              @relation("AutomationRuleCreator")
+  conversationShares                 AgentConversationShare[]      @relation("ConversationShareCreator")
+  conversationSubmissions            AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
+  conversationFeedback               AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
+  slackMemberMatch                   SlackMemberMatch?
 
   members     Member[]
   invitations Invitation[]
@@ -359,15 +369,22 @@ model Company {
   lastActivityAt DateTime?
   archivedAt     DateTime?
 
-  contacts       Contact[]           @relation("CompanyContacts")
-  conversations  AgentConversation[]
-  deals          Deal[]
-  activities     Activity[]
-  emailThreads   EmailThread[]
-  calendarEvents CalendarEvent[]
-  fieldValues    FieldValue[]
-  createdAt      DateTime            @default(now())
-  updatedAt      DateTime            @updatedAt
+  contacts                   Contact[]                  @relation("CompanyContacts")
+  conversations              AgentConversation[]
+  communicationConversations Conversation[]
+  customerIdentities         CustomerIdentity[]
+  communicationParticipants  CommunicationParticipant[]
+  businessEvents             BusinessEvent[]
+  approvalRequests           ApprovalRequest[]
+  businessTasks              BusinessTask[]
+  conversationInsights       ConversationInsight[]
+  deals                      Deal[]
+  activities                 Activity[]
+  emailThreads               EmailThread[]
+  calendarEvents             CalendarEvent[]
+  fieldValues                FieldValue[]
+  createdAt                  DateTime                   @default(now())
+  updatedAt                  DateTime                   @updatedAt
 
   @@unique([domain], map: "company_domain_active_key", where: { archivedAt: null })
   @@index([ownerId])
@@ -407,9 +424,15 @@ model Contact {
   enrichedAt       DateTime?
   enrichmentError  String?
 
-  brief         ContactBrief?
-  facts         ContactFact[]
-  conversations AgentConversation[]
+  brief                      ContactBrief?
+  facts                      ContactFact[]
+  conversations              AgentConversation[]
+  communicationConversations Conversation[]
+  customerIdentities         CustomerIdentity[]
+  businessEvents             BusinessEvent[]
+  approvalRequests           ApprovalRequest[]
+  businessTasks              BusinessTask[]
+  conversationInsights       ConversationInsight[]
 
   companyId String?
   company   Company? @relation("CompanyContacts", fields: [companyId], references: [id], onDelete: SetNull)
@@ -422,16 +445,17 @@ model Contact {
   lastActivityAt DateTime?
   archivedAt     DateTime?
 
-  deals           DealContact[]
-  activities      Activity[]
-  emailThreads    EmailThread[]
-  calendarEvents  CalendarEvent[]
-  eventAttendance CalendarAttendee[]
-  fieldValues     FieldValue[]
-  visitors        TrackedVisitor[]   @relation("VisitorContact")
-  submissions     FormSubmission[]   @relation("SubmissionContact")
-  createdAt       DateTime           @default(now())
-  updatedAt       DateTime           @updatedAt
+  deals                     DealContact[]
+  activities                Activity[]
+  emailThreads              EmailThread[]
+  calendarEvents            CalendarEvent[]
+  eventAttendance           CalendarAttendee[]
+  fieldValues               FieldValue[]
+  visitors                  TrackedVisitor[]           @relation("VisitorContact")
+  submissions               FormSubmission[]           @relation("SubmissionContact")
+  createdAt                 DateTime                   @default(now())
+  updatedAt                 DateTime                   @updatedAt
+  communicationParticipants CommunicationParticipant[]
 
   @@unique([email], map: "contact_email_active_key", where: { archivedAt: null })
   @@index([companyId])
@@ -701,12 +725,19 @@ model AgentDefinition {
   currentVersionId String?       @unique
   currentVersion   AgentVersion? @relation("CurrentAgentVersion", fields: [currentVersionId, id], references: [id, agentId], onDelete: Restrict)
 
-  versions      AgentVersion[]      @relation("AgentVersions")
-  triggers      AgentTrigger[]
-  runs          AgentRun[]
-  actions       AgentAction[]
-  auditEvents   AgentAuditEvent[]
-  conversations AgentConversation[]
+  versions                   AgentVersion[]      @relation("AgentVersions")
+  triggers                   AgentTrigger[]
+  runs                       AgentRun[]
+  actions                    AgentAction[]
+  capabilities               AgentCapability[]
+  permissions                AgentPermission[]
+  decisions                  AgentDecision[]
+  safetyPolicies             AgentSafetyPolicy[]
+  communicationConversations Conversation[]      @relation("ConversationAgentAssignment")
+  approvalRequests           ApprovalRequest[]   @relation("ApprovalRequestAgent")
+  assignedBusinessTasks      BusinessTask[]      @relation("BusinessTaskAgentAssignee")
+  auditEvents                AgentAuditEvent[]
+  conversations              AgentConversation[]
 
   createdAt  DateTime  @default(now())
   updatedAt  DateTime  @updatedAt
@@ -856,9 +887,14 @@ model AgentRun {
 
   cancelRequestedAt DateTime?
   cancelDeliveredAt DateTime?
+  businessEventId   String?
+  businessEvent     BusinessEvent? @relation(fields: [businessEventId], references: [id], onDelete: SetNull)
 
-  events  AgentRunEvent[]
-  actions AgentAction[]
+  events           AgentRunEvent[]
+  actions          AgentAction[]
+  decisions        AgentDecision[]
+  approvalRequests ApprovalRequest[]
+  businessTasks    BusinessTask[]
 
   @@unique([id, agentId])
   @@index([agentId, createdAt])
@@ -907,8 +943,16 @@ model AgentAction {
   externalId     String?
   attemptCount   Int               @default(0)
 
-  errorCode    String?
-  errorMessage String?
+  errorCode          String?
+  errorMessage       String?
+  beforeState        Json?
+  requestedPayload   Json?
+  actualResult       Json?
+  confidence         Float?
+  approvalRequired   Boolean          @default(false)
+  approvalRequestId  String?
+  approvalRequest    ApprovalRequest? @relation(fields: [approvalRequestId], references: [id], onDelete: SetNull)
+  evidenceReferences Json?
 
   plannedAt   DateTime  @default(now())
   startedAt   DateTime?
@@ -919,6 +963,7 @@ model AgentAction {
   @@index([runId, plannedAt])
   @@index([provider, externalId])
   @@index([status, plannedAt])
+  @@index([approvalRequestId])
   @@map("agentAction")
 }
 
@@ -952,14 +997,19 @@ model AgentAuditEvent {
 }
 
 model Deal {
-  id            String              @id @default(cuid())
-  conversations AgentConversation[]
-  name          String
-  description   String?
-  companyId     String
-  company       Company             @relation(fields: [companyId], references: [id], onDelete: Cascade)
-  ownerId       String
-  owner         User                @relation("DealOwner", fields: [ownerId], references: [id])
+  id                         String                @id @default(cuid())
+  conversations              AgentConversation[]
+  communicationConversations Conversation[]
+  businessEvents             BusinessEvent[]
+  approvalRequests           ApprovalRequest[]
+  businessTasks              BusinessTask[]
+  conversationInsights       ConversationInsight[]
+  name                       String
+  description                String?
+  companyId                  String
+  company                    Company               @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  ownerId                    String
+  owner                      User                  @relation("DealOwner", fields: [ownerId], references: [id])
 
   stage             DealStage @default(DEMO_BOOKED)
   stageChangedAt    DateTime  @default(now())
@@ -1032,8 +1082,13 @@ model Booking {
 
   source RecordSource @default(MANUAL)
 
-  resources    BookingResource[]
-  emailThreads EmailThread[]
+  resources                  BookingResource[]
+  emailThreads               EmailThread[]
+  communicationConversations Conversation[]
+  businessEvents             BusinessEvent[]
+  approvalRequests           ApprovalRequest[]
+  businessTasks              BusinessTask[]
+  conversationInsights       ConversationInsight[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1428,8 +1483,9 @@ model EmailThread {
   lastMessageAt  DateTime
   messageCount   Int      @default(0)
 
-  messages EmailMessage[]
-  activity Activity?
+  messages     EmailMessage[]
+  activity     Activity?
+  conversation Conversation?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1462,10 +1518,978 @@ model EmailMessage {
   body       String?
   sentAt     DateTime
 
+  communicationMessage CommunicationMessage?
+
   createdAt DateTime @default(now())
 
   @@index([threadId, sentAt])
   @@map("emailMessage")
+}
+
+enum BusinessUnitStatus {
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum CommunicationChannel {
+  EMAIL
+  WHATSAPP
+  SMS
+  TELEGRAM
+  INSTAGRAM
+  FACEBOOK
+  WEB_FORM
+  PHONE_CALL
+  INTERNAL
+  OTHER
+}
+
+enum CommunicationDirection {
+  INBOUND
+  OUTBOUND
+  INTERNAL
+  UNKNOWN
+}
+
+enum CommunicationParticipantRole {
+  SENDER
+  RECIPIENT
+  CC
+  BCC
+  PARTICIPANT
+}
+
+enum ConversationStatus {
+  OPEN
+  WAITING_ON_CUSTOMER
+  WAITING_ON_US
+  RESOLVED
+  ARCHIVED
+}
+
+enum ConversationPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum AiProcessingStatus {
+  NOT_REQUESTED
+  PENDING
+  PROCESSING
+  COMPLETE
+  NEEDS_REVIEW
+  FAILED
+}
+
+enum CustomerIdentityKind {
+  EMAIL
+  PHONE
+  SOCIAL_HANDLE
+  CHANNEL_PROFILE
+  EXTERNAL_ID
+  OTHER
+}
+
+enum CustomerIdentityStatus {
+  UNVERIFIED
+  VERIFIED
+  MERGED
+  IGNORED
+}
+
+enum BusinessEventSource {
+  CRM
+  GMAIL
+  OUTLOOK
+  CALENDAR
+  WEBSITE
+  AGENT
+  AUTOMATION
+  N8N
+  SYSTEM
+  OTHER
+}
+
+enum AgentKind {
+  CUSTOMER_SERVICE
+  SALES
+  BOOKING
+  FINANCE
+  MARKETING
+  OPERATIONS
+  EXECUTIVE
+  CUSTOM
+}
+
+enum AgentPermissionScope {
+  READ
+  PROPOSE
+  EXECUTE
+  SEND
+  FINANCIAL
+  ADMIN
+}
+
+enum AgentDecisionStatus {
+  DRAFT
+  PROPOSED
+  APPROVED
+  REJECTED
+  EXECUTED
+  CANCELLED
+}
+
+enum ApprovalRequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+  CANCELLED
+}
+
+enum ApprovalRiskLevel {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum KnowledgeItemType {
+  PRICING
+  TRAVEL_FEE
+  SERVICE
+  PACKAGE
+  PROMOTION
+  PAYMENT
+  CANCELLATION
+  BOOKING
+  OPERATIONS
+  FAQ
+  POLICY
+  STAFF_INSTRUCTION
+  OTHER
+}
+
+enum KnowledgeVersionStatus {
+  DRAFT
+  ACTIVE
+  RETIRED
+}
+
+enum MemoryProvider {
+  MEMO
+  OTHER
+}
+
+enum MemoryEntityType {
+  CONTACT
+  COMPANY
+  DEAL
+  BOOKING
+  CONVERSATION
+  MESSAGE
+  BUSINESS_EVENT
+  KNOWLEDGE_ITEM
+  AGENT_ACTION
+  OTHER
+}
+
+enum BusinessEventOutboxStatus {
+  PENDING
+  SENDING
+  SENT
+  FAILED
+  CANCELLED
+}
+
+enum BusinessTaskStatus {
+  TODO
+  IN_PROGRESS
+  WAITING
+  DONE
+  CANCELLED
+}
+
+enum BusinessTaskPriority {
+  LOW
+  NORMAL
+  HIGH
+  URGENT
+}
+
+enum BusinessTaskAssigneeType {
+  HUMAN
+  AGENT
+}
+
+enum AutomationRuleStatus {
+  DRAFT
+  ACTIVE
+  PAUSED
+  ARCHIVED
+}
+
+enum AutomationExecutionStatus {
+  QUEUED
+  RUNNING
+  WAITING_FOR_APPROVAL
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+model BusinessUnit {
+  id String @id @default(cuid())
+
+  name        String
+  slug        String
+  description String?
+  status      BusinessUnitStatus @default(ACTIVE)
+
+  ownerId String?
+  owner   User?   @relation("BusinessUnitOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  settings Json?
+
+  channelAccounts     ChannelAccount[]
+  customerIdentities  CustomerIdentity[]
+  conversations       Conversation[]
+  businessEvents      BusinessEvent[]
+  approvals           ApprovalRequest[]
+  knowledgeItems      KnowledgeItem[]
+  businessRules       BusinessRule[]
+  memoryLinks         ExternalMemoryLink[]
+  businessTasks       BusinessTask[]
+  automationRules     AutomationRule[]
+  agentSafetyPolicies AgentSafetyPolicy[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([slug])
+  @@index([status, name])
+  @@map("businessUnit")
+}
+
+model ChannelAccount {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  userId String?
+  user   User?   @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  channel           CommunicationChannel
+  provider          String
+  externalAccountId String?
+  label             String
+  status            String               @default("active")
+  scopes            String[]             @default([])
+  metadata          Json?
+
+  conversations Conversation[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, externalAccountId])
+  @@index([businessUnitId, channel])
+  @@index([userId, channel])
+  @@map("channelAccount")
+}
+
+model CustomerIdentity {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  kind       CustomerIdentityKind
+  channel    CommunicationChannel?
+  value      String
+  externalId String?
+  label      String?
+  status     CustomerIdentityStatus @default(UNVERIFIED)
+  confidence Float?
+  metadata   Json?
+
+  participants CommunicationParticipant[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessUnitId, kind, value])
+  @@index([contactId])
+  @@index([companyId])
+  @@index([channel, externalId])
+  @@map("customerIdentity")
+}
+
+model Conversation {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  channelAccountId String?
+  channelAccount   ChannelAccount? @relation(fields: [channelAccountId], references: [id], onDelete: SetNull)
+
+  channel  CommunicationChannel
+  status   ConversationStatus   @default(OPEN)
+  priority ConversationPriority @default(NORMAL)
+
+  subject          String?
+  preview          String?
+  externalThreadId String?
+
+  emailThreadId String?      @unique
+  emailThread   EmailThread? @relation(fields: [emailThreadId], references: [id], onDelete: SetNull)
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  dealId String?
+  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  assignedOwnerId String?
+  assignedOwner   User?   @relation("ConversationOwnerAssignment", fields: [assignedOwnerId], references: [id], onDelete: SetNull)
+
+  assignedAgentId String?
+  assignedAgent   AgentDefinition? @relation("ConversationAgentAssignment", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+
+  unreadCount Int @default(0)
+
+  firstMessageAt DateTime?
+  lastMessageAt  DateTime?
+
+  aiProcessingStatus AiProcessingStatus @default(NOT_REQUESTED)
+  metadata           Json?
+
+  messages       CommunicationMessage[]
+  participants   CommunicationParticipant[]
+  businessEvents BusinessEvent[]
+  insights       ConversationInsight[]
+  approvals      ApprovalRequest[]
+  businessTasks  BusinessTask[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([channel, externalThreadId])
+  @@index([businessUnitId, lastMessageAt])
+  @@index([channel, status, lastMessageAt])
+  @@index([contactId, lastMessageAt])
+  @@index([companyId, lastMessageAt])
+  @@index([dealId, lastMessageAt])
+  @@index([bookingId, lastMessageAt])
+  @@map("conversation")
+}
+
+model CommunicationMessage {
+  id String @id @default(cuid())
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  channel   CommunicationChannel
+  direction CommunicationDirection
+
+  sender     Json
+  recipients Json
+
+  subject String?
+  body    String?
+  snippet String?
+  sentAt  DateTime
+
+  externalMessageId String?
+  providerMessageId String?
+
+  emailMessageId String?       @unique
+  emailMessage   EmailMessage? @relation(fields: [emailMessageId], references: [id], onDelete: SetNull)
+
+  aiProcessingStatus AiProcessingStatus @default(NOT_REQUESTED)
+  attachments        Json?
+  metadata           Json?
+
+  participants   CommunicationParticipant[]
+  businessEvents BusinessEvent[]
+  insights       ConversationInsight[]
+
+  createdAt        DateTime          @default(now())
+  approvalRequests ApprovalRequest[]
+
+  @@unique([channel, providerMessageId])
+  @@index([conversationId, sentAt])
+  @@index([channel, sentAt])
+  @@map("communicationMessage")
+}
+
+model CommunicationParticipant {
+  id String @id @default(cuid())
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  messageId String?
+  message   CommunicationMessage? @relation(fields: [messageId], references: [id], onDelete: Cascade)
+
+  customerIdentityId String?
+  customerIdentity   CustomerIdentity? @relation(fields: [customerIdentityId], references: [id], onDelete: SetNull)
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  role       CommunicationParticipantRole
+  name       String?
+  email      String?
+  phone      String?
+  externalId String?
+  metadata   Json?
+
+  createdAt DateTime @default(now())
+  company   Company? @relation(fields: [companyId], references: [id])
+  companyId String?
+
+  @@index([conversationId, role])
+  @@index([messageId, role])
+  @@index([contactId])
+  @@index([customerIdentityId])
+  @@map("communicationParticipant")
+}
+
+model ConversationInsight {
+  id String @id @default(cuid())
+
+  conversationId String
+  conversation   Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  messageId String?
+  message   CommunicationMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  dealId String?
+  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  intent           String?
+  summary          String?
+  sentiment        String?
+  urgency          String?
+  services         Json?
+  eventDate        DateTime? @db.Date
+  eventTime        String?
+  durationMinutes  Int?
+  location         String?
+  quotedAmount     Decimal?  @db.Decimal(14, 2)
+  quotedCurrency   String?
+  promises         Json?
+  objections       Json?
+  nextAction       String?
+  confidence       Float?
+  needsHumanReview Boolean   @default(false)
+  processedAt      DateTime?
+  model            String?
+  metadata         Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([conversationId, createdAt])
+  @@index([needsHumanReview, createdAt])
+  @@index([intent, createdAt])
+  @@map("conversationInsight")
+}
+
+model BusinessEvent {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  type    String
+  source  BusinessEventSource
+  channel CommunicationChannel?
+
+  actorType   String?
+  actorId     String?
+  actorUserId String?
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  dealId String?
+  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  messageId String?
+  message   CommunicationMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  occurredAt DateTime
+  data       Json
+
+  correlationId  String?
+  causationId    String?
+  idempotencyKey String? @unique
+
+  outbox               BusinessEventOutbox[]
+  agentRuns            AgentRun[]
+  approvals            ApprovalRequest[]
+  businessTasks        BusinessTask[]
+  memoryLinks          ExternalMemoryLink[]
+  automationExecutions AutomationExecution[]
+
+  createdAt DateTime @default(now())
+
+  @@index([businessUnitId, occurredAt])
+  @@index([type, occurredAt])
+  @@index([source, occurredAt])
+  @@index([contactId, occurredAt])
+  @@index([companyId, occurredAt])
+  @@index([dealId, occurredAt])
+  @@index([bookingId, occurredAt])
+  @@index([conversationId, occurredAt])
+  @@index([messageId, occurredAt])
+  @@index([correlationId])
+  @@map("businessEvent")
+}
+
+model BusinessEventOutbox {
+  id String @id @default(cuid())
+
+  businessEventId String
+  businessEvent   BusinessEvent @relation(fields: [businessEventId], references: [id], onDelete: Cascade)
+
+  destination   String
+  status        BusinessEventOutboxStatus @default(PENDING)
+  payload       Json
+  attemptCount  Int                       @default(0)
+  lastError     String?
+  nextAttemptAt DateTime?
+  sentAt        DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessEventId, destination])
+  @@index([status, nextAttemptAt])
+  @@map("businessEventOutbox")
+}
+
+model AgentCapability {
+  id String @id @default(cuid())
+
+  agentId String
+  agent   AgentDefinition @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  key         String
+  name        String
+  description String?
+  config      Json?
+  enabled     Boolean @default(true)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([agentId, key])
+  @@index([enabled, key])
+  @@map("agentCapability")
+}
+
+model AgentPermission {
+  id String @id @default(cuid())
+
+  agentId String
+  agent   AgentDefinition @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  scope   AgentPermissionScope
+  target  String
+  allowed Boolean              @default(false)
+  config  Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([agentId, scope, target])
+  @@index([scope, allowed])
+  @@map("agentPermission")
+}
+
+model AgentDecision {
+  id String @id @default(cuid())
+
+  agentId String
+  agent   AgentDefinition @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  runId String
+  run   AgentRun @relation(fields: [runId, agentId], references: [id, agentId], onDelete: Cascade)
+
+  type       String
+  summary    String
+  evidence   Json?
+  confidence Float?
+  riskLevel  ApprovalRiskLevel?
+  status     AgentDecisionStatus @default(PROPOSED)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([agentId, createdAt])
+  @@index([runId, createdAt])
+  @@index([status, createdAt])
+  @@map("agentDecision")
+}
+
+model ApprovalRequest {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  requestedByAgentId String?
+  requestedByAgent   AgentDefinition? @relation("ApprovalRequestAgent", fields: [requestedByAgentId], references: [id], onDelete: SetNull)
+
+  runId String?
+  run   AgentRun? @relation(fields: [runId], references: [id], onDelete: SetNull)
+
+  businessEventId String?
+  businessEvent   BusinessEvent? @relation(fields: [businessEventId], references: [id], onDelete: SetNull)
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  dealId String?
+  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  messageId String?
+  message   CommunicationMessage? @relation(fields: [messageId], references: [id], onDelete: SetNull)
+
+  type           String
+  summary        String
+  proposedAction Json
+  confidence     Float?
+  riskLevel      ApprovalRiskLevel     @default(MEDIUM)
+  status         ApprovalRequestStatus @default(PENDING)
+  metadata       Json?
+
+  approvedById String?
+  approvedBy   User?     @relation("ApprovalApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+  rejectedAt   DateTime?
+  expiresAt    DateTime?
+
+  actions AgentAction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status, createdAt])
+  @@index([requestedByAgentId, createdAt])
+  @@index([runId, createdAt])
+  @@index([contactId, createdAt])
+  @@index([companyId, createdAt])
+  @@index([dealId, createdAt])
+  @@index([bookingId, createdAt])
+  @@index([conversationId, createdAt])
+  @@map("approvalRequest")
+}
+
+model KnowledgeItem {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  type       KnowledgeItemType
+  title      String
+  active     Boolean           @default(true)
+  source     String?
+  confidence Float?
+
+  versions    KnowledgeVersion[]
+  rules       BusinessRule[]
+  memoryLinks ExternalMemoryLink[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, type, active])
+  @@index([title])
+  @@map("knowledgeItem")
+}
+
+model KnowledgeVersion {
+  id String @id @default(cuid())
+
+  knowledgeItemId String
+  knowledgeItem   KnowledgeItem @relation(fields: [knowledgeItemId], references: [id], onDelete: Cascade)
+
+  version Int
+  status  KnowledgeVersionStatus @default(DRAFT)
+
+  content String?
+  data    Json?
+
+  effectiveFrom  DateTime?
+  effectiveUntil DateTime?
+
+  createdById String?
+  createdBy   User?   @relation("KnowledgeVersionCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  approvedById String?
+  approvedBy   User?     @relation("KnowledgeVersionApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  createdAt DateTime @default(now())
+
+  @@unique([knowledgeItemId, version])
+  @@index([status, effectiveFrom])
+  @@map("knowledgeVersion")
+}
+
+model BusinessRule {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  knowledgeItemId String?
+  knowledgeItem   KnowledgeItem? @relation(fields: [knowledgeItemId], references: [id], onDelete: SetNull)
+
+  type      KnowledgeItemType
+  title     String
+  condition Json
+  action    Json
+  priority  Int               @default(0)
+  active    Boolean           @default(false)
+
+  createdById String?
+  createdBy   User?   @relation("BusinessRuleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  effectiveFrom  DateTime?
+  effectiveUntil DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, type, active])
+  @@index([knowledgeItemId])
+  @@map("businessRule")
+}
+
+model ExternalMemoryLink {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  businessEventId String?
+  businessEvent   BusinessEvent? @relation(fields: [businessEventId], references: [id], onDelete: SetNull)
+
+  knowledgeItemId String?
+  knowledgeItem   KnowledgeItem? @relation(fields: [knowledgeItemId], references: [id], onDelete: SetNull)
+
+  provider         MemoryProvider
+  externalMemoryId String
+  entityType       MemoryEntityType
+  entityId         String
+  indexedAt        DateTime?
+  lastSyncedAt     DateTime?
+  metadata         Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([provider, externalMemoryId])
+  @@unique([provider, entityType, entityId])
+  @@index([businessUnitId, entityType])
+  @@index([businessEventId])
+  @@map("externalMemoryLink")
+}
+
+model BusinessTask {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  ownerId String?
+  owner   User?   @relation("BusinessTaskOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  assigneeType    BusinessTaskAssigneeType @default(HUMAN)
+  assignedUserId  String?
+  assignedUser    User?                    @relation("BusinessTaskUserAssignee", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  assignedAgentId String?
+  assignedAgent   AgentDefinition?         @relation("BusinessTaskAgentAssignee", fields: [assignedAgentId], references: [id], onDelete: SetNull)
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  dealId String?
+  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  conversationId String?
+  conversation   Conversation? @relation(fields: [conversationId], references: [id], onDelete: SetNull)
+
+  sourceEventId String?
+  sourceEvent   BusinessEvent? @relation(fields: [sourceEventId], references: [id], onDelete: SetNull)
+
+  parentTaskId String?
+  parentTask   BusinessTask?  @relation("BusinessTaskTree", fields: [parentTaskId], references: [id], onDelete: SetNull)
+  childTasks   BusinessTask[] @relation("BusinessTaskTree")
+
+  agentRunId String?
+  agentRun   AgentRun? @relation(fields: [agentRunId], references: [id], onDelete: SetNull)
+
+  title       String
+  description String?
+  priority    BusinessTaskPriority @default(NORMAL)
+  status      BusinessTaskStatus   @default(TODO)
+  dueAt       DateTime?
+  result      Json?
+  metadata    Json?
+
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  completedAt DateTime?
+
+  @@index([businessUnitId, status, dueAt])
+  @@index([assignedUserId, status, dueAt])
+  @@index([assignedAgentId, status, dueAt])
+  @@index([contactId, status])
+  @@index([companyId, status])
+  @@index([dealId, status])
+  @@index([bookingId, status])
+  @@index([conversationId, status])
+  @@index([sourceEventId])
+  @@map("businessTask")
+}
+
+model AutomationRule {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  name        String
+  description String?
+  status      AutomationRuleStatus @default(DRAFT)
+  triggerType String
+  conditions  Json
+  actions     Json
+  priority    Int                  @default(0)
+
+  createdById String?
+  createdBy   User?   @relation("AutomationRuleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  executions AutomationExecution[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status, priority])
+  @@index([triggerType, status])
+  @@map("automationRule")
+}
+
+model AutomationExecution {
+  id String @id @default(cuid())
+
+  ruleId String
+  rule   AutomationRule @relation(fields: [ruleId], references: [id], onDelete: Cascade)
+
+  businessEventId String?
+  businessEvent   BusinessEvent? @relation(fields: [businessEventId], references: [id], onDelete: SetNull)
+
+  status AutomationExecutionStatus @default(QUEUED)
+  input  Json?
+  result Json?
+  error  String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([ruleId, createdAt])
+  @@index([businessEventId, createdAt])
+  @@index([status, createdAt])
+  @@map("automationExecution")
+}
+
+model AgentSafetyPolicy {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  agentId String?
+  agent   AgentDefinition? @relation(fields: [agentId], references: [id], onDelete: Cascade)
+
+  enabled           Boolean                @default(false)
+  automaticSending  Boolean                @default(false)
+  maxActionsPerHour Int                    @default(10)
+  maxActionsPerDay  Int                    @default(50)
+  approvalThreshold Float                  @default(0.8)
+  riskThreshold     ApprovalRiskLevel      @default(MEDIUM)
+  financialActions  Boolean                @default(false)
+  allowedTools      String[]               @default([])
+  allowedChannels   CommunicationChannel[] @default([])
+  killSwitch        Boolean                @default(false)
+  metadata          Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessUnitId, agentId])
+  @@index([agentId, enabled])
+  @@map("agentSafetyPolicy")
 }
 
 model CalendarEvent {
@@ -1550,7 +2574,8 @@ model AppSetting {
 
   ratesRefreshedAt DateTime?
 
-  archiveRetentionDays Int @default(180)
+  archiveRetentionDays   Int     @default(180)
+  aiAutomationKillSwitch Boolean @default(false)
 
   trackingSiteId           String? @unique
   trackingCrossDomain      Boolean @default(true)
