@@ -32,7 +32,9 @@ import {
 	CardHeader,
 	CardTitle,
 } from "@crm/ui/components/card";
+import { Field, FieldGroup, FieldLabel } from "@crm/ui/components/field";
 import { Icon } from "@crm/ui/components/icon";
+import { Input } from "@crm/ui/components/input";
 import { Label } from "@crm/ui/components/label";
 import { Spinner } from "@crm/ui/components/spinner";
 import { StatusIndicator } from "@crm/ui/components/status-indicator";
@@ -130,6 +132,31 @@ const CONNECT_ERRORS = new Map([
 	],
 ]);
 
+const HISTORICAL_IMPORT_ACTIVE = new Set([
+	"PLANNING",
+	"READY",
+	"RUNNING",
+	"VERIFYING",
+	"WAITING_RATE_LIMIT",
+	"WAITING_RETRY",
+]);
+
+const IMPORT_DAY_MS = 86_400_000;
+
+const HISTORICAL_IMPORT_LABEL = {
+	PLANNING: "Planning",
+	READY: "Ready",
+	RUNNING: "Running",
+	VERIFYING: "Verifying",
+	WAITING_RATE_LIMIT: "Waiting for Gmail",
+	WAITING_RETRY: "Waiting to retry",
+	RECONNECT_REQUIRED: "Needs reconnect",
+	PAUSED: "Paused",
+	FAILED: "Failed",
+	COMPLETED: "Completed",
+	CANCELLED: "Cancelled",
+} as const;
+
 function ConnectGoogle({
 	slug,
 	connectError,
@@ -222,7 +249,10 @@ export function GoogleConnection({
 	const status = useQuery({
 		...trpc.google.status.queryOptions(),
 		refetchInterval: (query) =>
-			query.state.data?.sources.some((source) => isSyncing(source.status))
+			query.state.data?.sources.some((source) => isSyncing(source.status)) ||
+			(query.state.data?.historicalImport
+				? HISTORICAL_IMPORT_ACTIVE.has(query.state.data.historicalImport.status)
+				: false)
 				? SYNC_POLL_MS
 				: false,
 	});
@@ -402,6 +432,8 @@ export function GoogleConnection({
 					);
 				})}
 
+				<HistoricalEmailImport job={status.data.historicalImport} />
+
 				<CardFooter>
 					<div className="-ml-2 flex flex-wrap items-center gap-1 text-muted-foreground">
 						<AlertDialog>
@@ -476,4 +508,286 @@ export function GoogleConnection({
 			</CardContent>
 		</Card>
 	);
+}
+
+type HistoricalImportJob = {
+	id: string;
+	requestedAfter: string;
+	requestedBefore: string;
+	status: keyof typeof HISTORICAL_IMPORT_LABEL;
+	totalMessages: number;
+	processedMessages: number;
+	writtenMessages: number;
+	alreadyStoredMessages: number;
+	ignoredMessages: number;
+	remainingMessages: number;
+	totalChunks: number;
+	completedChunks: number;
+	progressPercentage: number;
+	retryAfterAt: string | null;
+	lastError: string | null;
+};
+
+function HistoricalEmailImport({ job }: { job: HistoricalImportJob | null }) {
+	const trpc = useTRPC();
+	const cache = useCrmCache();
+	const [startDate, setStartDate] = useState("");
+	const [endDate, setEndDate] = useState("");
+
+	const start = useMutation(
+		trpc.google.createHistoricalImport.mutationOptions({
+			onSuccess: async () => {
+				await cache.google({ settle: "record" });
+				toast.success("Historical email import started.");
+			},
+			onError: (error) => toast.error(error.message),
+		}),
+	);
+
+	const pause = useMutation(
+		trpc.google.pauseHistoricalImport.mutationOptions({
+			onSuccess: () => cache.google({ settle: "record" }),
+			onError: (error) => toast.error(error.message),
+		}),
+	);
+
+	const resume = useMutation(
+		trpc.google.resumeHistoricalImport.mutationOptions({
+			onSuccess: () => cache.google({ settle: "record" }),
+			onError: (error) => toast.error(error.message),
+		}),
+	);
+
+	const cancel = useMutation(
+		trpc.google.cancelHistoricalImport.mutationOptions({
+			onSuccess: () => cache.google({ settle: "record" }),
+			onError: (error) => toast.error(error.message),
+		}),
+	);
+
+	const pending =
+		start.isPending || pause.isPending || resume.isPending || cancel.isPending;
+	const showStartForm =
+		!job || job.status === "COMPLETED" || job.status === "CANCELLED";
+
+	function startImport() {
+		if (!startDate || !endDate) {
+			toast.error("Choose a start date and an end date.");
+			return;
+		}
+
+		start.mutate({
+			requestedAfter: `${startDate}T00:00:00.000Z`,
+			requestedBefore: toExclusiveEnd(endDate).toISOString(),
+		});
+	}
+
+	return (
+		<div className="flex flex-col gap-4 border-t pt-5">
+			<div className="flex flex-col gap-1">
+				<div className="flex items-center justify-between gap-4">
+					<h3 className="font-medium text-sm">Historical email import</h3>
+					{job ? (
+						<StatusIndicator
+							size="sm"
+							tone={statusTone(job.status)}
+							label={HISTORICAL_IMPORT_LABEL[job.status]}
+						/>
+					) : null}
+				</div>
+				<p className="text-muted-foreground text-xs">
+					Import older Gmail messages without moving the live sync cursor.
+				</p>
+			</div>
+
+			{job ? (
+				<div className="flex flex-col gap-4">
+					<div className="flex flex-col gap-2">
+						<div className="flex items-center justify-between gap-4 text-xs">
+							<span>
+								{formatDate(job.requestedAfter)} →{" "}
+								{formatExclusiveEnd(job.requestedBefore)}
+							</span>
+							<span className="tabular-nums">
+								{job.progressPercentage.toFixed(1)}%
+							</span>
+						</div>
+						<div className="h-2 overflow-hidden rounded-sm bg-muted">
+							<div
+								className="h-full bg-primary"
+								style={{ width: `${job.progressPercentage}%` }}
+							/>
+						</div>
+					</div>
+
+					<div className="grid gap-3 text-xs sm:grid-cols-3">
+						<Metric
+							label="Progress"
+							value={`${job.processedMessages} / ${job.totalMessages}`}
+						/>
+						<Metric
+							label="Chunks"
+							value={`${job.completedChunks} / ${job.totalChunks}`}
+						/>
+						<Metric label="Written" value={job.writtenMessages.toString()} />
+						<Metric
+							label="Already stored"
+							value={job.alreadyStoredMessages.toString()}
+						/>
+						<Metric label="Ignored" value={job.ignoredMessages.toString()} />
+						<Metric
+							label="Remaining"
+							value={job.remainingMessages.toString()}
+						/>
+					</div>
+
+					{job.status === "WAITING_RATE_LIMIT" && job.retryAfterAt ? (
+						<Alert>
+							<AlertTitle>Waiting for Gmail</AlertTitle>
+							<AlertDescription>
+								Retrying automatically at{" "}
+								{new Date(job.retryAfterAt).toLocaleTimeString([], {
+									hour: "2-digit",
+									minute: "2-digit",
+								})}
+								.
+							</AlertDescription>
+						</Alert>
+					) : null}
+
+					{job.status === "RECONNECT_REQUIRED" ? (
+						<Alert variant="destructive">
+							<Icon icon={Warning} />
+							<AlertTitle>Google connection needs reconnecting</AlertTitle>
+							<AlertDescription>
+								Reconnect Google, then resume this import.
+							</AlertDescription>
+						</Alert>
+					) : null}
+
+					{job.lastError && job.status !== "WAITING_RATE_LIMIT" ? (
+						<p className="text-destructive text-xs">{job.lastError}</p>
+					) : null}
+
+					<div className="flex flex-wrap items-center gap-2">
+						<Button
+							variant="outline"
+							size="xs"
+							disabled={pending || !canPause(job.status)}
+							onClick={() => pause.mutate({ id: job.id })}
+						>
+							Pause
+						</Button>
+						<Button
+							variant="outline"
+							size="xs"
+							disabled={pending || !canResume(job.status)}
+							onClick={() => resume.mutate({ id: job.id })}
+						>
+							Resume
+						</Button>
+						<Button
+							variant="ghost"
+							size="xs"
+							disabled={pending || !canCancel(job.status)}
+							onClick={() => cancel.mutate({ id: job.id })}
+						>
+							Cancel
+						</Button>
+					</div>
+				</div>
+			) : null}
+
+			{showStartForm ? (
+				<FieldGroup>
+					<div className="grid gap-3 sm:grid-cols-[1fr_1fr_auto]">
+						<Field>
+							<FieldLabel htmlFor="gmail-import-start">Start date</FieldLabel>
+							<Input
+								id="gmail-import-start"
+								type="date"
+								value={startDate}
+								onChange={(event) => setStartDate(event.target.value)}
+							/>
+						</Field>
+
+						<Field>
+							<FieldLabel htmlFor="gmail-import-end">End date</FieldLabel>
+							<Input
+								id="gmail-import-end"
+								type="date"
+								value={endDate}
+								onChange={(event) => setEndDate(event.target.value)}
+							/>
+						</Field>
+
+						<Button
+							type="button"
+							size="sm"
+							disabled={start.isPending}
+							onClick={startImport}
+							className="self-end"
+						>
+							{start.isPending ? <Spinner data-icon="inline-start" /> : null}
+							Start import
+						</Button>
+					</div>
+				</FieldGroup>
+			) : null}
+		</div>
+	);
+}
+
+function Metric({ label, value }: { label: string; value: string }) {
+	return (
+		<div className="flex flex-col gap-1">
+			<span className="text-muted-foreground">{label}</span>
+			<span className="font-medium tabular-nums">{value}</span>
+		</div>
+	);
+}
+
+function statusTone(status: keyof typeof HISTORICAL_IMPORT_LABEL) {
+	if (status === "COMPLETED") return "success";
+	if (
+		status === "FAILED" ||
+		status === "RECONNECT_REQUIRED" ||
+		status === "CANCELLED"
+	) {
+		return "warning";
+	}
+
+	return "neutral";
+}
+
+function canPause(status: keyof typeof HISTORICAL_IMPORT_LABEL) {
+	return HISTORICAL_IMPORT_ACTIVE.has(status);
+}
+
+function canResume(status: keyof typeof HISTORICAL_IMPORT_LABEL) {
+	return (
+		status === "PAUSED" ||
+		status === "FAILED" ||
+		status === "RECONNECT_REQUIRED" ||
+		status === "WAITING_RETRY"
+	);
+}
+
+function canCancel(status: keyof typeof HISTORICAL_IMPORT_LABEL) {
+	return status !== "COMPLETED" && status !== "CANCELLED";
+}
+
+function toExclusiveEnd(value: string): Date {
+	const date = new Date(`${value}T00:00:00.000Z`);
+	return new Date(date.getTime() + IMPORT_DAY_MS);
+}
+
+function formatDate(value: string): string {
+	return value.slice(0, 10);
+}
+
+function formatExclusiveEnd(value: string): string {
+	const date = new Date(value);
+	const inclusive = new Date(date.getTime() - IMPORT_DAY_MS);
+	return inclusive.toISOString().slice(0, 10);
 }

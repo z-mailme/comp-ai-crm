@@ -12,11 +12,15 @@ import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
 import { ConversationService } from "./conversation.service";
+import { GmailHistoricalImportService } from "./gmail-historical-import.service";
 import {
 	calendarEventInput,
 	calendarEventOutput,
+	createHistoricalImportInput,
 	emailThreadOutput,
 	googleConnectionStatusOutput,
+	historicalImportIdInput,
+	historicalImportJobOutput,
 	purgeSyncedDataOutput,
 	revokeAccessOutput,
 	setAutoCreateInput,
@@ -34,6 +38,8 @@ export class GoogleRouter {
 		@Inject(GoogleConnectionService)
 		private readonly connection: GoogleConnectionService,
 		@Inject(GoogleSyncService) private readonly sync: GoogleSyncService,
+		@Inject(GmailHistoricalImportService)
+		private readonly historicalImportsService: GmailHistoricalImportService,
 		@Inject(ConversationService)
 		private readonly conversations: ConversationService,
 	) {}
@@ -69,6 +75,76 @@ export class GoogleRouter {
 	async syncNow(@Ctx() ctx: AuthedTrpcContext) {
 		await this.sync.runForUser(ctx.user.id);
 		return this.connection.status(ctx.user.id);
+	}
+
+	@Query({
+		output: historicalImportJobOutput.nullable(),
+		meta: restMeta("GET", "/google/historical-import/latest", ["Google"]),
+	})
+	async historicalImport(@Ctx() ctx: AuthedTrpcContext) {
+		return this.historicalImportsService.latest(ctx.user.id);
+	}
+
+	@Query({
+		output: historicalImportJobOutput.array(),
+		meta: restMeta("GET", "/google/historical-import/jobs", ["Google"]),
+	})
+	async historicalImports(@Ctx() ctx: AuthedTrpcContext) {
+		return this.historicalImportsService.list(ctx.user.id);
+	}
+
+	@Mutation({
+		input: createHistoricalImportInput,
+		output: historicalImportJobOutput,
+		meta: restMeta("POST", "/google/historical-import/jobs", ["Google"]),
+	})
+	async createHistoricalImport(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof createHistoricalImportInput>,
+	) {
+		return this.historicalImportsService.create(ctx.user.id, input);
+	}
+
+	@Mutation({
+		input: historicalImportIdInput,
+		output: historicalImportJobOutput,
+		meta: restMeta("POST", "/google/historical-import/jobs/{id}/pause", [
+			"Google",
+		]),
+	})
+	async pauseHistoricalImport(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input("id") id: string,
+	) {
+		return this.historicalImportsService.pause(ctx.user.id, id);
+	}
+
+	@Mutation({
+		input: historicalImportIdInput,
+		output: historicalImportJobOutput,
+		meta: restMeta("POST", "/google/historical-import/jobs/{id}/resume", [
+			"Google",
+		]),
+	})
+	async resumeHistoricalImport(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input("id") id: string,
+	) {
+		return this.historicalImportsService.resume(ctx.user.id, id);
+	}
+
+	@Mutation({
+		input: historicalImportIdInput,
+		output: historicalImportJobOutput,
+		meta: restMeta("POST", "/google/historical-import/jobs/{id}/cancel", [
+			"Google",
+		]),
+	})
+	async cancelHistoricalImport(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input("id") id: string,
+	) {
+		return this.historicalImportsService.cancel(ctx.user.id, id);
 	}
 
 	@Mutation({

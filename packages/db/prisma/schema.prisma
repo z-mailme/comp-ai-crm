@@ -23,15 +23,16 @@ model User {
   sessions      Session[]
   accounts      Account[]
 
-  ownedCompanies Company[]           @relation("CompanyOwner")
-  ownedContacts  Contact[]           @relation("ContactOwner")
-  ownedDeals     Deal[]              @relation("DealOwner")
-  activities     Activity[]          @relation("ActivityAuthor")
-  mailboxSyncs   MailboxSync[]
-  factDecisions  ContactFact[]       @relation("FactDecider")
-  conversations  AgentConversation[] @relation("ConversationOwner")
-  fieldValues    FieldValue[]        @relation("FieldValueUser")
-  savedViews     SavedView[]         @relation("SavedViewOwner")
+  ownedCompanies              Company[]                    @relation("CompanyOwner")
+  ownedContacts               Contact[]                    @relation("ContactOwner")
+  ownedDeals                  Deal[]                       @relation("DealOwner")
+  activities                  Activity[]                   @relation("ActivityAuthor")
+  mailboxSyncs                MailboxSync[]
+  mailboxHistoricalImportJobs MailboxHistoricalImportJob[]
+  factDecisions               ContactFact[]                @relation("FactDecider")
+  conversations               AgentConversation[]          @relation("ConversationOwner")
+  fieldValues                 FieldValue[]                 @relation("FieldValueUser")
+  savedViews                  SavedView[]                  @relation("SavedViewOwner")
 
   createdAgentDefinitions AgentDefinition[]             @relation("AgentDefinitionCreator")
   createdAgentVersions    AgentVersion[]                @relation("AgentVersionCreator")
@@ -1264,6 +1265,37 @@ enum GoogleSyncStatus {
   FAILED
 }
 
+enum MailboxHistoricalImportJobStatus {
+  PLANNING
+  READY
+  RUNNING
+  VERIFYING
+  WAITING_RATE_LIMIT
+  WAITING_RETRY
+  RECONNECT_REQUIRED
+  PAUSED
+  FAILED
+  COMPLETED
+  CANCELLED
+}
+
+enum MailboxHistoricalImportChunkStatus {
+  PENDING
+  RUNNING
+  WAITING_RATE_LIMIT
+  RETRYABLE_FAILED
+  RECONNECT_REQUIRED
+  FAILED
+  COMPLETED
+}
+
+enum MailboxHistoricalImportVerificationStatus {
+  UNVERIFIED
+  VERIFIED
+  MISSING
+  FAILED
+}
+
 enum EmailDirection {
   INBOUND
   OUTBOUND
@@ -1296,6 +1328,85 @@ model MailboxSync {
   @@unique([userId, source])
   @@index([status])
   @@map("mailboxSync")
+}
+
+model MailboxHistoricalImportJob {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  source String @default("gmail")
+
+  requestedAfter  DateTime
+  requestedBefore DateTime
+  status          MailboxHistoricalImportJobStatus @default(PLANNING)
+
+  totalMessages         Int @default(0)
+  processedMessages     Int @default(0)
+  writtenMessages       Int @default(0)
+  alreadyStoredMessages Int @default(0)
+  ignoredMessages       Int @default(0)
+  remainingMessages     Int @default(0)
+  totalChunks           Int @default(0)
+  completedChunks       Int @default(0)
+
+  currentChunkId String?
+  retryAfterAt   DateTime?
+  leaseExpiresAt DateTime?
+  startedAt      DateTime?
+  completedAt    DateTime?
+  verifiedAt     DateTime?
+  lastError      String?
+
+  chunks MailboxHistoricalImportChunk[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([status, retryAfterAt])
+  @@index([status, leaseExpiresAt])
+  @@index([userId, source, requestedAfter, requestedBefore])
+  @@map("mailboxHistoricalImportJob")
+}
+
+model MailboxHistoricalImportChunk {
+  id    String                     @id @default(cuid())
+  jobId String
+  job   MailboxHistoricalImportJob @relation(fields: [jobId], references: [id], onDelete: Cascade)
+
+  after     DateTime
+  before    DateTime
+  sortIndex Int
+  depth     Int                                @default(0)
+  status    MailboxHistoricalImportChunkStatus @default(PENDING)
+
+  messagesMatched       Int?
+  messagesAlreadyStored Int      @default(0)
+  messagesAttempted     Int      @default(0)
+  messagesWritten       Int      @default(0)
+  messagesIgnored       Int      @default(0)
+  messagesRemaining     Int      @default(0)
+  ignoredMessageIds     String[] @default([])
+
+  retryAfterAt    DateTime?
+  attemptCount    Int       @default(0)
+  lastError       String?
+  failedMessageId String?
+  startedAt       DateTime?
+  completedAt     DateTime?
+  verifiedAt      DateTime?
+
+  verificationStatus MailboxHistoricalImportVerificationStatus @default(UNVERIFIED)
+  verificationError  String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([jobId, after, before])
+  @@index([jobId, sortIndex])
+  @@index([jobId, status])
+  @@index([status, retryAfterAt])
+  @@map("mailboxHistoricalImportChunk")
 }
 
 model EmailThread {

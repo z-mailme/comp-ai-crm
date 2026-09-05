@@ -6,6 +6,7 @@ import { CalendarClient } from "./calendar.client";
 import { CalendarSyncService } from "./calendar-sync.service";
 import { ConversationService } from "./conversation.service";
 import { GmailClient } from "./gmail.client";
+import { GmailHistoricalImportService } from "./gmail-historical-import.service";
 import { GmailSyncService } from "./gmail-sync.service";
 import { GoogleRouter } from "./google.router";
 import { GoogleConnectionService } from "./google-connection.service";
@@ -17,12 +18,17 @@ import { GoogleSyncService } from "./google-sync.service";
 		CalendarClient,
 		CalendarSyncService,
 		GmailClient,
+		GmailHistoricalImportService,
 		GmailSyncService,
 		GoogleSyncService,
 		GoogleConnectionService,
 		ConversationService,
 		GoogleRouter,
 	],
-	exports: [GoogleSyncService, GoogleConnectionService],
+	exports: [
+		GoogleSyncService,
+		GoogleConnectionService,
+		GmailHistoricalImportService,
+	],
 })
 export class GoogleModule {}

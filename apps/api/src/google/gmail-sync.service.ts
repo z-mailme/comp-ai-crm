@@ -62,6 +62,7 @@ export type GmailBackfillOutcome = Omit<GmailSyncOutcome, "status"> & {
 	messagesWritten?: number;
 	messagesRemaining?: number;
 	messagesIgnored?: number;
+	ignoredMessageIds?: string[];
 	retryAfterMs?: number;
 	failedMessageId?: string;
 };
@@ -88,6 +89,7 @@ type StrictBackfillIngestOutcome = {
 	remaining: number;
 	attempted: number;
 	ignored: number;
+	ignoredIds: string[];
 	alreadyStored: number;
 	failure?: StrictBackfillFailure;
 };
@@ -244,6 +246,7 @@ export class GmailSyncService {
 				messagesWritten: ingested.written,
 				messagesRemaining: ingested.remaining,
 				messagesIgnored: ingested.ignored,
+				ignoredMessageIds: ingested.ignoredIds,
 				pagesRead: listed.pagesRead,
 				resultSizeEstimate: listed.resultSizeEstimate,
 				truncated: listed.truncated,
@@ -261,6 +264,7 @@ export class GmailSyncService {
 			messagesWritten: ingested.written,
 			messagesRemaining: ingested.remaining,
 			messagesIgnored: ingested.ignored,
+			ignoredMessageIds: ingested.ignoredIds,
 			pagesRead: listed.pagesRead,
 			resultSizeEstimate: listed.resultSizeEstimate,
 			truncated: listed.truncated,
@@ -424,6 +428,7 @@ export class GmailSyncService {
 				remaining: 0,
 				attempted: 0,
 				ignored: 0,
+				ignoredIds: [],
 				alreadyStored: 0,
 			};
 		}
@@ -435,6 +440,7 @@ export class GmailSyncService {
 		let written = 0;
 		let attempted = 0;
 		let ignored = 0;
+		const ignoredIds: string[] = [];
 		let storedElsewhere = 0;
 
 		for (const id of batch) {
@@ -446,6 +452,7 @@ export class GmailSyncService {
 					written,
 					attempted,
 					ignored,
+					ignoredIds,
 					alreadyStored: storedElsewhere,
 					remaining: pending.length - written - ignored - storedElsewhere,
 					failure: backfillFailureForMessage(id, message),
@@ -455,6 +462,7 @@ export class GmailSyncService {
 			const parsed = this.parse(message.data);
 			if (!parsed) {
 				ignored += 1;
+				ignoredIds.push(id);
 				continue;
 			}
 
@@ -475,6 +483,7 @@ export class GmailSyncService {
 			written,
 			attempted,
 			ignored,
+			ignoredIds,
 			alreadyStored: storedElsewhere,
 			remaining: pending.length - written - ignored - storedElsewhere,
 		};

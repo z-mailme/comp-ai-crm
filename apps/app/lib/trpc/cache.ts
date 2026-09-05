@@ -247,7 +247,10 @@ export function useCrmCache(): CrmCache {
 
 		google: (options) =>
 			run(
-				[trpc.google.status.queryKey()],
+				[
+					trpc.google.status.queryKey(),
+					trpc.google.historicalImport.queryKey(),
+				],
 				[
 					...activityKeys(),
 					...listKeys(),

@@ -7,6 +7,7 @@ import { InjectDatabase } from "../database/database.constants";
 import { MailboxMatchService } from "../mailbox/mailbox-match.service";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
 import { SyncStateService } from "../mailbox/sync-state.service";
+import { GmailHistoricalImportService } from "./gmail-historical-import.service";
 import {
 	GOOGLE_PROVIDER_ID,
 	GOOGLE_SYNC_SOURCES,
@@ -33,17 +34,20 @@ export class GoogleConnectionService {
 		private readonly state: SyncStateService,
 		private readonly match: MailboxMatchService,
 		private readonly stamp: ActivityStampService,
+		private readonly historicalImport: GmailHistoricalImportService,
 	) {}
 
 	async status(userId: string): Promise<GoogleConnectionStatus> {
 		await this.onConnected(userId);
 
-		const [granted, rows, hasRefreshToken, accounts] = await Promise.all([
-			this.tokens.grantedScopes(userId, GOOGLE_PROVIDER_ID),
-			this.state.listForUser(userId, GOOGLE_SYNC_SOURCES),
-			this.tokens.hasRefreshToken(userId, GOOGLE_PROVIDER_ID),
-			this.tokens.signInAccounts(userId),
-		]);
+		const [granted, rows, hasRefreshToken, accounts, historicalImport] =
+			await Promise.all([
+				this.tokens.grantedScopes(userId, GOOGLE_PROVIDER_ID),
+				this.state.listForUser(userId, GOOGLE_SYNC_SOURCES),
+				this.tokens.hasRefreshToken(userId, GOOGLE_PROVIDER_ID),
+				this.tokens.signInAccounts(userId),
+				this.historicalImport.latest(userId),
+			]);
 
 		const bySource = new Map(rows.map((row) => [row.source, row]));
 
@@ -69,6 +73,7 @@ export class GoogleConnectionService {
 			required: signsInWithGoogle(accounts),
 			hasRefreshToken,
 			sources,
+			historicalImport,
 		};
 	}
 

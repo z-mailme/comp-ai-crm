@@ -1,4 +1,10 @@
-import { EmailDirection, GoogleSyncStatus } from "@crm/db";
+import {
+	EmailDirection,
+	GoogleSyncStatus,
+	MailboxHistoricalImportChunkStatus,
+	MailboxHistoricalImportJobStatus,
+	MailboxHistoricalImportVerificationStatus,
+} from "@crm/db";
 import { z } from "zod";
 import { GOOGLE_SYNC_SOURCES } from "./google.constants";
 
@@ -21,11 +27,59 @@ export const calendarEventInput = z.object({
 	eventId: z.string(),
 });
 
+const historicalImportDateInput = z
+	.string()
+	.trim()
+	.min(1)
+	.refine((value) => !Number.isNaN(new Date(value).getTime()), {
+		message: "Date values must parse as dates.",
+	})
+	.transform((value) => new Date(value));
+
+export const createHistoricalImportInput = z
+	.object({
+		requestedAfter: historicalImportDateInput,
+		requestedBefore: historicalImportDateInput,
+	})
+	.refine((input) => input.requestedAfter < input.requestedBefore, {
+		message: "The start date must be before the end date.",
+		path: ["requestedBefore"],
+	});
+
+export const historicalImportIdInput = z.object({
+	id: z.string().trim().min(1),
+});
+
 export type SetAutoCreateInput = z.infer<typeof setAutoCreateInput>;
 export type SuppressDomainInput = z.infer<typeof suppressDomainInput>;
+export type CreateHistoricalImportInput = z.infer<
+	typeof createHistoricalImportInput
+>;
+export type HistoricalImportIdInput = z.infer<typeof historicalImportIdInput>;
 
 const googleSyncStatusOutput = z.enum(
 	Object.values(GoogleSyncStatus) as [GoogleSyncStatus, ...GoogleSyncStatus[]],
+);
+
+const historicalImportJobStatusOutput = z.enum(
+	Object.values(MailboxHistoricalImportJobStatus) as [
+		MailboxHistoricalImportJobStatus,
+		...MailboxHistoricalImportJobStatus[],
+	],
+);
+
+const historicalImportChunkStatusOutput = z.enum(
+	Object.values(MailboxHistoricalImportChunkStatus) as [
+		MailboxHistoricalImportChunkStatus,
+		...MailboxHistoricalImportChunkStatus[],
+	],
+);
+
+const historicalImportVerificationStatusOutput = z.enum(
+	Object.values(MailboxHistoricalImportVerificationStatus) as [
+		MailboxHistoricalImportVerificationStatus,
+		...MailboxHistoricalImportVerificationStatus[],
+	],
 );
 
 export const googleSourceStatusOutput = z.object({
@@ -37,12 +91,58 @@ export const googleSourceStatusOutput = z.object({
 	autoCreate: z.boolean(),
 });
 
+export const historicalImportChunkOutput = z.object({
+	id: z.string(),
+	after: z.string(),
+	before: z.string(),
+	status: historicalImportChunkStatusOutput,
+	messagesMatched: z.number().nullable(),
+	messagesAlreadyStored: z.number(),
+	messagesAttempted: z.number(),
+	messagesWritten: z.number(),
+	messagesIgnored: z.number(),
+	messagesRemaining: z.number(),
+	retryAfterAt: z.string().nullable(),
+	attemptCount: z.number(),
+	lastError: z.string().nullable(),
+	failedMessageId: z.string().nullable(),
+	verifiedAt: z.string().nullable(),
+	verificationStatus: historicalImportVerificationStatusOutput,
+});
+
+export const historicalImportJobOutput = z.object({
+	id: z.string(),
+	userId: z.string(),
+	source: z.literal("gmail"),
+	requestedAfter: z.string(),
+	requestedBefore: z.string(),
+	status: historicalImportJobStatusOutput,
+	totalMessages: z.number(),
+	processedMessages: z.number(),
+	writtenMessages: z.number(),
+	alreadyStoredMessages: z.number(),
+	ignoredMessages: z.number(),
+	remainingMessages: z.number(),
+	totalChunks: z.number(),
+	completedChunks: z.number(),
+	progressPercentage: z.number(),
+	currentChunk: historicalImportChunkOutput.nullable(),
+	retryAfterAt: z.string().nullable(),
+	startedAt: z.string().nullable(),
+	completedAt: z.string().nullable(),
+	verifiedAt: z.string().nullable(),
+	lastError: z.string().nullable(),
+	createdAt: z.string(),
+	updatedAt: z.string(),
+});
+
 export const googleConnectionStatusOutput = z.object({
 	configured: z.boolean(),
 	linked: z.boolean(),
 	required: z.boolean(),
 	hasRefreshToken: z.boolean(),
 	sources: z.array(googleSourceStatusOutput),
+	historicalImport: historicalImportJobOutput.nullable(),
 });
 
 export const purgeSyncedDataOutput = z.object({
@@ -147,6 +247,9 @@ export const calendarEventOutput = z.object({
 export type GoogleSourceStatus = z.infer<typeof googleSourceStatusOutput>;
 export type GoogleConnectionStatus = z.infer<
 	typeof googleConnectionStatusOutput
+>;
+export type HistoricalImportJobOutput = z.infer<
+	typeof historicalImportJobOutput
 >;
 export type PurgeSyncedDataOutput = z.infer<typeof purgeSyncedDataOutput>;
 export type RevokeAccessOutput = z.infer<typeof revokeAccessOutput>;

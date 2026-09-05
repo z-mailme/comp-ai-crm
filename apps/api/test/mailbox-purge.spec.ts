@@ -1,6 +1,7 @@
 import { afterAll, beforeEach, describe, expect, it } from "bun:test";
 import { ActivityType, db, EmailDirection, GoogleSyncStatus } from "@crm/db";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
+import type { GmailHistoricalImportService } from "../src/google/gmail-historical-import.service";
 import { GoogleConnectionService } from "../src/google/google-connection.service";
 import {
 	GOOGLE_PROVIDER_ID,
@@ -36,6 +37,7 @@ const google = new GoogleConnectionService(
 	state,
 	{} as unknown as MailboxMatchService,
 	stamp,
+	{ latest: async () => null } as unknown as GmailHistoricalImportService,
 );
 const microsoft = new MicrosoftConnectionService(db, tokens, state, stamp);
 

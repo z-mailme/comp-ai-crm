@@ -22,6 +22,7 @@ import {
 import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
 import type { EnvironmentVariables } from "../config/env.validation";
 import { gmailBackfillInput } from "../google/gmail-backfill";
+import { GmailHistoricalImportService } from "../google/gmail-historical-import.service";
 import { GoogleSyncService } from "../google/google-sync.service";
 import { MailboxSyncService } from "./mailbox-sync.service";
 
@@ -41,6 +42,7 @@ export class SyncController {
 	constructor(
 		private readonly sync: MailboxSyncService,
 		private readonly google: GoogleSyncService,
+		private readonly historicalImport: GmailHistoricalImportService,
 		config: ConfigService<EnvironmentVariables, true>,
 	) {
 		this.secret = config.get("CRON_SECRET", { infer: true });
@@ -99,6 +101,21 @@ export class SyncController {
 		}
 
 		return this.google.backfillGmail(parsed.data);
+	}
+
+	@Post("gmail/historical-import/tick")
+	@AllowAnonymous()
+	@ApiOperation({ summary: "Run one due Gmail historical import job step" })
+	@ApiOkResponse({
+		description:
+			"The historical import tick planned, processed or verified one chunk.",
+	})
+	async gmailHistoricalImportTick(
+		@Headers("authorization") authorization?: string,
+	) {
+		this.authorize(authorization);
+
+		return this.historicalImport.tick();
 	}
 
 	private async run(authorization?: string) {
