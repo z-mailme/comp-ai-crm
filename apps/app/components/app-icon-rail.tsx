@@ -2,6 +2,8 @@
 
 import AiObservability from "@carbon/icons-react/es/AiObservability";
 import Building from "@carbon/icons-react/es/Building";
+import Bullhorn from "@carbon/icons-react/es/Bullhorn";
+import Calendar from "@carbon/icons-react/es/Calendar";
 import Close from "@carbon/icons-react/es/Close";
 import Dashboard from "@carbon/icons-react/es/Dashboard";
 import Email from "@carbon/icons-react/es/Email";
@@ -59,6 +61,8 @@ const ITEMS: RailItem[] = [
 		related: ["/agents"],
 	},
 	{ title: "Companies", href: "/companies", icon: Building, match: "prefix" },
+	{ title: "Calendar", href: "/calendar", icon: Calendar, match: "prefix" },
+	{ title: "Marketing", href: "/marketing", icon: Bullhorn, match: "prefix" },
 	{
 		title: "Contacts",
 		href: "/contacts",

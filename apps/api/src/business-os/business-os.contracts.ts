@@ -48,6 +48,14 @@ export const globalSearchInput = z.object({
 	limit: z.number().int().min(1).max(25).default(8),
 });
 
+export const calendarInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	view: z.enum(["month", "week", "day", "agenda"]).default("week"),
+	date: z.string().trim().min(1).optional(),
+	search: z.string().default(""),
+	calendarId: z.string().trim().min(1).optional(),
+});
+
 const linkedRecordOutput = z.object({
 	id: z.string(),
 	name: z.string(),
@@ -315,6 +323,60 @@ export const observabilityOutput = z.object({
 	}),
 });
 
+export const calendarOutput = z.object({
+	range: z.object({
+		start: z.string(),
+		end: z.string(),
+		view: z.enum(["month", "week", "day", "agenda"]),
+	}),
+	connection: z.object({
+		configured: z.boolean(),
+		connected: z.boolean(),
+		status: z.string().nullable(),
+		lastSyncedAt: z.string().nullable(),
+		lastError: z.string().nullable(),
+	}),
+	calendars: z.array(
+		z.object({
+			id: z.string(),
+			name: z.string(),
+			connected: z.boolean(),
+		}),
+	),
+	events: z.array(
+		z.object({
+			id: z.string(),
+			title: z.string().nullable(),
+			description: z.string().nullable(),
+			location: z.string().nullable(),
+			conferenceUrl: z.string().nullable(),
+			startsAt: z.string(),
+			endsAt: z.string(),
+			isAllDay: z.boolean(),
+			status: z.string(),
+			organizerEmail: z.string().nullable(),
+			recurringEventId: z.string().nullable(),
+			googleEventId: z.string().nullable(),
+			sourceCalendar: z.string(),
+			attendees: z.array(
+				z.object({
+					id: z.string(),
+					email: z.string(),
+					name: z.string().nullable(),
+					responseStatus: z.string().nullable(),
+					isOrganizer: z.boolean(),
+					contact: linkedContactOutput.nullable(),
+				}),
+			),
+			contact: linkedContactOutput.nullable(),
+			company: linkedCompanyOutput.nullable(),
+			booking: linkedRecordOutput.nullable(),
+			deal: linkedRecordOutput.nullable(),
+			conversation: linkedRecordOutput.nullable(),
+		}),
+	),
+});
+
 export type BusinessOsOverviewOutput = z.infer<typeof businessOsOverviewOutput>;
 export type InboxInput = z.infer<typeof inboxInput>;
 export type InboxOutput = z.infer<typeof inboxOutput>;
@@ -325,6 +387,8 @@ export type GlobalSearchOutput = z.infer<typeof globalSearchOutput>;
 export type ApprovalsOutput = z.infer<typeof approvalsOutput>;
 export type KnowledgeOutput = z.infer<typeof knowledgeOutput>;
 export type ObservabilityOutput = z.infer<typeof observabilityOutput>;
+export type CalendarInput = z.infer<typeof calendarInput>;
+export type CalendarOutput = z.infer<typeof calendarOutput>;
 
 export const OUTBOX_STATUSES = Object.values(BusinessEventOutboxStatus);
 export const AUTOMATION_EXECUTION_STATUSES = Object.values(

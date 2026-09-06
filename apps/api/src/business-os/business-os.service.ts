@@ -1,3 +1,4 @@
+import { isGoogleConfigured } from "@crm/auth";
 import {
 	ApprovalRequestStatus,
 	AutomationExecutionStatus,
@@ -6,6 +7,7 @@ import {
 	BusinessTaskStatus,
 	ConversationStatus,
 	type Db,
+	GoogleSyncStatus,
 	type Prisma,
 } from "@crm/db";
 import { Injectable, NotFoundException } from "@nestjs/common";
@@ -18,6 +20,8 @@ import {
 import type {
 	ApprovalsOutput,
 	BusinessOsOverviewOutput,
+	CalendarInput,
+	CalendarOutput,
 	ConversationDetailOutput,
 	Customer360Output,
 	GlobalSearchInput,
@@ -28,7 +32,9 @@ import type {
 	ObservabilityOutput,
 } from "./business-os.contracts";
 
+const DAY_MS = 24 * 60 * 60 * 1000;
 const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
+const AGENDA_DAYS = 30;
 
 const CONVERSATION_SELECT = {
 	id: true,
@@ -97,6 +103,62 @@ const EVENT_SELECT = {
 	actorId: true,
 	occurredAt: true,
 	data: true,
+} as const;
+
+const CALENDAR_ATTENDEE_ORDER: Prisma.CalendarAttendeeOrderByWithRelationInput[] =
+	[{ isOrganizer: "desc" }, { email: "asc" }];
+
+const CALENDAR_EVENT_SELECT = {
+	id: true,
+	title: true,
+	description: true,
+	location: true,
+	conferenceUrl: true,
+	startsAt: true,
+	endsAt: true,
+	isAllDay: true,
+	status: true,
+	organizerEmail: true,
+	recurringEventId: true,
+	googleEventId: true,
+	attendees: {
+		orderBy: CALENDAR_ATTENDEE_ORDER,
+		select: {
+			id: true,
+			email: true,
+			name: true,
+			responseStatus: true,
+			isOrganizer: true,
+			contact: {
+				select: {
+					id: true,
+					firstName: true,
+					lastName: true,
+					email: true,
+					imageUrl: true,
+				},
+			},
+		},
+	},
+	contact: {
+		select: {
+			id: true,
+			firstName: true,
+			lastName: true,
+			email: true,
+			imageUrl: true,
+		},
+	},
+	company: {
+		select: {
+			id: true,
+			name: true,
+			domain: true,
+			iconUrl: true,
+			iconDarkUrl: true,
+			iconTone: true,
+		},
+	},
 } as const;
 
 @Injectable()
@@ -270,6 +332,166 @@ export class BusinessOsService {
 		});
 
 		return { conversations: conversations.map(conversationSummary) };
+	}
+
+	async calendar(
+		source: BusinessContextSource,
+		input: CalendarInput,
+	): Promise<CalendarOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const normalizedInput = {
+			...input,
+			view: input.view ?? "month",
+			search: input.search ?? "",
+		};
+		const range = calendarRange(normalizedInput);
+		const search = normalizedInput.search.trim();
+		const eventScope = calendarEventScope(context);
+
+		const [row, events] = await Promise.all([
+			this.db.mailboxSync.findUnique({
+				where: { userId_source: { userId: source.userId, source: "calendar" } },
+				select: {
+					status: true,
+					lastSyncedAt: true,
+					lastError: true,
+				},
+			}),
+			this.db.calendarEvent.findMany({
+				where: {
+					AND: [
+						eventScope,
+						{ startsAt: { lt: range.end }, endsAt: { gt: range.start } },
+						search
+							? {
+									OR: [
+										{ title: { contains: search, mode: "insensitive" } },
+										{
+											description: {
+												contains: search,
+												mode: "insensitive",
+											},
+										},
+										{ location: { contains: search, mode: "insensitive" } },
+										{
+											attendees: {
+												some: {
+													OR: [
+														{
+															email: {
+																contains: search,
+																mode: "insensitive",
+															},
+														},
+														{
+															name: {
+																contains: search,
+																mode: "insensitive",
+															},
+														},
+													],
+												},
+											},
+										},
+									],
+								}
+							: {},
+					],
+				},
+				orderBy: [{ startsAt: "asc" }, { endsAt: "asc" }],
+				take: 250,
+				select: CALENDAR_EVENT_SELECT,
+			}),
+		]);
+
+		const eventIds = events.flatMap((event) =>
+			event.googleEventId ? [event.googleEventId] : [],
+		);
+		const bookings = await this.db.booking.findMany({
+			where: {
+				AND: [
+					bookingScope(context),
+					{ googleCalendarEventId: { in: eventIds } },
+				],
+			},
+			select: {
+				id: true,
+				bookingKey: true,
+				googleCalendarEventId: true,
+				deal: { select: { id: true, name: true } },
+				communicationConversations: {
+					take: 1,
+					select: { id: true, subject: true },
+				},
+			},
+		});
+		const bookingByEventId = new Map(
+			bookings
+				.filter((booking) => booking.googleCalendarEventId)
+				.map((booking) => [booking.googleCalendarEventId as string, booking]),
+		);
+		const calendarConnected = row?.status !== GoogleSyncStatus.NEEDS_RECONNECT;
+
+		return {
+			range: {
+				start: range.start.toISOString(),
+				end: range.end.toISOString(),
+				view: normalizedInput.view,
+			},
+			connection: {
+				configured: isGoogleConfigured(),
+				connected: Boolean(row && calendarConnected),
+				status: row?.status ?? null,
+				lastSyncedAt: row?.lastSyncedAt?.toISOString() ?? null,
+				lastError: row?.lastError ?? null,
+			},
+			calendars: row
+				? [{ id: "primary", name: "Primary Google Calendar", connected: true }]
+				: [],
+			events: events.map((event) => {
+				const booking = event.googleEventId
+					? bookingByEventId.get(event.googleEventId)
+					: null;
+
+				return {
+					id: event.id,
+					title: event.title,
+					description: event.description,
+					location: event.location,
+					conferenceUrl: event.conferenceUrl,
+					startsAt: event.startsAt.toISOString(),
+					endsAt: event.endsAt.toISOString(),
+					isAllDay: event.isAllDay,
+					status: event.status,
+					organizerEmail: event.organizerEmail,
+					recurringEventId: event.recurringEventId,
+					googleEventId: event.googleEventId,
+					sourceCalendar: "Primary Google Calendar",
+					attendees: event.attendees.map((attendee) => ({
+						id: attendee.id,
+						email: attendee.email,
+						name: attendee.name,
+						responseStatus: attendee.responseStatus,
+						isOrganizer: attendee.isOrganizer,
+						contact: attendee.contact ? contactSummary(attendee.contact) : null,
+					})),
+					contact: event.contact ? contactSummary(event.contact) : null,
+					company: event.company,
+					booking: booking
+						? { id: booking.id, name: booking.bookingKey }
+						: null,
+					deal: booking?.deal ?? null,
+					conversation: booking?.communicationConversations[0]
+						? {
+								id: booking.communicationConversations[0].id,
+								name:
+									booking.communicationConversations[0].subject ??
+									"Conversation",
+							}
+						: null,
+				};
+			}),
+		};
 	}
 
 	async conversation(
@@ -1086,6 +1308,37 @@ function businessEventOutboxScope(
 	return { businessEvent: businessEventScope(context) };
 }
 
+function calendarEventScope(
+	context: BusinessContext,
+): Prisma.CalendarEventWhereInput {
+	if (context.includeUnscoped) {
+		return {
+			OR: [
+				{ businessUnitId: context.businessUnitId },
+				{ businessUnitId: null },
+			],
+		};
+	}
+
+	return {
+		OR: [
+			{ businessUnitId: context.businessUnitId },
+			{
+				businessUnitId: null,
+				contact: {
+					customerIdentities: { some: customerIdentityScope(context) },
+				},
+			},
+			{
+				businessUnitId: null,
+				company: {
+					customerIdentities: { some: customerIdentityScope(context) },
+				},
+			},
+		],
+	};
+}
+
 function bookingScope(context: BusinessContext): Prisma.BookingWhereInput {
 	if (context.includeUnscoped) return {};
 
@@ -1097,6 +1350,39 @@ function bookingScope(context: BusinessContext): Prisma.BookingWhereInput {
 			{ businessTasks: { some: directBusinessUnitScope(context) } },
 		],
 	};
+}
+
+function calendarRange(input: CalendarInput): {
+	start: Date;
+	end: Date;
+} {
+	const selected = input.date
+		? new Date(`${input.date}T00:00:00.000Z`)
+		: new Date();
+	const date = Number.isNaN(selected.getTime()) ? new Date() : selected;
+	const start = new Date(
+		Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
+	);
+
+	if (input.view === "day") return { start, end: addDays(start, 1) };
+	if (input.view === "agenda")
+		return { start, end: addDays(start, AGENDA_DAYS) };
+
+	if (input.view === "month") {
+		return {
+			start: new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)),
+			end: new Date(
+				Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1),
+			),
+		};
+	}
+
+	const day = start.getUTCDay();
+	return { start: addDays(start, -day), end: addDays(start, 7 - day) };
+}
+
+function addDays(date: Date, days: number): Date {
+	return new Date(date.getTime() + days * DAY_MS);
 }
 
 function dealScope(context: BusinessContext): Prisma.DealWhereInput {

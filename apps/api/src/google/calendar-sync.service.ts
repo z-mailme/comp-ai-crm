@@ -242,6 +242,7 @@ export class CalendarSyncService {
 		}
 
 		const organizer = event.organizer?.email?.toLowerCase() ?? null;
+		const businessUnitId = await this.businessUnitFor(match);
 
 		const record = await this.db.calendarEvent.upsert({
 			where: key,
@@ -258,6 +259,7 @@ export class CalendarSyncService {
 				isAllDay: start.isAllDay,
 				status: event.status ?? "confirmed",
 				organizerEmail: organizer,
+				businessUnitId,
 				companyId: match.companyId,
 				contactId: match.contactId,
 				syncedByUserId: row.userId,
@@ -273,6 +275,7 @@ export class CalendarSyncService {
 				isAllDay: start.isAllDay,
 				status: event.status ?? "confirmed",
 				organizerEmail: organizer,
+				businessUnitId,
 				companyId: match.companyId,
 				contactId: match.contactId,
 			},
@@ -290,6 +293,30 @@ export class CalendarSyncService {
 		});
 
 		return "written";
+	}
+
+	private async businessUnitFor(match: {
+		companyId: string | null;
+		contactId: string | null;
+	}): Promise<string | null> {
+		const linked: ({ contactId: string } | { companyId: string })[] = [];
+		if (match.contactId) linked.push({ contactId: match.contactId });
+		if (match.companyId) linked.push({ companyId: match.companyId });
+		if (linked.length === 0) return null;
+
+		const identities = await this.db.customerIdentity.findMany({
+			where: {
+				OR: linked,
+				businessUnitId: { not: null },
+			},
+			distinct: ["businessUnitId"],
+			select: { businessUnitId: true },
+			take: 2,
+		});
+
+		return identities.length === 1
+			? (identities[0]?.businessUnitId ?? null)
+			: null;
 	}
 
 	private async syncAttendees(

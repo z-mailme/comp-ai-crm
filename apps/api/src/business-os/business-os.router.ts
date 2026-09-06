@@ -8,6 +8,8 @@ import {
 	approvalsOutput,
 	businessContextInput,
 	businessOsOverviewOutput,
+	calendarInput,
+	calendarOutput,
 	conversationDetailOutput,
 	conversationInput,
 	customer360Input,
@@ -50,6 +52,18 @@ export class BusinessOsRouter {
 		@Input() input: z.infer<typeof inboxInput>,
 	) {
 		return this.businessOs.inbox(sourceOf(ctx, input), input);
+	}
+
+	@Query({
+		input: calendarInput,
+		output: calendarOutput,
+		meta: restMeta("GET", "/business-os/calendar", ["Business OS"]),
+	})
+	async calendar(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof calendarInput>,
+	) {
+		return this.businessOs.calendar(sourceOf(ctx, input), input);
 	}
 
 	@Query({

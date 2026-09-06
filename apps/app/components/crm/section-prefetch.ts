@@ -11,6 +11,8 @@ export type Section =
 	| "/"
 	| "/inbox"
 	| "/command"
+	| "/calendar"
+	| "/marketing"
 	| "/companies"
 	| "/contacts"
 	| "/deals"
@@ -45,6 +47,20 @@ export function usePrefetchSection(): (section: string) => void {
 					);
 					void queryClient.prefetchQuery(
 						trpc.businessOs.knowledge.queryOptions(),
+					);
+					return;
+				case "/calendar":
+					void queryClient.prefetchQuery(
+						trpc.businessOs.calendar.queryOptions({
+							view: "week",
+							date: new Date().toISOString().slice(0, 10),
+							search: "",
+						}),
+					);
+					return;
+				case "/marketing":
+					void queryClient.prefetchQuery(
+						trpc.marketing.overview.queryOptions(),
 					);
 					return;
 				case "/companies":

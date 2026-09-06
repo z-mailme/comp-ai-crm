@@ -49,6 +49,8 @@ model User {
   approvedKnowledgeVersions          KnowledgeVersion[]            @relation("KnowledgeVersionApprover")
   createdBusinessRules               BusinessRule[]                @relation("BusinessRuleCreator")
   createdAutomationRules             AutomationRule[]              @relation("AutomationRuleCreator")
+  createdMarketingIntegrations       MarketingIntegration[]        @relation("MarketingIntegrationCreator")
+  createdMarketingAudiences          MarketingAudience[]           @relation("MarketingAudienceCreator")
   conversationShares                 AgentConversationShare[]      @relation("ConversationShareCreator")
   conversationSubmissions            AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
   conversationFeedback               AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
@@ -1754,17 +1756,21 @@ model BusinessUnit {
 
   settings Json?
 
-  channelAccounts     ChannelAccount[]
-  customerIdentities  CustomerIdentity[]
-  conversations       Conversation[]
-  businessEvents      BusinessEvent[]
-  approvals           ApprovalRequest[]
-  knowledgeItems      KnowledgeItem[]
-  businessRules       BusinessRule[]
-  memoryLinks         ExternalMemoryLink[]
-  businessTasks       BusinessTask[]
-  automationRules     AutomationRule[]
-  agentSafetyPolicies AgentSafetyPolicy[]
+  channelAccounts         ChannelAccount[]
+  marketingIntegrations   MarketingIntegration[]
+  marketingAudiences      MarketingAudience[]
+  marketingCreativeAssets MarketingCreativeAsset[]
+  calendarEvents          CalendarEvent[]
+  customerIdentities      CustomerIdentity[]
+  conversations           Conversation[]
+  businessEvents          BusinessEvent[]
+  approvals               ApprovalRequest[]
+  knowledgeItems          KnowledgeItem[]
+  businessRules           BusinessRule[]
+  memoryLinks             ExternalMemoryLink[]
+  businessTasks           BusinessTask[]
+  automationRules         AutomationRule[]
+  agentSafetyPolicies     AgentSafetyPolicy[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2492,6 +2498,92 @@ model AgentSafetyPolicy {
   @@map("agentSafetyPolicy")
 }
 
+enum MarketingProvider {
+  LISTMONK
+  GOOGLE_ADS
+  META_ADS
+}
+
+enum MarketingIntegrationStatus {
+  CONNECTED
+  NOT_CONFIGURED
+  NEEDS_ATTENTION
+}
+
+model MarketingIntegration {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  provider MarketingProvider
+  label    String
+  status   MarketingIntegrationStatus @default(NOT_CONFIGURED)
+
+  config  Json?
+  secrets Json?
+
+  lastCheckedAt DateTime?
+  lastError     String?
+
+  createdById String?
+  createdBy   User?   @relation("MarketingIntegrationCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessUnitId, provider])
+  @@index([provider, status])
+  @@map("marketingIntegration")
+}
+
+model MarketingAudience {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  source      String
+  status      String  @default("draft")
+  rules       Json
+
+  provider       MarketingProvider?
+  providerListId String?
+
+  createdById String?
+  createdBy   User?   @relation("MarketingAudienceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status])
+  @@map("marketingAudience")
+}
+
+model MarketingCreativeAsset {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  provider           MarketingProvider
+  externalCreativeId String?
+  canvaDesignId      String?
+  exportedAssetUrl   String?
+  creativeVersion    String?
+  channel            String?
+  format             String?
+  metadata           Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, provider])
+  @@map("marketingCreativeAsset")
+}
+
 model CalendarEvent {
   id                String   @id @default(cuid())
   iCalUid           String
@@ -2508,6 +2600,9 @@ model CalendarEvent {
   status         String
   organizerEmail String?
 
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
   companyId String?
   company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
   contactId String?
@@ -2523,6 +2618,7 @@ model CalendarEvent {
   updatedAt DateTime @updatedAt
 
   @@unique([iCalUid, originalStartTime])
+  @@index([businessUnitId, startsAt])
   @@index([companyId, startsAt])
   @@index([contactId, startsAt])
   @@map("calendarEvent")
