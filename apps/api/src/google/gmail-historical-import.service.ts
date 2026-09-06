@@ -600,6 +600,7 @@ export class GmailHistoricalImportService {
 			jobId,
 			chunk.id,
 			outcome.reason ?? "Gmail import failed.",
+			outcome.failedMessageId,
 		);
 		return { ...emptyTick(jobId), failed: 1 };
 	}
@@ -657,6 +658,7 @@ export class GmailHistoricalImportService {
 			jobId,
 			chunk.id,
 			outcome.reason ?? "Verification failed.",
+			outcome.failedMessageId,
 		);
 		return { ...emptyTick(jobId), failed: 1 };
 	}

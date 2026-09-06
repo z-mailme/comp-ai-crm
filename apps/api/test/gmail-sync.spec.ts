@@ -21,7 +21,10 @@ import { GmailSyncService } from "../src/google/gmail-sync.service";
 import type { SyncSource } from "../src/mailbox/mailbox.constants";
 import type { MailboxResult } from "../src/mailbox/mailbox-api.client";
 import { MailboxDealMatchService } from "../src/mailbox/mailbox-deal-match.service";
-import { MailboxMatchService } from "../src/mailbox/mailbox-match.service";
+import {
+	MailboxMatchService,
+	type MatchContext,
+} from "../src/mailbox/mailbox-match.service";
 import type { MailboxTokenService } from "../src/mailbox/mailbox-token.service";
 import { SyncStateService } from "../src/mailbox/sync-state.service";
 import { ThreadWriterService } from "../src/mailbox/thread-writer.service";
@@ -956,6 +959,75 @@ describe("GmailSyncService history pagination", () => {
 		expect(saved?.subject).toBe("Live subject");
 		expect(saved?.body).toBe("Live body");
 		expect(row?.cursor).toBe("history-2");
+	});
+
+	it("keeps the history cursor on persistence failure and advances after retry", async () => {
+		const setup = await kit("history-persistence-retry", {
+			cursor: "history-1",
+		});
+		const email = `buyer-${setup.marker}@gmail.com`;
+		await addContact(setup.marker, email);
+		const rfc = `history-persistence-retry-${setup.marker}@mail.test`;
+
+		setup.gmail.setHistoryPage(undefined, {
+			history: [
+				{ messagesAdded: [{ message: { id: "gmail-history-retry-1" } }] },
+			],
+			historyId: "history-2",
+		});
+		setup.gmail.messages.set(
+			"gmail-history-retry-1",
+			message({
+				id: "gmail-history-retry-1",
+				rfc: `<${rfc}>`,
+				from: email,
+				to: setup.mailbox,
+			}),
+		);
+
+		const failingThreads = {
+			context: async () => ({}) as MatchContext,
+			store: async () => {
+				throw new Error("forced persistence failure");
+			},
+		} as unknown as ThreadWriterService;
+		const service = new GmailSyncService(
+			db,
+			setup.gmail as unknown as GmailClient,
+			{
+				async accessTokenFor(): Promise<{
+					outcome: "ok";
+					accessToken: string;
+				}> {
+					return { outcome: "ok", accessToken: "token" };
+				},
+			} as unknown as MailboxTokenService,
+			new SyncStateService(db),
+			failingThreads,
+		);
+
+		const failed = await service.sync(setup.row);
+		const failedRow = await db.mailboxSync.findUnique({
+			where: { id: setup.row.id },
+			select: { cursor: true },
+		});
+
+		expect(failed.status).toBe("failed");
+		expect(failed.failedMessageId).toBe("gmail-history-retry-1");
+		expect(failedRow?.cursor).toBe("history-1");
+
+		const retryRow = await db.mailboxSync.findUniqueOrThrow({
+			where: { id: setup.row.id },
+		});
+		const retried = await setup.service.sync(retryRow);
+		const retriedRow = await db.mailboxSync.findUnique({
+			where: { id: setup.row.id },
+			select: { cursor: true },
+		});
+
+		expect(retried.status).toBe("synced");
+		expect(await stored(rfc)).not.toBeNull();
+		expect(retriedRow?.cursor).toBe("history-2");
 	});
 
 	it("processes every Gmail history page before it advances the cursor", async () => {
