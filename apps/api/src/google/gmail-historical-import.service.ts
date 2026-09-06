@@ -227,6 +227,7 @@ export class GmailHistoricalImportService {
 	}
 
 	async resume(userId: string, id: string): Promise<HistoricalImportJobOutput> {
+		const now = new Date();
 		const job = await this.db.mailboxHistoricalImportJob.findFirst({
 			where: { id, userId, source: "gmail" },
 			include: { chunks: true },
@@ -237,6 +238,9 @@ export class GmailHistoricalImportService {
 			throw new BadRequestException("A cancelled Gmail import cannot resume.");
 		}
 		if (job.status === MailboxHistoricalImportJobStatus.COMPLETED) {
+			return serializeJob(job);
+		}
+		if (hasActiveLease(job, now) && hasRunningChunk(job)) {
 			return serializeJob(job);
 		}
 
@@ -254,6 +258,9 @@ export class GmailHistoricalImportService {
 						in: [
 							MailboxHistoricalImportChunkStatus.RECONNECT_REQUIRED,
 							MailboxHistoricalImportChunkStatus.FAILED,
+							...(hasStaleLease(job, now)
+								? [MailboxHistoricalImportChunkStatus.RUNNING]
+								: []),
 						],
 					},
 				},
@@ -324,7 +331,7 @@ export class GmailHistoricalImportService {
 				error instanceof Error ? error.stack : String(error),
 			);
 		} finally {
-			await this.releaseJob(job.id);
+			await this.releaseJob(job.id, job.leaseExpiresAt);
 		}
 
 		return summary;
@@ -898,22 +905,46 @@ export class GmailHistoricalImportService {
 
 		if (!job) return null;
 
-		const { count } = await this.db.mailboxHistoricalImportJob.updateMany({
-			where: { id: job.id, updatedAt: job.updatedAt, ...where },
-			data: {
-				leaseExpiresAt: addMs(now, GMAIL_SYNC.historicalImport.leaseMs),
-			},
-		});
+		const leaseExpiresAt = addMs(now, GMAIL_SYNC.historicalImport.leaseMs);
+		const claimed = await this.db.$transaction(
+			async (tx) => {
+				const { count } = await tx.mailboxHistoricalImportJob.updateMany({
+					where: { id: job.id, updatedAt: job.updatedAt, ...where },
+					data: { leaseExpiresAt },
+				});
 
-		if (count !== 1) return null;
+				if (count !== 1) return false;
+
+				await tx.mailboxHistoricalImportChunk.updateMany({
+					where: {
+						jobId: job.id,
+						status: MailboxHistoricalImportChunkStatus.RUNNING,
+					},
+					data: {
+						status: MailboxHistoricalImportChunkStatus.PENDING,
+						retryAfterAt: null,
+					},
+				});
+
+				return true;
+			},
+			{ isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+		);
+
+		if (!claimed) return null;
 		return this.db.mailboxHistoricalImportJob.findUnique({
 			where: { id: job.id },
 		});
 	}
 
-	private async releaseJob(jobId: string): Promise<void> {
+	private async releaseJob(
+		jobId: string,
+		leaseExpiresAt: Date | null,
+	): Promise<void> {
+		if (!leaseExpiresAt) return;
+
 		await this.db.mailboxHistoricalImportJob.updateMany({
-			where: { id: jobId },
+			where: { id: jobId, leaseExpiresAt },
 			data: { leaseExpiresAt: null },
 		});
 	}
@@ -969,6 +1000,7 @@ export class GmailHistoricalImportService {
 			nextStatus === MailboxHistoricalImportJobStatus.COMPLETED
 				? (job.verifiedAt ?? new Date())
 				: job.verifiedAt;
+		const currentChunkId = currentChunkFor(job.chunks)?.id ?? null;
 
 		await this.db.mailboxHistoricalImportJob.update({
 			where: { id: jobId },
@@ -982,6 +1014,7 @@ export class GmailHistoricalImportService {
 				remainingMessages,
 				totalChunks,
 				completedChunks,
+				currentChunkId,
 				completedAt,
 				verifiedAt,
 			},
@@ -1000,6 +1033,26 @@ function dueJobWhere(now: Date): Prisma.MailboxHistoricalImportJobWhereInput {
 			},
 		],
 	};
+}
+
+function hasActiveLease(
+	job: Pick<MailboxHistoricalImportJobModel, "leaseExpiresAt">,
+	now: Date,
+): boolean {
+	return job.leaseExpiresAt !== null && job.leaseExpiresAt > now;
+}
+
+function hasStaleLease(
+	job: Pick<MailboxHistoricalImportJobModel, "leaseExpiresAt">,
+	now: Date,
+): boolean {
+	return !hasActiveLease(job, now);
+}
+
+function hasRunningChunk(job: JobWithChunks): boolean {
+	return job.chunks.some(
+		(chunk) => chunk.status === MailboxHistoricalImportChunkStatus.RUNNING,
+	);
 }
 
 function statusFor(
@@ -1030,6 +1083,14 @@ function statusFor(
 
 	if (
 		job.chunks.some(
+			(chunk) => chunk.status === MailboxHistoricalImportChunkStatus.RUNNING,
+		)
+	) {
+		return MailboxHistoricalImportJobStatus.RUNNING;
+	}
+
+	if (
+		job.chunks.some(
 			(chunk) =>
 				chunk.status === MailboxHistoricalImportChunkStatus.RETRYABLE_FAILED,
 		)
@@ -1053,12 +1114,7 @@ function statusFor(
 }
 
 function serializeJob(job: JobWithChunks): HistoricalImportJobOutput {
-	const currentChunk =
-		job.chunks.find((chunk) => chunk.id === job.currentChunkId) ??
-		job.chunks.find(
-			(chunk) => chunk.status !== MailboxHistoricalImportChunkStatus.COMPLETED,
-		) ??
-		null;
+	const currentChunk = currentChunkFor(job.chunks, job.currentChunkId);
 
 	return {
 		id: job.id,
@@ -1095,6 +1151,41 @@ function serializeJob(job: JobWithChunks): HistoricalImportJobOutput {
 		createdAt: job.createdAt.toISOString(),
 		updatedAt: job.updatedAt.toISOString(),
 	};
+}
+
+function currentChunkFor(
+	chunks: readonly MailboxHistoricalImportChunkModel[],
+	currentChunkId: string | null = null,
+): MailboxHistoricalImportChunkModel | null {
+	const current = chunks.find((chunk) => chunk.id === currentChunkId) ?? null;
+	if (
+		current &&
+		current.status !== MailboxHistoricalImportChunkStatus.COMPLETED
+	) {
+		return current;
+	}
+
+	const incomplete =
+		chunks.find(
+			(chunk) => chunk.status !== MailboxHistoricalImportChunkStatus.COMPLETED,
+		) ?? null;
+	if (incomplete) return incomplete;
+
+	if (
+		current &&
+		current.verificationStatus !==
+			MailboxHistoricalImportVerificationStatus.VERIFIED
+	) {
+		return current;
+	}
+
+	return (
+		chunks.find(
+			(chunk) =>
+				chunk.verificationStatus !==
+				MailboxHistoricalImportVerificationStatus.VERIFIED,
+		) ?? null
+	);
 }
 
 function serializeChunk(

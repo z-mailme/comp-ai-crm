@@ -1,6 +1,12 @@
 import { afterAll, describe, expect, it } from "bun:test";
 import {
+	ActivityType,
+	BusinessEventSource,
+	CommunicationChannel,
+	ConversationPriority,
+	ConversationStatus,
 	db,
+	EmailDirection,
 	MailboxHistoricalImportChunkStatus,
 	MailboxHistoricalImportJobStatus,
 	MailboxHistoricalImportVerificationStatus,
@@ -76,6 +82,16 @@ async function kit(name: string) {
 }
 
 async function clean(marker: string): Promise<void> {
+	await db.businessEvent.deleteMany({
+		where: { idempotencyKey: { contains: marker } },
+	});
+	await db.conversation.deleteMany({
+		where: { externalThreadId: { contains: marker } },
+	});
+	await db.activity.deleteMany({ where: { subject: { contains: marker } } });
+	await db.emailThread.deleteMany({
+		where: { rootMessageId: { contains: marker } },
+	});
 	await db.mailboxHistoricalImportJob.deleteMany({
 		where: { userId: { contains: marker } },
 	});
@@ -98,6 +114,209 @@ async function createJob(
 		requestedAfter: new Date(after),
 		requestedBefore: new Date(before),
 	});
+}
+
+async function runningLeaf(
+	setup: Awaited<ReturnType<typeof kit>>,
+	options: {
+		leaseExpiresAt: Date | null;
+		messagesMatched?: number | null;
+		messagesWritten?: number;
+		messagesIgnored?: number;
+		messagesRemaining?: number;
+		now: Date;
+	},
+) {
+	const messagesMatched = options.messagesMatched ?? 3;
+	const job = await createJob(setup);
+
+	if (messagesMatched !== null) {
+		setup.gmail.push({
+			status: "synced",
+			messagesMatched,
+			messagesWouldFetch: options.messagesRemaining ?? messagesMatched,
+		});
+		await setup.service.tick(options.now);
+	}
+
+	const [chunk] = await chunks(job.id);
+	if (!chunk) throw new Error("Expected one chunk.");
+
+	await db.mailboxHistoricalImportChunk.update({
+		where: { id: chunk.id },
+		data: {
+			status: MailboxHistoricalImportChunkStatus.RUNNING,
+			messagesMatched,
+			messagesWritten: options.messagesWritten ?? 0,
+			messagesIgnored: options.messagesIgnored ?? 0,
+			messagesRemaining: options.messagesRemaining ?? messagesMatched ?? 0,
+			startedAt: options.now,
+			completedAt: null,
+			retryAfterAt: null,
+			lastError: null,
+			failedMessageId: null,
+		},
+	});
+	const updatedJob = await db.mailboxHistoricalImportJob.update({
+		where: { id: job.id },
+		data: {
+			status: MailboxHistoricalImportJobStatus.READY,
+			currentChunkId: chunk.id,
+			leaseExpiresAt: options.leaseExpiresAt,
+			retryAfterAt: null,
+		},
+	});
+	const updatedChunk = await db.mailboxHistoricalImportChunk.findUniqueOrThrow({
+		where: { id: chunk.id },
+	});
+
+	return { job: updatedJob, chunk: updatedChunk };
+}
+
+async function productionShape(setup: Awaited<ReturnType<typeof kit>>) {
+	const requestedAfter = new Date("2024-01-01T00:00:00.000Z");
+	const requestedBefore = new Date("2024-01-16T00:00:00.000Z");
+	const job = await db.mailboxHistoricalImportJob.create({
+		data: {
+			userId: setup.userId,
+			source: "gmail",
+			requestedAfter,
+			requestedBefore,
+			status: MailboxHistoricalImportJobStatus.READY,
+			totalMessages: 2242,
+			processedMessages: 2107,
+			writtenMessages: 2107,
+			remainingMessages: 135,
+			totalChunks: 15,
+			completedChunks: 14,
+		},
+	});
+	const completedCounts = [...Array.from({ length: 13 }, () => 150), 157];
+	const completed = completedCounts.map((count, index) => ({
+		id: `${setup.marker}-completed-${index}`,
+		jobId: job.id,
+		after: new Date(Date.UTC(2024, 0, index + 1)),
+		before: new Date(Date.UTC(2024, 0, index + 2)),
+		sortIndex: index,
+		status: MailboxHistoricalImportChunkStatus.COMPLETED,
+		messagesMatched: count,
+		messagesAttempted: count,
+		messagesWritten: count,
+		messagesRemaining: 0,
+		completedAt: new Date(Date.UTC(2024, 0, index + 2)),
+		verifiedAt: new Date(Date.UTC(2024, 0, index + 2)),
+		verificationStatus: MailboxHistoricalImportVerificationStatus.VERIFIED,
+	}));
+	const chunkId = `${setup.marker}-running`;
+
+	await db.mailboxHistoricalImportChunk.createMany({
+		data: [
+			...completed,
+			{
+				id: chunkId,
+				jobId: job.id,
+				after: new Date("2024-01-15T00:00:00.000Z"),
+				before: requestedBefore,
+				sortIndex: 14,
+				status: MailboxHistoricalImportChunkStatus.RUNNING,
+				messagesMatched: 135,
+				messagesAttempted: 0,
+				messagesWritten: 0,
+				messagesRemaining: 135,
+			},
+		],
+	});
+	await seedProjectionRows(setup);
+	await db.mailboxHistoricalImportJob.update({
+		where: { id: job.id },
+		data: { currentChunkId: completed[0]?.id ?? null },
+	});
+
+	const updatedJob = await db.mailboxHistoricalImportJob.findUniqueOrThrow({
+		where: { id: job.id },
+	});
+	const chunk = await db.mailboxHistoricalImportChunk.findUniqueOrThrow({
+		where: { id: chunkId },
+	});
+
+	return { job: updatedJob, chunk };
+}
+
+async function seedProjectionRows(setup: Awaited<ReturnType<typeof kit>>) {
+	const rootMessageId = `<root-${setup.marker}@mail.test>`;
+	const emailThread = await db.emailThread.create({
+		data: {
+			rootMessageId,
+			subject: `Duplicate ${setup.marker}`,
+			firstMessageAt: new Date("2024-01-15T00:00:00.000Z"),
+			lastMessageAt: new Date("2024-01-15T00:00:00.000Z"),
+		},
+	});
+	await db.emailMessage.create({
+		data: {
+			threadId: emailThread.id,
+			rfcMessageId: `<message-${setup.marker}@mail.test>`,
+			syncedByUserId: setup.userId,
+			gmailMessageId: `gmail-${setup.marker}`,
+			direction: EmailDirection.INBOUND,
+			fromEmail: `customer-${setup.marker}@example.test`,
+			recipients: [],
+			subject: `Duplicate ${setup.marker}`,
+			body: "Hello",
+			sentAt: new Date("2024-01-15T00:00:00.000Z"),
+		},
+	});
+	await db.activity.create({
+		data: {
+			type: ActivityType.EMAIL,
+			subject: `Duplicate ${setup.marker}`,
+			body: "Hello",
+			occurredAt: new Date("2024-01-15T00:00:00.000Z"),
+			createdById: setup.userId,
+			emailThreadId: emailThread.id,
+		},
+	});
+	const conversation = await db.conversation.create({
+		data: {
+			channel: CommunicationChannel.EMAIL,
+			status: ConversationStatus.OPEN,
+			priority: ConversationPriority.NORMAL,
+			subject: `Duplicate ${setup.marker}`,
+			externalThreadId: `thread-${setup.marker}`,
+			emailThreadId: emailThread.id,
+		},
+	});
+	await db.businessEvent.create({
+		data: {
+			type: "email.received",
+			source: BusinessEventSource.GMAIL,
+			channel: CommunicationChannel.EMAIL,
+			conversationId: conversation.id,
+			occurredAt: new Date("2024-01-15T00:00:00.000Z"),
+			data: {},
+			correlationId: rootMessageId,
+			idempotencyKey: `gmail:${setup.marker}`,
+		},
+	});
+}
+
+async function duplicateCounts(marker: string) {
+	const [emailMessages, emailThreads, activities, conversations, events] =
+		await Promise.all([
+			db.emailMessage.count({
+				where: { gmailMessageId: { contains: marker } },
+			}),
+			db.emailThread.count({ where: { rootMessageId: { contains: marker } } }),
+			db.activity.count({ where: { subject: { contains: marker } } }),
+			db.conversation.count({
+				where: { externalThreadId: { contains: marker } },
+			}),
+			db.businessEvent.count({
+				where: { idempotencyKey: { contains: marker } },
+			}),
+		]);
+
+	return { emailMessages, emailThreads, activities, conversations, events };
 }
 
 afterAll(async () => {
@@ -397,6 +616,207 @@ describe("GmailHistoricalImportService worker", () => {
 
 		expect(second.attempted).toBe(0);
 		expect((await chunks(job.id))[0]?.messagesMatched).toBe(1);
+	});
+
+	it("does not reclaim a running chunk while its job lease is active", async () => {
+		const setup = await kit("running-active-lease");
+		const now = new Date("2025-01-01T00:00:00.000Z");
+		const { job, chunk } = await runningLeaf(setup, {
+			leaseExpiresAt: new Date("2025-01-01T00:05:00.000Z"),
+			now,
+		});
+
+		setup.gmail.push({
+			status: "synced",
+			messagesMatched: 3,
+			messagesWritten: 3,
+			messagesAttempted: 3,
+		});
+		const tick = await setup.service.tick(now);
+		const [updated] = await chunks(job.id);
+		const reloaded = await db.mailboxHistoricalImportJob.findUniqueOrThrow({
+			where: { id: job.id },
+		});
+
+		expect(tick.attempted).toBe(0);
+		expect(setup.gmail.calls).toHaveLength(1);
+		expect(updated?.id).toBe(chunk.id);
+		expect(updated?.status).toBe(MailboxHistoricalImportChunkStatus.RUNNING);
+		expect(reloaded.leaseExpiresAt?.toISOString()).toBe(
+			"2025-01-01T00:05:00.000Z",
+		);
+	});
+
+	it("reclaims a running chunk with no job lease and keeps its counters", async () => {
+		const setup = await kit("running-null-lease");
+		const now = new Date("2025-01-01T00:00:00.000Z");
+		const { job, chunk } = await runningLeaf(setup, {
+			leaseExpiresAt: null,
+			messagesMatched: 135,
+			messagesWritten: 10,
+			messagesIgnored: 5,
+			messagesRemaining: 120,
+			now,
+		});
+
+		setup.gmail.push({
+			status: "synced",
+			messagesMatched: 135,
+			messagesWritten: 100,
+			messagesAttempted: 100,
+			messagesRemaining: 0,
+			ignoredMessageIds: Array.from(
+				{ length: 5 },
+				(_, index) => `ignored-${index}`,
+			),
+		});
+		const tick = await setup.service.tick(now);
+		const [updated] = await chunks(job.id);
+
+		expect(tick.processed).toBe(1);
+		expect(setup.gmail.calls[1]?.historicalImportJobId).toBe(job.id);
+		expect(setup.gmail.calls[1]?.historicalImportChunkId).toBe(chunk.id);
+		expect(updated?.id).toBe(chunk.id);
+		expect(updated?.status).toBe(MailboxHistoricalImportChunkStatus.COMPLETED);
+		expect(updated?.messagesMatched).toBe(135);
+		expect(updated?.messagesWritten).toBe(110);
+		expect(updated?.messagesAlreadyStored).toBe(20);
+		expect(updated?.messagesIgnored).toBe(5);
+		expect(updated?.messagesRemaining).toBe(0);
+	});
+
+	it("reclaims a running chunk after its job lease expires", async () => {
+		const setup = await kit("running-expired-lease");
+		const now = new Date("2025-01-01T00:05:00.000Z");
+		const { job, chunk } = await runningLeaf(setup, {
+			leaseExpiresAt: new Date("2025-01-01T00:01:00.000Z"),
+			messagesMatched: 4,
+			messagesRemaining: 4,
+			now: new Date("2025-01-01T00:00:00.000Z"),
+		});
+
+		setup.gmail.push({
+			status: "synced",
+			messagesMatched: 4,
+			messagesWritten: 4,
+			messagesAttempted: 4,
+			messagesRemaining: 0,
+		});
+		const tick = await setup.service.tick(now);
+		const [updated] = await chunks(job.id);
+
+		expect(tick.processed).toBe(1);
+		expect(setup.gmail.calls[1]?.historicalImportJobId).toBe(job.id);
+		expect(setup.gmail.calls[1]?.historicalImportChunkId).toBe(chunk.id);
+		expect(updated?.status).toBe(MailboxHistoricalImportChunkStatus.COMPLETED);
+		expect(updated?.messagesMatched).toBe(4);
+		expect(updated?.messagesRemaining).toBe(0);
+	});
+
+	it("resume requeues a stale running chunk without replacing the job", async () => {
+		const setup = await kit("resume-running");
+		const now = new Date("2025-01-01T00:00:00.000Z");
+		const { job, chunk } = await runningLeaf(setup, {
+			leaseExpiresAt: null,
+			now,
+		});
+
+		const resumed = await setup.service.resume(setup.userId, job.id);
+		const [updated] = await chunks(job.id);
+
+		expect(resumed.id).toBe(job.id);
+		expect(resumed.currentChunk?.id).toBe(chunk.id);
+		expect(updated?.id).toBe(chunk.id);
+		expect(updated?.status).toBe(MailboxHistoricalImportChunkStatus.PENDING);
+		expect(updated?.messagesMatched).toBe(3);
+		expect(setup.gmail.calls).toHaveLength(1);
+	});
+
+	it("resume leaves an actively leased running chunk alone", async () => {
+		const setup = await kit("resume-active-running");
+		const now = new Date("2025-01-01T00:00:00.000Z");
+		const { job, chunk } = await runningLeaf(setup, {
+			leaseExpiresAt: new Date(Date.now() + 60_000),
+			now,
+		});
+
+		const resumed = await setup.service.resume(setup.userId, job.id);
+		const [updated] = await chunks(job.id);
+
+		expect(resumed.id).toBe(job.id);
+		expect(resumed.currentChunk?.id).toBe(chunk.id);
+		expect(updated?.status).toBe(MailboxHistoricalImportChunkStatus.RUNNING);
+		expect(updated?.messagesMatched).toBe(3);
+	});
+
+	it("shows the incomplete chunk when currentChunkId points at a completed chunk", async () => {
+		const setup = await kit("current-pointer");
+		const job = await createJob(
+			setup,
+			"2025-01-01T00:00:00.000Z",
+			"2025-03-01T00:00:00.000Z",
+		);
+		const [first, second] = await chunks(job.id);
+		if (!first || !second) throw new Error("Expected two chunks.");
+
+		await db.mailboxHistoricalImportChunk.update({
+			where: { id: first.id },
+			data: {
+				status: MailboxHistoricalImportChunkStatus.COMPLETED,
+				messagesMatched: 1,
+				messagesWritten: 1,
+				completedAt: new Date("2025-01-01T00:00:00.000Z"),
+			},
+		});
+		await db.mailboxHistoricalImportChunk.update({
+			where: { id: second.id },
+			data: {
+				status: MailboxHistoricalImportChunkStatus.RUNNING,
+				messagesMatched: 2,
+				messagesRemaining: 2,
+			},
+		});
+		await db.mailboxHistoricalImportJob.update({
+			where: { id: job.id },
+			data: {
+				status: MailboxHistoricalImportJobStatus.READY,
+				currentChunkId: first.id,
+				leaseExpiresAt: null,
+			},
+		});
+
+		const displayed = await setup.service.byId(setup.userId, job.id);
+
+		expect(displayed.currentChunk?.id).toBe(second.id);
+	});
+
+	it("moves a 2107 of 2242 stale state toward completion without duplicates", async () => {
+		const setup = await kit("production-shape");
+		const { job, chunk } = await productionShape(setup);
+		const before = await duplicateCounts(setup.marker);
+
+		setup.gmail.push({
+			status: "synced",
+			messagesMatched: 135,
+			messagesWritten: 135,
+			messagesAttempted: 135,
+			messagesRemaining: 0,
+		});
+		const tick = await setup.service.tick(new Date("2025-01-01T00:00:00.000Z"));
+		const updated = await setup.service.byId(setup.userId, job.id);
+		const [updatedChunk] = await db.mailboxHistoricalImportChunk.findMany({
+			where: { id: chunk.id },
+		});
+		const after = await duplicateCounts(setup.marker);
+
+		expect(tick.processed).toBe(1);
+		expect(updated.id).toBe(job.id);
+		expect(updated.totalMessages).toBe(2242);
+		expect(updated.processedMessages).toBe(2242);
+		expect(updated.remainingMessages).toBe(0);
+		expect(updated.completedChunks).toBe(15);
+		expect(updatedChunk?.id).toBe(chunk.id);
+		expect(after).toEqual(before);
 	});
 });
 
