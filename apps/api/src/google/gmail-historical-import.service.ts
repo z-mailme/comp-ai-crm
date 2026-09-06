@@ -389,6 +389,8 @@ export class GmailHistoricalImportService {
 			before: chunk.before,
 			dryRun: true,
 			max: GMAIL_SYNC.historicalImport.safeCandidateLimit,
+			historicalImportJobId: job.id,
+			historicalImportChunkId: chunk.id,
 		});
 
 		if (outcome.status === "synced") {
@@ -429,6 +431,8 @@ export class GmailHistoricalImportService {
 			before: chunk.before,
 			dryRun: false,
 			max: GMAIL_SYNC.historicalImport.safeCandidateLimit,
+			historicalImportJobId: job.id,
+			historicalImportChunkId: chunk.id,
 		});
 
 		if (outcome.status === "synced") {
@@ -504,6 +508,8 @@ export class GmailHistoricalImportService {
 			before: chunk.before,
 			dryRun: true,
 			max: GMAIL_SYNC.historicalImport.safeCandidateLimit,
+			historicalImportJobId: job.id,
+			historicalImportChunkId: chunk.id,
 		});
 
 		if (outcome.status === "synced") {

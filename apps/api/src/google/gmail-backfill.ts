@@ -39,4 +39,10 @@ export const gmailBackfillInput = z
 		path: ["before"],
 	});
 
-export type GmailBackfillInput = z.infer<typeof gmailBackfillInput>;
+export type GmailBackfillTraceContext = {
+	historicalImportJobId?: string;
+	historicalImportChunkId?: string;
+};
+
+export type GmailBackfillInput = z.infer<typeof gmailBackfillInput> &
+	GmailBackfillTraceContext;

@@ -277,6 +277,55 @@ async function stored(rfcMessageId: string) {
 	});
 }
 
+async function storedProjection(rfcMessageId: string) {
+	return db.emailMessage.findUnique({
+		where: { rfcMessageId },
+		select: {
+			id: true,
+			fromName: true,
+			recipients: true,
+			subject: true,
+			snippet: true,
+			body: true,
+			gmailMessageId: true,
+			thread: {
+				select: {
+					subject: true,
+					activity: { select: { subject: true, body: true, meta: true } },
+					conversation: {
+						select: {
+							subject: true,
+							preview: true,
+							metadata: true,
+							messages: {
+								select: {
+									subject: true,
+									body: true,
+									snippet: true,
+									sender: true,
+									recipients: true,
+									metadata: true,
+								},
+							},
+							participants: {
+								orderBy: { role: "asc" },
+								select: { name: true, email: true },
+							},
+							businessEvents: {
+								select: {
+									type: true,
+									data: true,
+									outbox: { select: { payload: true } },
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	});
+}
+
 async function clean(marker: string): Promise<void> {
 	await db.emailThread.deleteMany({
 		where: { rootMessageId: { contains: marker } },
@@ -331,6 +380,100 @@ describe("GmailSyncService first run", () => {
 });
 
 describe("GmailSyncService backfill", () => {
+	it("removes NUL bytes from persisted mailbox projections and preserves Unicode", async () => {
+		const setup = await kit("nul-backfill", { cursor: "live-cursor" });
+		const email = `customer-${setup.marker}@gmail.com`;
+		await addContact(setup.marker, email);
+		const rfc = `nul-backfill-${setup.marker}@mail.test`;
+
+		setup.gmail.setListPage(undefined, {
+			messages: [{ id: "gmail-nul-backfill-1" }],
+			resultSizeEstimate: 1,
+		});
+		setup.gmail.messages.set(
+			"gmail-nul-backfill-1",
+			message({
+				id: "gmail-nul-backfill-1",
+				rfc: `<${rfc}>`,
+				from: `"José\u0000 Person 😊" <${email}>`,
+				to: `"Rep\u0000\tName" <${setup.mailbox}>`,
+				subject: "Hello\u0000 Café 😊",
+				body: "Line one\u0000\nLine two\tCafé 😊",
+			}),
+		);
+
+		const first = await setup.service.backfill(backfillInput(setup));
+		const second = await setup.service.backfill(backfillInput(setup));
+		const saved = await storedProjection(rfc);
+		const serialized = JSON.stringify(saved);
+
+		expect(first.messagesWritten).toBe(1);
+		expect(second.messagesWritten).toBe(0);
+		expect(second.messagesAlreadyStored).toBe(1);
+		expect(await db.emailMessage.count({ where: { rfcMessageId: rfc } })).toBe(
+			1,
+		);
+		expect(serialized).not.toContain("\\u0000");
+		expect(saved?.fromName).toBe("José Person 😊");
+		expect(saved?.subject).toBe("Hello Café 😊");
+		expect(saved?.body).toBe("Line one\nLine two\tCafé 😊");
+		expect(saved?.snippet).toBe("Line one Line two Café 😊");
+		expect(saved?.thread.subject).toBe("Hello Café 😊");
+		expect(saved?.thread.activity?.subject).toBe("Hello Café 😊");
+		expect(saved?.thread.activity?.body).toBe("Line one Line two Café 😊");
+		expect(saved?.thread.conversation?.subject).toBe("Hello Café 😊");
+		expect(saved?.thread.conversation?.preview).toBe(
+			"Line one Line two Café 😊",
+		);
+		expect(saved?.thread.conversation?.messages[0]?.body).toBe(
+			"Line one\nLine two\tCafé 😊",
+		);
+		expect(saved?.thread.conversation?.messages[0]?.sender).toEqual({
+			email,
+			name: "José Person 😊",
+		});
+		expect(saved?.thread.conversation?.businessEvents[0]?.data).toMatchObject({
+			subject: "Hello Café 😊",
+			snippet: "Line one Line two Café 😊",
+		});
+	});
+
+	it("sanitizes an HTML-only Gmail body before persistence", async () => {
+		const setup = await kit("nul-html", { cursor: "live-cursor" });
+		const email = `customer-${setup.marker}@gmail.com`;
+		await addContact(setup.marker, email);
+		const rfc = `nul-html-${setup.marker}@mail.test`;
+		const base = message({
+			id: "gmail-nul-html-1",
+			rfc: `<${rfc}>`,
+			from: email,
+			to: setup.mailbox,
+		});
+
+		setup.gmail.setListPage(undefined, {
+			messages: [{ id: "gmail-nul-html-1" }],
+			resultSizeEstimate: 1,
+		});
+		setup.gmail.messages.set("gmail-nul-html-1", {
+			...base,
+			payload: {
+				mimeType: "text/html",
+				headers: base.payload?.headers,
+				body: {
+					data: Buffer.from(
+						"<p>Hello\u0000 <strong>Café 😊</strong></p>",
+					).toString("base64url"),
+				},
+			},
+		});
+
+		await setup.service.backfill(backfillInput(setup));
+		const saved = await storedProjection(rfc);
+
+		expect(saved?.body).toBe("Hello Café 😊");
+		expect(JSON.stringify(saved)).not.toContain("\\u0000");
+	});
+
 	it("imports an older free-mail contact message without moving the cursor", async () => {
 		const setup = await kit("backfill-import", { cursor: "live-cursor" });
 		const { contact } = await addContact(setup.marker, "customer@gmail.com");
@@ -778,6 +921,43 @@ describe("GmailSyncService backfill", () => {
 });
 
 describe("GmailSyncService history pagination", () => {
+	it("sanitizes live incremental Gmail messages before storing", async () => {
+		const setup = await kit("history-nul", { cursor: "history-1" });
+		const email = `buyer-${setup.marker}@gmail.com`;
+		await addContact(setup.marker, email);
+		const rfc = `history-nul-${setup.marker}@mail.test`;
+
+		setup.gmail.setHistoryPage(undefined, {
+			history: [
+				{ messagesAdded: [{ message: { id: "gmail-history-nul-1" } }] },
+			],
+			historyId: "history-2",
+		});
+		setup.gmail.messages.set(
+			"gmail-history-nul-1",
+			message({
+				id: "gmail-history-nul-1",
+				rfc: `<${rfc}>`,
+				from: email,
+				to: setup.mailbox,
+				subject: "Live\u0000 subject",
+				body: "Live\u0000 body",
+			}),
+		);
+
+		const outcome = await setup.service.sync(setup.row);
+		const saved = await storedProjection(rfc);
+		const row = await db.mailboxSync.findUnique({
+			where: { id: setup.row.id },
+			select: { cursor: true },
+		});
+
+		expect(outcome.status).toBe("synced");
+		expect(saved?.subject).toBe("Live subject");
+		expect(saved?.body).toBe("Live body");
+		expect(row?.cursor).toBe("history-2");
+	});
+
 	it("processes every Gmail history page before it advances the cursor", async () => {
 		const setup = await kit("history-pages", { cursor: "history-1" });
 		const domain = `history-pages-${setup.marker}.test`;

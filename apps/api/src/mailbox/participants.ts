@@ -249,6 +249,7 @@ export function splitName(name: string | null, email: string): PersonName {
 }
 
 function isEmailish(value: string): boolean {
+	if (value.includes("\u0000")) return false;
 	return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
 }
 

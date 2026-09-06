@@ -225,6 +225,41 @@ describe("GmailHistoricalImportService worker", () => {
 		expect(completed.completedChunks).toBe(1);
 	});
 
+	it("resumes the same failed chunk after a message-level persistence failure", async () => {
+		const setup = await kit("nul-resume");
+		const job = await createJob(setup);
+		setup.gmail.push({
+			status: "synced",
+			messagesMatched: 2,
+			messagesWouldFetch: 2,
+		});
+		await setup.service.tick(new Date("2025-01-01T00:00:00.000Z"));
+		const [chunk] = await chunks(job.id);
+
+		setup.gmail.push({
+			status: "failed",
+			reason:
+				"Gmail message persistence failed (postgres-invalid-text-encoding).",
+			failedMessageId: "gmail-nul",
+		});
+		await setup.service.tick(new Date("2025-01-01T00:01:00.000Z"));
+		const failed = await setup.service.byId(setup.userId, job.id);
+		const resumed = await setup.service.resume(setup.userId, job.id);
+		const [resumedChunk] = await chunks(job.id);
+
+		expect(failed.status).toBe(MailboxHistoricalImportJobStatus.FAILED);
+		expect(failed.currentChunk?.failedMessageId).toBe("gmail-nul");
+		expect(setup.gmail.calls[1]?.historicalImportJobId).toBe(job.id);
+		expect(setup.gmail.calls[1]?.historicalImportChunkId).toBe(chunk?.id);
+		expect(resumed.status).toBe(MailboxHistoricalImportJobStatus.READY);
+		expect(resumed.totalMessages).toBe(2);
+		expect(resumed.remainingMessages).toBe(2);
+		expect(resumedChunk?.status).toBe(
+			MailboxHistoricalImportChunkStatus.PENDING,
+		);
+		expect(resumedChunk?.failedMessageId).toBeNull();
+	});
+
 	it("keeps a rate-limited chunk due only after retryAfterAt", async () => {
 		const setup = await kit("rate-limit");
 		const job = await createJob(setup);

@@ -100,3 +100,45 @@ Final verification accepts already stored messages and persisted ignored Gmail i
 Verification requeues a chunk when Gmail still reports missing fetchable messages.
 
 The job completes only after all chunks verify.
+
+## PostgreSQL NUL Byte Failure
+
+PostgreSQL text fields reject `\u0000`.
+
+The failure happens when Gmail payload text reaches `ThreadWriterService.store` and is written to text or JSON fields.
+
+The protected persistence path is:
+
+Gmail API -> parser -> strict backfill or live sync -> `ThreadWriterService.store` -> email projections -> BusinessEvent outbox.
+
+The sanitation boundary removes only NUL bytes from persisted mailbox text and JSON string values.
+
+It preserves Unicode, emoji, accents, tabs, and newlines.
+
+It does not mutate provider identity fields.
+
+## Resume After Deploy
+
+Use the existing failed job.
+
+Do not create a new job.
+
+Do not purge Gmail data.
+
+Do not reset the imported counters.
+
+Resume clears failed chunk state and requeues the same chunk.
+
+Strict backfill skips Gmail ids that already exist.
+
+The same chunk continues without duplicate email messages, threads, activities, conversations, or BusinessEvents.
+
+## Post-Deploy Checks
+
+1. Confirm the historical import job id is unchanged.
+2. Confirm the failed chunk is requeued.
+3. Confirm `alreadyStoredMessages` is preserved.
+4. Confirm `writtenMessages` increases only for missing Gmail ids.
+5. Confirm logs show Gmail message id, Gmail thread id, job id, chunk id, and failure category on persistence errors.
+6. Confirm logs do not show private email bodies.
+7. Confirm final verification completes after all chunks process.

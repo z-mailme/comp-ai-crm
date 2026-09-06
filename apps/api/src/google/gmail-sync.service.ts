@@ -2,6 +2,7 @@ import {
 	type Db,
 	GoogleSyncStatus,
 	type MailboxSyncModel as MailboxSync,
+	Prisma as PrismaNamespace,
 } from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
@@ -41,6 +42,7 @@ export type GmailSyncOutcome = {
 	messagesWritten?: number;
 	threadsTouched?: number;
 	reason?: string;
+	failedMessageId?: string;
 };
 
 type GmailBackfillStatus = GmailSyncOutcome["status"] | "retryable-failed";
@@ -91,6 +93,12 @@ type StrictBackfillIngestOutcome = {
 	ignored: number;
 	ignoredIds: string[];
 	alreadyStored: number;
+	failure?: StrictBackfillFailure;
+};
+
+type IncrementalIngestOutcome = {
+	written: number;
+	remaining: number;
 	failure?: StrictBackfillFailure;
 };
 
@@ -221,6 +229,7 @@ export class GmailSyncService {
 			listed.ids,
 			alreadyStored,
 			input.max,
+			input,
 		);
 
 		this.logger.log({
@@ -343,12 +352,24 @@ export class GmailSyncService {
 			return this.handleFailure(row, history);
 		}
 
-		const { written, remaining } = await this.ingest(
+		const { written, remaining, failure } = await this.ingest(
 			row,
 			accessToken,
 			mailbox,
 			[...ids],
 		);
+
+		if (failure) {
+			await this.state.markFailed(row.id, failure.reason);
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "failed",
+				messagesWritten: written,
+				reason: failure.reason,
+				failedMessageId: failure.failedMessageId,
+			};
+		}
 
 		await this.state.settle(row.id, {
 			cursor: remaining > 0 ? startHistoryId : finalHistoryId,
@@ -380,7 +401,7 @@ export class GmailSyncService {
 		options: { maxMessages: number } = {
 			maxMessages: GMAIL_SYNC.incremental.maxMessagesPerTick,
 		},
-	): Promise<{ written: number; remaining: number }> {
+	): Promise<IncrementalIngestOutcome> {
 		if (ids.length === 0) return { written: 0, remaining: 0 };
 
 		const seen = await this.existingGmailIds(ids);
@@ -394,24 +415,41 @@ export class GmailSyncService {
 		const context: MatchContext = await this.threads.context();
 
 		let written = 0;
+		let processed = 0;
 
 		for (const id of batch) {
 			const message = await this.gmail.getMessage(accessToken, id);
-			if (message.outcome !== "ok") continue;
+			if (message.outcome !== "ok") {
+				processed += 1;
+				continue;
+			}
 
 			const parsed = this.parse(message.data);
-			if (!parsed) continue;
+			if (!parsed) {
+				processed += 1;
+				continue;
+			}
 
-			const stored = await this.threads.store(
-				row,
-				{ mailbox, origin: "gmail" },
-				parsed,
-				context,
-			);
+			let stored: boolean;
+			try {
+				stored = await this.threads.store(
+					row,
+					{ mailbox, origin: "gmail" },
+					parsed,
+					context,
+				);
+			} catch (error) {
+				return {
+					written,
+					remaining: pending.length - processed,
+					failure: this.persistenceFailureForMessage(error, row, message.data),
+				};
+			}
 			if (stored) written += 1;
+			processed += 1;
 		}
 
-		return { written, remaining };
+		return { written, remaining: pending.length - processed };
 	}
 
 	private async strictBackfillIngest(
@@ -421,6 +459,7 @@ export class GmailSyncService {
 		ids: readonly string[],
 		alreadyStored: ReadonlySet<string>,
 		maxMessages: number,
+		input: GmailBackfillInput,
 	): Promise<StrictBackfillIngestOutcome> {
 		if (ids.length === 0) {
 			return {
@@ -466,12 +505,30 @@ export class GmailSyncService {
 				continue;
 			}
 
-			const stored = await this.threads.store(
-				row,
-				{ mailbox, origin: "gmail" },
-				parsed,
-				context,
-			);
+			let stored: boolean;
+			try {
+				stored = await this.threads.store(
+					row,
+					{ mailbox, origin: "gmail" },
+					parsed,
+					context,
+				);
+			} catch (error) {
+				return {
+					written,
+					attempted,
+					ignored,
+					ignoredIds,
+					alreadyStored: storedElsewhere,
+					remaining: pending.length - written - ignored - storedElsewhere,
+					failure: this.persistenceFailureForMessage(
+						error,
+						row,
+						message.data,
+						input,
+					),
+				};
+			}
 			if (stored) {
 				written += 1;
 			} else {
@@ -726,6 +783,38 @@ export class GmailSyncService {
 
 		await this.state.markFailed(row.id, failure.reason);
 	}
+
+	private persistenceFailureForMessage(
+		error: unknown,
+		row: MailboxSync,
+		message: GmailMessage,
+		input?: GmailBackfillInput,
+	): StrictBackfillFailure {
+		const category = persistenceFailureCategory(error);
+
+		this.logger.error(
+			{
+				message: "Gmail message persistence failed",
+				userId: row.userId,
+				gmailMessageId: message.id ?? null,
+				gmailThreadId: message.threadId ?? null,
+				historicalImportJobId: input?.historicalImportJobId,
+				historicalImportChunkId: input?.historicalImportChunkId,
+				chunkAfter: input?.after.toISOString(),
+				chunkBefore: input?.before.toISOString(),
+				failureCategory: category,
+			},
+			stackOf(error),
+		);
+
+		return {
+			status: retryablePersistenceFailure(error)
+				? "retryable-failed"
+				: "failed",
+			reason: `Gmail message persistence failed (${category}).`,
+			failedMessageId: message.id ?? undefined,
+		};
+	}
 }
 
 function backfillFailureForMessage(
@@ -762,4 +851,36 @@ function backfillFailureForMessage(
 		reason: result.reason,
 		failedMessageId: id,
 	};
+}
+
+function persistenceFailureCategory(error: unknown): string {
+	if (error instanceof PrismaNamespace.PrismaClientKnownRequestError) {
+		return `prisma-${error.code.toLowerCase()}`;
+	}
+
+	const message = error instanceof Error ? error.message : String(error);
+	const lower = message.toLowerCase();
+	if (lower.includes("22021") || lower.includes("invalid byte sequence")) {
+		return "postgres-invalid-text-encoding";
+	}
+
+	if (lower.includes("nul") || lower.includes("\\u0000")) {
+		return "postgres-invalid-text-encoding";
+	}
+
+	const name = error instanceof Error && error.name ? error.name : "unknown";
+	return name.replace(/[^a-z0-9_.-]+/gi, "-").toLowerCase();
+}
+
+function retryablePersistenceFailure(error: unknown): boolean {
+	if (!(error instanceof PrismaNamespace.PrismaClientKnownRequestError)) {
+		return false;
+	}
+
+	return ["P1001", "P1002", "P1008", "P2024", "P2034"].includes(error.code);
+}
+
+function stackOf(error: unknown): string {
+	if (error instanceof Error) return error.stack ?? error.message;
+	return String(error);
 }
