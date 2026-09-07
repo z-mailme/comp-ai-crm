@@ -23,9 +23,12 @@ import {
 } from "@crm/ui/components/status-indicator";
 import { TableCell } from "@crm/ui/components/table";
 import { useQuery } from "@tanstack/react-query";
+import { useRouter } from "next/navigation";
 import { LocalRelativeTime } from "@/components/local-date-time";
 import { useTRPC } from "@/lib/trpc/client";
 import type { RouterOutputs } from "@/lib/trpc/types";
+import { useWorkspaceUrl } from "@/lib/use-workspace-url";
+import { ComposeEmail } from "./compose-email";
 
 type Conversation =
 	RouterOutputs["businessOs"]["inbox"]["conversations"][number];
@@ -96,11 +99,14 @@ export function UnifiedInbox() {
 			</StatGroup>
 
 			<Card className="min-w-0">
-				<CardHeader>
-					<CardTitle>Conversations</CardTitle>
-					<CardDescription>
-						Email threads now project into the unified conversation table.
-					</CardDescription>
+				<CardHeader className="flex flex-row items-start justify-between gap-4 space-y-0">
+					<div className="flex flex-col gap-1.5">
+						<CardTitle>Conversations</CardTitle>
+						<CardDescription>
+							Email threads now project into the unified conversation table.
+						</CardDescription>
+					</div>
+					<ComposeEmail />
 				</CardHeader>
 				{conversations.length === 0 ? (
 					<CardContent>
@@ -124,6 +130,8 @@ export function UnifiedInbox() {
 }
 
 function ConversationRow({ conversation }: { conversation: Conversation }) {
+	const router = useRouter();
+	const workspaceUrl = useWorkspaceUrl();
 	const customer =
 		conversation.contact?.name ??
 		conversation.company?.name ??
@@ -131,7 +139,10 @@ function ConversationRow({ conversation }: { conversation: Conversation }) {
 		null;
 
 	return (
-		<SimpleTableRow>
+		<SimpleTableRow
+			clickable
+			onClick={() => router.push(workspaceUrl(`/inbox/${conversation.id}`))}
+		>
 			<TableCell className={CELL}>
 				<div className="flex min-w-0 flex-col gap-1">
 					<span className="truncate font-medium">

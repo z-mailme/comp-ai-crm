@@ -270,3 +270,49 @@ export type RevokeAccessOutput = z.infer<typeof revokeAccessOutput>;
 export type SuppressDomainOutput = z.infer<typeof suppressDomainOutput>;
 export type EmailThreadOutput = z.infer<typeof emailThreadOutput>;
 export type CalendarEventOutput = z.infer<typeof calendarEventOutput>;
+
+const emailAddressList = z.array(z.string().email()).max(50);
+const emailBody = z.string().trim().min(1).max(100_000);
+const emailIdempotencyKey = z
+	.string()
+	.trim()
+	.min(8)
+	.max(120)
+	.regex(/^[a-zA-Z0-9-]+$/);
+
+export const sendEmailInput = z.discriminatedUnion("mode", [
+	z.object({
+		mode: z.literal("reply"),
+		conversationId: z.string().trim().min(1),
+		replyAll: z.boolean().default(false),
+		cc: emailAddressList.default([]),
+		bcc: emailAddressList.default([]),
+		body: emailBody,
+		idempotencyKey: emailIdempotencyKey,
+	}),
+	z.object({
+		mode: z.literal("compose"),
+		to: emailAddressList.min(1),
+		cc: emailAddressList.default([]),
+		bcc: emailAddressList.default([]),
+		subject: z.string().trim().min(1).max(500),
+		body: emailBody,
+		idempotencyKey: emailIdempotencyKey,
+	}),
+]);
+
+export const sendEmailOutput = z.object({
+	status: z.enum([
+		"sent",
+		"scope-required",
+		"not-connected",
+		"reconnect-required",
+		"failed",
+	]),
+	reason: z.string().nullable(),
+	gmailMessageId: z.string().nullable(),
+	duplicate: z.boolean(),
+});
+
+export type SendEmailInput = z.infer<typeof sendEmailInput>;
+export type SendEmailOutput = z.infer<typeof sendEmailOutput>;

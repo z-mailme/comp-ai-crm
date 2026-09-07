@@ -13,6 +13,7 @@ import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
 import { ConversationService } from "./conversation.service";
 import { GmailHistoricalImportService } from "./gmail-historical-import.service";
+import { GmailSendService } from "./gmail-send.service";
 import {
 	calendarEventInput,
 	calendarEventOutput,
@@ -25,6 +26,8 @@ import {
 	reindexCalendarInput,
 	reindexCalendarOutput,
 	revokeAccessOutput,
+	sendEmailInput,
+	sendEmailOutput,
 	setAutoCreateInput,
 	suppressDomainInput,
 	suppressDomainOutput,
@@ -44,6 +47,8 @@ export class GoogleRouter {
 		private readonly historicalImportsService: GmailHistoricalImportService,
 		@Inject(ConversationService)
 		private readonly conversations: ConversationService,
+		@Inject(GmailSendService)
+		private readonly gmailSend: GmailSendService,
 	) {}
 
 	@Query({
@@ -159,6 +164,18 @@ export class GoogleRouter {
 		@Input("id") id: string,
 	) {
 		return this.historicalImportsService.cancel(ctx.user.id, id);
+	}
+
+	@Mutation({
+		input: sendEmailInput,
+		output: sendEmailOutput,
+		meta: restMeta("POST", "/google/gmail/send", ["Google"]),
+	})
+	async sendEmail(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof sendEmailInput>,
+	) {
+		return this.gmailSend.send(ctx.user.id, input);
 	}
 
 	@Mutation({
