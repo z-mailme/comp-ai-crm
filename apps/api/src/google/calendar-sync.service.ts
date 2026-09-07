@@ -39,6 +39,11 @@ export type SyncOutcome = {
 	reason?: string;
 };
 
+type BackfillWindow = {
+	start: Date;
+	end: Date;
+};
+
 @Injectable()
 export class CalendarSyncService {
 	private readonly logger = new Logger(CalendarSyncService.name);
@@ -467,7 +472,7 @@ export class CalendarSyncService {
 		return people;
 	}
 
-	private backfillWindow(row: MailboxSync): { start: Date; end: Date } {
+	private backfillWindow(row: MailboxSync): BackfillWindow {
 		if (row.backfillWindowStart && row.backfillWindowEnd) {
 			return {
 				start: row.backfillWindowStart,

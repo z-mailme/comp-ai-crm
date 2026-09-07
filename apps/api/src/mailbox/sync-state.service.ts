@@ -63,6 +63,16 @@ export class SyncStateService {
 		source: SyncSource,
 		options: { autoCreate: boolean; businessUnitId?: string | null },
 	): Promise<MailboxSync> {
+		const update: Prisma.MailboxSyncUncheckedUpdateInput = {
+			status: GoogleSyncStatus.IDLE,
+			lastError: null,
+			retryAfter: null,
+		};
+
+		if (options.businessUnitId !== undefined) {
+			update.businessUnitId = options.businessUnitId;
+		}
+
 		return this.db.mailboxSync.upsert({
 			where: { userId_source: { userId, source } },
 			create: {
@@ -72,14 +82,7 @@ export class SyncStateService {
 				autoCreate: options.autoCreate,
 				businessUnitId: options.businessUnitId ?? null,
 			},
-			update: {
-				status: GoogleSyncStatus.IDLE,
-				lastError: null,
-				retryAfter: null,
-				...(options.businessUnitId === undefined
-					? {}
-					: { businessUnitId: options.businessUnitId }),
-			},
+			update,
 		});
 	}
 

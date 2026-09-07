@@ -60,33 +60,35 @@ type NavGroup = {
 	items: NavItem[];
 };
 
-const ICONS: Record<string, CarbonIcon> = {
-	activity: Activity,
-	analytics: Analytics,
-	api: Api,
-	application: Application,
-	bot: Bot,
-	building: Building,
-	calendar: Calendar,
-	chart: ChartLine,
-	command: AiObservability,
-	dashboard: Dashboard,
-	deal: Partnership,
-	document: Document,
-	email: Email,
-	finance: Finance,
-	flow: Flow,
-	marketing: Bullhorn,
-	money: Money,
-	notebook: Notebook,
-	people: UserMultiple,
-	purchase: Purchase,
-	report: Report,
-	security: Security,
-	settings: Settings,
-	task: Task,
-	tools: Tools,
-};
+const ICONS = new Map<string, CarbonIcon>(
+	Object.entries({
+		activity: Activity,
+		analytics: Analytics,
+		api: Api,
+		application: Application,
+		bot: Bot,
+		building: Building,
+		calendar: Calendar,
+		chart: ChartLine,
+		command: AiObservability,
+		dashboard: Dashboard,
+		deal: Partnership,
+		document: Document,
+		email: Email,
+		finance: Finance,
+		flow: Flow,
+		marketing: Bullhorn,
+		money: Money,
+		notebook: Notebook,
+		people: UserMultiple,
+		purchase: Purchase,
+		report: Report,
+		security: Security,
+		settings: Settings,
+		task: Task,
+		tools: Tools,
+	} satisfies Record<string, CarbonIcon>),
+);
 
 function isActive(item: NavItem, pathname: string): boolean {
 	return (
@@ -118,7 +120,7 @@ function NavLink({
 	onPrefetch: () => void;
 	compact?: boolean;
 }) {
-	const icon = ICONS[item.icon] ?? Application;
+	const icon = ICONS.get(item.icon) ?? Application;
 	const label = statusLabel(item.status);
 
 	return (
@@ -235,7 +237,7 @@ export function AppIconRailFallback() {
 						{group.title}
 					</div>
 					{group.items.slice(0, 3).map((item) => {
-						const icon = ICONS[item.icon] ?? Application;
+						const icon = ICONS.get(item.icon) ?? Application;
 						return (
 							<Button
 								key={item.href}
