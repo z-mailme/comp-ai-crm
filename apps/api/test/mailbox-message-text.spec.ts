@@ -47,6 +47,20 @@ describe("decodeBase64Url", () => {
 	it("survives junk without throwing", () => {
 		expect(() => decodeBase64Url("!!!!")).not.toThrow();
 	});
+
+	it("replaces a truncated UTF-8 sequence instead of emitting malformed text", () => {
+		const truncated = Buffer.from([0x68, 0x69, 0x20, 0xe2, 0x80])
+			.toString("base64")
+			.replace(/\+/g, "-")
+			.replace(/\//g, "_")
+			.replace(/=+$/, "");
+
+		const decoded = decodeBase64Url(truncated);
+
+		expect(decoded.startsWith("hi ")).toBe(true);
+		expect(decoded).toContain("");
+		expect(() => encodeURIComponent(decoded)).not.toThrow();
+	});
 });
 
 describe("plainTextBody", () => {
@@ -374,5 +388,17 @@ describe("snippetOf", () => {
 
 	it("is null for an empty body", () => {
 		expect(snippetOf("   ")).toBeNull();
+	});
+
+	it("never cuts a surrogate pair in half when truncating", () => {
+		const emoji = String.fromCharCode(0xd83d, 0xde00);
+		const body = `${"x".repeat(198)}${emoji} tail`;
+		const snippet = snippetOf(body);
+
+		expect(snippet).not.toBeNull();
+		expect(() => encodeURIComponent(snippet ?? "")).not.toThrow();
+		expect(snippet?.endsWith(`x${"…"}`) || snippet?.endsWith(`${emoji}…`)).toBe(
+			true,
+		);
 	});
 });
