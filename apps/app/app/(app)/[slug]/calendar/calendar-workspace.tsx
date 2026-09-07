@@ -3,67 +3,78 @@
 import ArrowLeft from "@carbon/icons-react/es/ArrowLeft";
 import ArrowRight from "@carbon/icons-react/es/ArrowRight";
 import Search from "@carbon/icons-react/es/Search";
-import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
-import {
-	Card,
-	CardContent,
-	CardDescription,
-	CardHeader,
-	CardTitle,
-} from "@crm/ui/components/card";
-import { StatGroup } from "@crm/ui/components/dashboard";
-import {
-	Dialog,
-	DialogContent,
-	DialogDescription,
-	DialogHeader,
-	DialogTitle,
-	DialogTrigger,
-} from "@crm/ui/components/dialog";
-import { EmptyCellValue } from "@crm/ui/components/empty-cell";
 import { Icon } from "@crm/ui/components/icon";
 import { Input } from "@crm/ui/components/input";
 import { Spinner } from "@crm/ui/components/spinner";
-import { StatCard } from "@crm/ui/components/stat-card";
-import {
-	StatusIndicator,
-	type StatusTone,
-} from "@crm/ui/components/status-indicator";
 import { cn } from "@crm/ui/lib/utils";
 import { useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { LocalDateTimeRange } from "@/components/local-date-time";
+import { useMemo, useState } from "react";
 import { useTRPC } from "@/lib/trpc/client";
 import type { RouterOutputs } from "@/lib/trpc/types";
 import { useWorkspaceUrl } from "@/lib/use-workspace-url";
+import { CalendarSchedule } from "./calendar-agenda-view";
+import { CalendarEventDialog } from "./calendar-event-dialog";
+import {
+	addDaysToKey,
+	dayFromKey,
+	localDayKey,
+	monthHeading,
+	weekDayKeys,
+	weekHeading,
+} from "./calendar-grid-model";
+import { CalendarMonthGrid } from "./calendar-month-view";
 import {
 	type CalendarQueryInput,
 	type CalendarView,
 	parseCalendarParams,
 } from "./calendar-search-params";
+import { CalendarSidebar } from "./calendar-sidebar";
+import { CalendarTimeGrid, useTodayKey } from "./calendar-week-view";
+import { useHiddenCalendars } from "./use-hidden-calendars";
 
-type CalendarOutput = RouterOutputs["businessOs"]["calendar"];
-type CalendarEvent = CalendarOutput["events"][number];
+export type CalendarOutput = RouterOutputs["businessOs"]["calendar"];
+export type CalendarEvent = CalendarOutput["events"][number];
+export type CalendarListEntry = CalendarOutput["calendars"][number];
 
 const VIEW_LABELS: Record<CalendarView, string> = {
-	month: "Month",
 	week: "Week",
 	day: "Day",
+	month: "Month",
 	agenda: "Agenda",
 };
+
+const AGENDA_DAY_COUNT = 30;
+
+const CHIP_TONES = [
+	"border-primary/40 bg-primary/10 text-primary",
+	"border-border bg-accent text-accent-foreground",
+	"border-border bg-muted text-foreground",
+] as const;
+
+const DOT_TONES = ["bg-primary", "bg-muted-foreground", "bg-border"] as const;
 
 export function CalendarWorkspace() {
 	const trpc = useTRPC();
 	const searchParams = useSearchParams();
 	const workspaceUrl = useWorkspaceUrl();
 	const input = parseCalendarParams(searchParams);
-	const calendar = useQuery(trpc.businessOs.calendar.queryOptions(input));
+	const timezone = useMemo(
+		() => Intl.DateTimeFormat().resolvedOptions().timeZone,
+		[],
+	);
+	const calendar = useQuery(
+		trpc.businessOs.calendar.queryOptions({ ...input, timezone }),
+	);
+	const [selectedEvent, setSelectedEvent] = useState<CalendarEvent | null>(
+		null,
+	);
+	const [hiddenCalendars, toggleCalendar] = useHiddenCalendars();
+	const todayKey = useTodayKey();
 
-	const data = calendar.data;
-
-	if (!data || calendar.isPending) {
+	if (calendar.isPending || !calendar.data) {
 		return (
 			<div className="flex justify-center py-12">
 				<Spinner />
@@ -71,21 +82,59 @@ export function CalendarWorkspace() {
 		);
 	}
 
-	const attendeeCount = data.events.reduce(
-		(total, event) => total + event.attendees.length,
-		0,
+	if (calendar.isError) {
+		return (
+			<div className="rounded-lg border bg-card p-6 text-sm">
+				<p className="font-medium">Calendar failed to load.</p>
+				<p className="mt-1 text-muted-foreground">
+					Check your connection and try again.
+				</p>
+			</div>
+		);
+	}
+
+	const data = calendar.data;
+	const calendars = data.calendars;
+	const toneIndex = (name: string): number => {
+		const index = calendars.findIndex((entry) => entry.name === name);
+		return index < 0 ? 0 : index % CHIP_TONES.length;
+	};
+	const toneClass = (name: string): string =>
+		CHIP_TONES[toneIndex(name)] ?? "border-border bg-muted text-foreground";
+	const dotClass = (name: string): string =>
+		DOT_TONES[toneIndex(name)] ?? "bg-border";
+
+	const events = data.events.filter(
+		(event) => !hiddenCalendars.has(event.sourceCalendar),
 	);
-	const linkedEvents = data.events.filter(
-		(event) => event.contact || event.company || event.booking || event.deal,
-	).length;
+
+	const hrefFor = (next: CalendarQueryInput) =>
+		workspaceUrl(calendarHref(next));
+	const hrefForDay = (day: string) =>
+		hrefFor({ ...input, view: "day", date: day });
+	const hrefForMonth = (day: string) =>
+		hrefFor({ ...input, view: "month", date: day });
+
+	const weekDays = weekDayKeys(input.date);
+	const monthDaysCount = daysInMonth(input.date);
 
 	return (
-		<div className="flex flex-col gap-6">
-			<div className="flex flex-col gap-3 rounded-lg border bg-card p-3 md:flex-row md:items-center md:justify-between">
+		<div className="flex flex-col gap-4">
+			<div className="flex flex-col gap-3 rounded-lg border bg-card p-3 lg:flex-row lg:items-center lg:justify-between">
 				<div className="flex flex-wrap items-center gap-2">
 					<Button asChild variant="outline" size="icon" aria-label="Previous">
-						<Link href={workspaceUrl(calendarHref(stepDate(input, -1)))}>
+						<Link href={hrefFor(stepDate(input, -1))}>
 							<Icon icon={ArrowLeft} />
+						</Link>
+					</Button>
+					<Button asChild variant="outline">
+						<Link href={hrefFor({ ...input, date: todayKey || input.date })}>
+							Today
+						</Link>
+					</Button>
+					<Button asChild variant="outline" size="icon" aria-label="Next">
+						<Link href={hrefFor(stepDate(input, 1))}>
+							<Icon icon={ArrowRight} />
 						</Link>
 					</Button>
 					<input
@@ -95,19 +144,13 @@ export function CalendarWorkspace() {
 						form="calendar-filter"
 						className="h-9 rounded-md border bg-background px-3 text-sm"
 					/>
-					<Button asChild variant="outline" size="icon" aria-label="Next">
-						<Link href={workspaceUrl(calendarHref(stepDate(input, 1)))}>
-							<Icon icon={ArrowRight} />
-						</Link>
-					</Button>
+					<h2 className="px-1 font-medium text-sm">{heading(input)}</h2>
 					<fieldset className="flex overflow-hidden rounded-md border">
 						<legend className="sr-only">Calendar view</legend>
 						{Object.entries(VIEW_LABELS).map(([view, label]) => (
 							<Link
 								key={view}
-								href={workspaceUrl(
-									calendarHref({ ...input, view: view as CalendarView }),
-								)}
+								href={hrefFor({ ...input, view: view as CalendarView })}
 								className={cn(
 									"px-3 py-2 text-sm hover:bg-muted",
 									input.view === view && "bg-muted font-medium text-foreground",
@@ -125,7 +168,7 @@ export function CalendarWorkspace() {
 					className="flex min-w-0 gap-2"
 				>
 					<input type="hidden" name="view" value={input.view} />
-					<div className="relative min-w-0 flex-1 md:w-72">
+					<div className="relative min-w-0 flex-1 lg:w-64">
 						<Icon
 							icon={Search}
 							className="pointer-events-none absolute top-2.5 left-2.5 text-muted-foreground"
@@ -141,311 +184,140 @@ export function CalendarWorkspace() {
 				</form>
 			</div>
 
-			<StatGroup>
-				<StatCard
-					label="Events"
-					value={data.events.length}
-					description={rangeLabel(data.range)}
-				/>
-				<StatCard
-					label="Linked"
-					value={linkedEvents}
-					description="Events with CRM context"
-				/>
-				<StatCard
-					label="Attendees"
-					value={attendeeCount}
-					description="Stored attendee rows"
-				/>
-				<StatCard
-					label="Google"
-					value={data.connection.connected ? "On" : "Off"}
-					description={data.connection.status ?? "No sync row"}
-				/>
-			</StatGroup>
+			{!data.connection.connected ? (
+				<div className="rounded-lg border bg-card p-3 text-sm">
+					<span className="font-medium">Google Calendar is not connected.</span>{" "}
+					<Link
+						href={workspaceUrl("/settings/connections")}
+						className="text-primary underline-offset-4 hover:underline"
+					>
+						Connect it in Settings → Connections
+					</Link>{" "}
+					to sync your events.
+				</div>
+			) : null}
 
-			<Card className="min-w-0">
-				<CardHeader>
-					<CardTitle>Meetings</CardTitle>
-					<CardDescription>
-						{data.connection.lastSyncedAt
-							? `Last synced ${new Date(data.connection.lastSyncedAt).toLocaleString()}`
-							: "Calendar sync has no completed run yet."}
-					</CardDescription>
-				</CardHeader>
-				<CardContent className="flex flex-col gap-3">
-					{data.events.length === 0 ? (
-						<p className="text-muted-foreground text-sm">
-							No calendar events match this view.
-						</p>
-					) : (
-						data.events.map((event) => (
-							<CalendarEventRow key={event.id} event={event} />
-						))
-					)}
-				</CardContent>
-			</Card>
+			<div className="flex min-w-0 gap-4">
+				<div className="hidden md:block">
+					<CalendarSidebar
+						month={input.date}
+						selectedDay={input.date}
+						todayKey={todayKey}
+						calendars={calendars}
+						hiddenCalendars={hiddenCalendars}
+						onToggleCalendar={toggleCalendar}
+						dotClass={dotClass}
+						hrefForDay={hrefForDay}
+						hrefForMonth={hrefForMonth}
+						connection={data.connection}
+						settingsHref={workspaceUrl("/settings/connections")}
+					/>
+				</div>
+
+				<div className="min-w-0 flex-1">
+					{input.view === "month" ? (
+						<>
+							<div className="hidden md:block">
+								<CalendarMonthGrid
+									month={input.date}
+									events={events}
+									todayKey={todayKey}
+									toneClass={toneClass}
+									onSelectEvent={setSelectedEvent}
+									hrefForDay={hrefForDay}
+								/>
+							</div>
+							<div className="md:hidden">
+								<CalendarSchedule
+									fromDay={monthStartKey(input.date)}
+									dayCount={monthDaysCount}
+									events={events}
+									todayKey={todayKey}
+									toneClass={toneClass}
+									onSelectEvent={setSelectedEvent}
+								/>
+							</div>
+						</>
+					) : null}
+
+					{input.view === "week" ? (
+						<>
+							<div className="hidden md:block">
+								<CalendarTimeGrid
+									days={weekDays}
+									events={events}
+									todayKey={todayKey}
+									toneClass={toneClass}
+									onSelectEvent={setSelectedEvent}
+									hrefForDay={hrefForDay}
+								/>
+							</div>
+							<div className="md:hidden">
+								<CalendarSchedule
+									fromDay={weekDays[0] ?? input.date}
+									dayCount={7}
+									events={events}
+									todayKey={todayKey}
+									toneClass={toneClass}
+									onSelectEvent={setSelectedEvent}
+								/>
+							</div>
+						</>
+					) : null}
+
+					{input.view === "day" ? (
+						<CalendarTimeGrid
+							days={[input.date]}
+							events={events}
+							todayKey={todayKey}
+							toneClass={toneClass}
+							onSelectEvent={setSelectedEvent}
+							hrefForDay={hrefForDay}
+						/>
+					) : null}
+
+					{input.view === "agenda" ? (
+						<CalendarSchedule
+							fromDay={input.date}
+							dayCount={AGENDA_DAY_COUNT}
+							events={events}
+							todayKey={todayKey}
+							toneClass={toneClass}
+							onSelectEvent={setSelectedEvent}
+						/>
+					) : null}
+				</div>
+			</div>
+
+			<CalendarEventDialog
+				event={selectedEvent}
+				onClose={() => setSelectedEvent(null)}
+			/>
 		</div>
 	);
 }
 
-function CalendarEventRow({ event }: { event: CalendarEvent }) {
-	const workspaceUrl = useWorkspaceUrl();
-
-	return (
-		<article className="grid gap-3 rounded-lg border p-4 md:grid-cols-[minmax(0,1fr)_auto]">
-			<div className="min-w-0">
-				<div className="flex flex-wrap items-center gap-2">
-					<h2 className="truncate font-medium">
-						{event.title ?? "Untitled event"}
-					</h2>
-					<Badge variant="outline">{event.status}</Badge>
-					{event.isAllDay ? <Badge variant="secondary">All day</Badge> : null}
-				</div>
-				<p className="mt-1 text-muted-foreground text-sm">
-					<LocalDateTimeRange
-						start={event.startsAt}
-						end={event.endsAt}
-						options={{
-							month: "short",
-							day: "numeric",
-							hour: "numeric",
-							minute: "2-digit",
-						}}
-					/>
-				</p>
-				<div className="mt-3 flex flex-wrap gap-2 text-xs">
-					<EntityBadge
-						label="Contact"
-						value={event.contact?.name}
-						href={
-							event.contact
-								? workspaceUrl(`/contacts/${event.contact.id}`)
-								: undefined
-						}
-					/>
-					<EntityBadge
-						label="Company"
-						value={event.company?.name}
-						href={
-							event.company
-								? workspaceUrl(`/companies/${event.company.id}`)
-								: undefined
-						}
-					/>
-					<EntityBadge label="Booking" value={event.booking?.name} />
-					<EntityBadge
-						label="Deal"
-						value={event.deal?.name}
-						href={
-							event.deal ? workspaceUrl(`/deals/${event.deal.id}`) : undefined
-						}
-					/>
-					<EntityBadge label="Conversation" value={event.conversation?.name} />
-				</div>
-				{event.contact ||
-				event.company ||
-				event.booking ||
-				event.deal ? null : (
-					<p className="mt-3 text-muted-foreground text-xs">
-						Not linked to CRM.
-					</p>
-				)}
-				{event.location || event.conferenceUrl ? (
-					<p className="mt-3 truncate text-muted-foreground text-sm">
-						{event.location ?? event.conferenceUrl}
-					</p>
-				) : null}
-			</div>
-			<div className="flex flex-col gap-2 md:w-64">
-				<StatusIndicator
-					tone={eventTone(event)}
-					label={`${event.attendees.length} attendee${
-						event.attendees.length === 1 ? "" : "s"
-					}`}
-				/>
-				<div className="flex flex-col gap-1 text-xs">
-					{event.attendees.slice(0, 4).map((attendee) => (
-						<div
-							key={attendee.id}
-							className="flex min-w-0 items-center justify-between gap-2"
-						>
-							<span className="truncate">
-								{attendee.name ?? attendee.email}
-							</span>
-							<span className="shrink-0 text-muted-foreground">
-								{attendee.responseStatus ?? <EmptyCellValue />}
-							</span>
-						</div>
-					))}
-				</div>
-				<Dialog>
-					<DialogTrigger asChild>
-						<Button variant="outline" size="sm">
-							Details
-						</Button>
-					</DialogTrigger>
-					<DialogContent className="sm:max-w-lg">
-						<DialogHeader>
-							<DialogTitle>{event.title ?? "Untitled event"}</DialogTitle>
-							<DialogDescription>
-								{event.sourceCalendar} - {event.status}
-							</DialogDescription>
-						</DialogHeader>
-						<div className="grid gap-4 text-sm">
-							<div className="grid gap-1">
-								<span className="font-medium">Time</span>
-								<span className="text-muted-foreground">
-									<LocalDateTimeRange
-										start={event.startsAt}
-										end={event.endsAt}
-										options={{
-											month: "short",
-											day: "numeric",
-											year: "numeric",
-											hour: "numeric",
-											minute: "2-digit",
-										}}
-									/>
-								</span>
-							</div>
-							<div className="grid gap-1">
-								<span className="font-medium">Calendar</span>
-								<span className="text-muted-foreground">
-									{event.organizerEmail ?? "No organizer"}
-								</span>
-							</div>
-							{event.location ? (
-								<div className="grid gap-1">
-									<span className="font-medium">Location</span>
-									<span className="text-muted-foreground">
-										{event.location}
-									</span>
-								</div>
-							) : null}
-							{event.conferenceUrl ? (
-								<div className="grid gap-1">
-									<span className="font-medium">Conference</span>
-									<a
-										href={event.conferenceUrl}
-										target="_blank"
-										rel="noreferrer"
-										className="truncate text-primary underline-offset-4 hover:underline"
-									>
-										{event.conferenceUrl}
-									</a>
-								</div>
-							) : null}
-							<div className="grid gap-2">
-								<span className="font-medium">CRM links</span>
-								{event.contact ||
-								event.company ||
-								event.booking ||
-								event.deal ||
-								event.conversation ? (
-									<div className="flex flex-wrap gap-2 text-xs">
-										<EntityBadge
-											label="Contact"
-											value={event.contact?.name}
-											href={
-												event.contact
-													? workspaceUrl(`/contacts/${event.contact.id}`)
-													: undefined
-											}
-										/>
-										<EntityBadge
-											label="Company"
-											value={event.company?.name}
-											href={
-												event.company
-													? workspaceUrl(`/companies/${event.company.id}`)
-													: undefined
-											}
-										/>
-										<EntityBadge label="Booking" value={event.booking?.name} />
-										<EntityBadge
-											label="Deal"
-											value={event.deal?.name}
-											href={
-												event.deal
-													? workspaceUrl(`/deals/${event.deal.id}`)
-													: undefined
-											}
-										/>
-										<EntityBadge
-											label="Conversation"
-											value={event.conversation?.name}
-										/>
-									</div>
-								) : (
-									<span className="text-muted-foreground">
-										Not linked to CRM.
-									</span>
-								)}
-							</div>
-							<div className="grid gap-2">
-								<span className="font-medium">Attendees</span>
-								{event.attendees.length === 0 ? (
-									<span className="text-muted-foreground">No attendees</span>
-								) : (
-									<div className="grid gap-2">
-										{event.attendees.map((attendee) => (
-											<div
-												key={attendee.id}
-												className="flex min-w-0 items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs"
-											>
-												<span className="truncate">
-													{attendee.name ?? attendee.email}
-												</span>
-												<span className="shrink-0 text-muted-foreground">
-													{attendee.responseStatus ?? "Unknown"}
-												</span>
-											</div>
-										))}
-									</div>
-								)}
-							</div>
-						</div>
-					</DialogContent>
-				</Dialog>
-			</div>
-		</article>
-	);
+function heading(input: CalendarQueryInput): string {
+	if (input.view === "month") return monthHeading(input.date);
+	if (input.view === "week") return weekHeading(weekDayKeys(input.date));
+	if (input.view === "agenda")
+		return `${AGENDA_DAY_COUNT} days from ${input.date}`;
+	return new Intl.DateTimeFormat(undefined, {
+		weekday: "long",
+		month: "long",
+		day: "numeric",
+		year: "numeric",
+	}).format(dayFromKey(input.date));
 }
 
-function EntityBadge({
-	label,
-	value,
-	href,
-}: {
-	label: string;
-	value: string | null | undefined;
-	href?: string;
-}) {
-	if (!value) return null;
-
-	const content = `${label}: ${value}`;
-	const className = "rounded-md bg-muted px-2 py-1 text-muted-foreground";
-
-	return href ? (
-		<Link href={href} className={cn(className, "hover:text-foreground")}>
-			{content}
-		</Link>
-	) : (
-		<span className={className}>{content}</span>
-	);
+function monthStartKey(dayKey: string): string {
+	const date = dayFromKey(dayKey);
+	return localDayKey(new Date(date.getFullYear(), date.getMonth(), 1));
 }
 
-function eventTone(event: CalendarEvent): StatusTone {
-	if (event.booking || event.deal) return "success";
-	if (event.contact || event.company) return "info";
-	return "neutral";
-}
-
-function rangeLabel(range: CalendarOutput["range"]): string {
-	const start = new Date(range.start);
-	const end = new Date(range.end);
-	return `${start.toLocaleDateString()} to ${end.toLocaleDateString()}`;
+function daysInMonth(dayKey: string): number {
+	const date = dayFromKey(dayKey);
+	return new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate();
 }
 
 function calendarHref(input: CalendarQueryInput): string {
@@ -461,15 +333,24 @@ function stepDate(
 	input: CalendarQueryInput,
 	direction: -1 | 1,
 ): CalendarQueryInput {
-	const date = new Date(`${input.date}T00:00:00.000Z`);
-	const amount =
+	const days =
 		input.view === "month"
-			? 31
+			? null
 			: input.view === "agenda"
-				? 30
+				? AGENDA_DAY_COUNT
 				: input.view === "week"
 					? 7
 					: 1;
-	date.setUTCDate(date.getUTCDate() + amount * direction);
-	return { ...input, date: date.toISOString().slice(0, 10) };
+
+	if (days !== null) {
+		return { ...input, date: addDaysToKey(input.date, days * direction) };
+	}
+
+	const date = dayFromKey(input.date);
+	return {
+		...input,
+		date: localDayKey(
+			new Date(date.getFullYear(), date.getMonth() + direction, 1),
+		),
+	};
 }

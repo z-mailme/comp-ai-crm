@@ -31,10 +31,9 @@ import type {
 	KnowledgeOutput,
 	ObservabilityOutput,
 } from "./business-os.contracts";
+import { calendarRange } from "./calendar-range";
 
-const DAY_MS = 24 * 60 * 60 * 1000;
 const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
-const AGENDA_DAYS = 30;
 
 const CONVERSATION_SELECT = {
 	id: true,
@@ -1350,39 +1349,6 @@ function bookingScope(context: BusinessContext): Prisma.BookingWhereInput {
 			{ businessTasks: { some: directBusinessUnitScope(context) } },
 		],
 	};
-}
-
-function calendarRange(input: CalendarInput): {
-	start: Date;
-	end: Date;
-} {
-	const selected = input.date
-		? new Date(`${input.date}T00:00:00.000Z`)
-		: new Date();
-	const date = Number.isNaN(selected.getTime()) ? new Date() : selected;
-	const start = new Date(
-		Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate()),
-	);
-
-	if (input.view === "day") return { start, end: addDays(start, 1) };
-	if (input.view === "agenda")
-		return { start, end: addDays(start, AGENDA_DAYS) };
-
-	if (input.view === "month") {
-		return {
-			start: new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)),
-			end: new Date(
-				Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1),
-			),
-		};
-	}
-
-	const day = start.getUTCDay();
-	return { start: addDays(start, -day), end: addDays(start, 7 - day) };
-}
-
-function addDays(date: Date, days: number): Date {
-	return new Date(date.getTime() + days * DAY_MS);
 }
 
 function dealScope(context: BusinessContext): Prisma.DealWhereInput {

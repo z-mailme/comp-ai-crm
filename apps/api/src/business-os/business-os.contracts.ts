@@ -54,6 +54,7 @@ export const calendarInput = z.object({
 	date: z.string().trim().min(1).optional(),
 	search: z.string().default(""),
 	calendarId: z.string().trim().min(1).optional(),
+	timezone: z.string().trim().min(1).max(120).optional(),
 });
 
 const linkedRecordOutput = z.object({
