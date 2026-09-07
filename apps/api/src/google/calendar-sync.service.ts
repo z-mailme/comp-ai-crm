@@ -7,6 +7,7 @@ import {
 } from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
 import { AgentTriggerService } from "../agent/agent-trigger.service";
+import { resolveDefaultBusinessUnitId } from "../business-os/business-context";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import {
@@ -25,7 +26,9 @@ import {
 
 const MAX_PAGES_PER_TICK = 5;
 
-const HORIZON_DAYS = 180;
+const DAY_MS = 24 * 60 * 60 * 1000;
+const INITIAL_BACKFILL_PAST_DAYS = 365;
+const INITIAL_BACKFILL_FUTURE_DAYS = 365;
 
 export type SyncOutcome = {
 	source: "calendar";
@@ -87,28 +90,46 @@ export class CalendarSyncService {
 			suppressedEmails,
 		};
 
-		let pageToken: string | undefined;
-		let syncToken = row.cursor ?? undefined;
+		const businessUnitId = await this.businessUnitFor(row);
+		const isInitialBackfill = !row.initialBackfilledAt;
+		const backfillWindow = this.backfillWindow(row);
+		let pageToken = isInitialBackfill
+			? (row.backfillPageToken ?? undefined)
+			: undefined;
+		let syncToken = isInitialBackfill ? undefined : (row.cursor ?? undefined);
 		let written = 0;
 		let removed = 0;
+
+		if (isInitialBackfill && !row.backfillStartedAt) {
+			await this.state.markBackfillStarted(row.id, {
+				startedAt: new Date(),
+				windowStart: backfillWindow.start,
+				windowEnd: backfillWindow.end,
+			});
+		}
 
 		for (let page = 0; page < MAX_PAGES_PER_TICK; page += 1) {
 			const result = await this.calendar.listEvents(token.accessToken, {
 				syncToken,
 				pageToken,
-				timeMin: new Date().toISOString(),
-				timeMax: this.horizon().toISOString(),
+				timeMin: isInitialBackfill
+					? backfillWindow.start.toISOString()
+					: undefined,
+				timeMax: isInitialBackfill
+					? backfillWindow.end.toISOString()
+					: undefined,
 			});
 
 			if (result.outcome === "cursor-invalid") {
-				await this.state.clearCursor(row.id, result.reason);
+				await this.state.resetCalendarBackfill(row.id, result.reason);
 				return {
 					source: "calendar",
 					userId: row.userId,
 					status: "synced",
 					eventsWritten: written,
 					eventsRemoved: removed,
-					reason: "Cursor reset; the next tick re-runs the window.",
+					reason:
+						"Cursor reset; the next tick re-runs initial Calendar backfill.",
 				};
 			}
 
@@ -143,18 +164,27 @@ export class CalendarSyncService {
 			}
 
 			for (const event of result.data.items ?? []) {
-				const applied = await this.apply(event, row, context);
+				const applied = await this.apply(event, row, context, businessUnitId);
 				if (applied === "written") written += 1;
 				if (applied === "removed") removed += 1;
 			}
 
 			pageToken = result.data.nextPageToken;
 
+			if (isInitialBackfill && pageToken) {
+				await this.state.checkpointBackfill(row.id, pageToken);
+			}
+
 			if (!pageToken) {
 				syncToken = result.data.nextSyncToken ?? syncToken;
 				await this.state.settle(row.id, {
 					cursor: syncToken ?? null,
 					status: GoogleSyncStatus.RUNNING,
+					initialBackfilledAt: isInitialBackfill ? new Date() : undefined,
+					backfillPageToken: isInitialBackfill ? null : undefined,
+					backfillStartedAt: isInitialBackfill ? null : undefined,
+					backfillWindowStart: isInitialBackfill ? null : undefined,
+					backfillWindowEnd: isInitialBackfill ? null : undefined,
 				});
 
 				this.logger.log({
@@ -192,6 +222,7 @@ export class CalendarSyncService {
 		event: GoogleEvent,
 		row: MailboxSync,
 		context: MatchContext,
+		businessUnitId: string | null,
 	): Promise<"written" | "removed" | "ignored"> {
 		const iCalUid = event.iCalUID;
 		if (!iCalUid) return "ignored";
@@ -213,6 +244,7 @@ export class CalendarSyncService {
 				where: {
 					iCalUid,
 					originalStartTime: originalStart.at,
+					businessUnitId,
 				},
 			});
 			return deleted.count > 0 ? "removed" : "ignored";
@@ -237,12 +269,7 @@ export class CalendarSyncService {
 			context,
 		);
 
-		if (!match.companyId && !match.contactId) {
-			return "ignored";
-		}
-
 		const organizer = event.organizer?.email?.toLowerCase() ?? null;
-		const businessUnitId = await this.businessUnitFor(match);
 
 		const record = await this.db.calendarEvent.upsert({
 			where: key,
@@ -284,39 +311,25 @@ export class CalendarSyncService {
 
 		await this.syncAttendees(record.id, event);
 		await this.prepareForMeeting(record.id, start.at);
-		await this.project(record.id, row.userId, {
-			title: event.summary ?? "Meeting",
-			startsAt: start.at,
-			companyId: match.companyId,
-			contactId: match.contactId,
-			location: event.location ?? null,
-		});
+
+		if (match.companyId || match.contactId) {
+			await this.project(record.id, row.userId, {
+				title: event.summary ?? "Meeting",
+				startsAt: start.at,
+				companyId: match.companyId,
+				contactId: match.contactId,
+				location: event.location ?? null,
+			});
+		}
 
 		return "written";
 	}
 
-	private async businessUnitFor(match: {
-		companyId: string | null;
-		contactId: string | null;
-	}): Promise<string | null> {
-		const linked: ({ contactId: string } | { companyId: string })[] = [];
-		if (match.contactId) linked.push({ contactId: match.contactId });
-		if (match.companyId) linked.push({ companyId: match.companyId });
-		if (linked.length === 0) return null;
-
-		const identities = await this.db.customerIdentity.findMany({
-			where: {
-				OR: linked,
-				businessUnitId: { not: null },
-			},
-			distinct: ["businessUnitId"],
-			select: { businessUnitId: true },
-			take: 2,
-		});
-
-		return identities.length === 1
-			? (identities[0]?.businessUnitId ?? null)
-			: null;
+	private async businessUnitFor(row: MailboxSync): Promise<string | null> {
+		return (
+			row.businessUnitId ??
+			(await resolveDefaultBusinessUnitId(this.db, row.userId))
+		);
 	}
 
 	private async syncAttendees(
@@ -454,9 +467,18 @@ export class CalendarSyncService {
 		return people;
 	}
 
-	private horizon(): Date {
-		const to = new Date();
-		to.setDate(to.getDate() + HORIZON_DAYS);
-		return to;
+	private backfillWindow(row: MailboxSync): { start: Date; end: Date } {
+		if (row.backfillWindowStart && row.backfillWindowEnd) {
+			return {
+				start: row.backfillWindowStart,
+				end: row.backfillWindowEnd,
+			};
+		}
+
+		const now = Date.now();
+		return {
+			start: new Date(now - INITIAL_BACKFILL_PAST_DAYS * DAY_MS),
+			end: new Date(now + INITIAL_BACKFILL_FUTURE_DAYS * DAY_MS),
+		};
 	}
 }

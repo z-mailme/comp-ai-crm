@@ -61,7 +61,7 @@ export class SyncStateService {
 	async ensure(
 		userId: string,
 		source: SyncSource,
-		options: { autoCreate: boolean },
+		options: { autoCreate: boolean; businessUnitId?: string | null },
 	): Promise<MailboxSync> {
 		return this.db.mailboxSync.upsert({
 			where: { userId_source: { userId, source } },
@@ -70,11 +70,15 @@ export class SyncStateService {
 				source,
 				status: GoogleSyncStatus.IDLE,
 				autoCreate: options.autoCreate,
+				businessUnitId: options.businessUnitId ?? null,
 			},
 			update: {
 				status: GoogleSyncStatus.IDLE,
 				lastError: null,
 				retryAfter: null,
+				...(options.businessUnitId === undefined
+					? {}
+					: { businessUnitId: options.businessUnitId }),
 			},
 		});
 	}
@@ -91,6 +95,11 @@ export class SyncStateService {
 		update: {
 			cursor?: string | null;
 			status: GoogleSyncStatus;
+			initialBackfilledAt?: Date | null;
+			backfillPageToken?: string | null;
+			backfillStartedAt?: Date | null;
+			backfillWindowStart?: Date | null;
+			backfillWindowEnd?: Date | null;
 		},
 	): Promise<void> {
 		await this.db.mailboxSync.update({
@@ -101,6 +110,37 @@ export class SyncStateService {
 				lastError: null,
 				retryAfter: null,
 			},
+		});
+	}
+
+	async markBackfillStarted(
+		id: string,
+		input: { startedAt: Date; windowStart: Date; windowEnd: Date },
+	): Promise<void> {
+		await this.db.mailboxSync.update({
+			where: { id },
+			data: {
+				backfillStartedAt: input.startedAt,
+				backfillWindowStart: input.windowStart,
+				backfillWindowEnd: input.windowEnd,
+			},
+		});
+	}
+
+	async checkpointBackfill(id: string, pageToken: string): Promise<void> {
+		await this.db.mailboxSync.update({
+			where: { id },
+			data: { backfillPageToken: pageToken },
+		});
+	}
+
+	async assignBusinessUnitIfMissing(
+		id: string,
+		businessUnitId: string,
+	): Promise<void> {
+		await this.db.mailboxSync.updateMany({
+			where: { id, businessUnitId: null },
+			data: { businessUnitId },
 		});
 	}
 
@@ -118,6 +158,29 @@ export class SyncStateService {
 				status: GoogleSyncStatus.IDLE,
 				lastError: null,
 				retryAfter: null,
+			},
+		});
+	}
+
+	async resetCalendarBackfill(id: string, reason: string): Promise<void> {
+		this.logger.warn({
+			message: "Calendar cursor invalidated; initial backfill will restart",
+			syncId: id,
+			reason,
+		});
+
+		await this.db.mailboxSync.update({
+			where: { id },
+			data: {
+				cursor: null,
+				status: GoogleSyncStatus.IDLE,
+				lastError: null,
+				retryAfter: null,
+				initialBackfilledAt: null,
+				backfillPageToken: null,
+				backfillStartedAt: null,
+				backfillWindowStart: null,
+				backfillWindowEnd: null,
 			},
 		});
 	}
@@ -162,6 +225,27 @@ export class SyncStateService {
 		await this.db.mailboxSync.updateMany({
 			where: { userId, source },
 			data: { autoCreate: enabled },
+		});
+	}
+
+	async reindexCalendar(
+		userId: string,
+		businessUnitId: string | null,
+	): Promise<void> {
+		await this.db.mailboxSync.updateMany({
+			where: { userId, source: "calendar" },
+			data: {
+				businessUnitId,
+				cursor: null,
+				status: GoogleSyncStatus.IDLE,
+				lastError: null,
+				retryAfter: null,
+				initialBackfilledAt: null,
+				backfillPageToken: null,
+				backfillStartedAt: null,
+				backfillWindowStart: null,
+				backfillWindowEnd: null,
+			},
 		});
 	}
 

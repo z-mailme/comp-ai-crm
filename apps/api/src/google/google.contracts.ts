@@ -13,6 +13,10 @@ export const setAutoCreateInput = z.object({
 	enabled: z.boolean(),
 });
 
+export const reindexCalendarInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+});
+
 export const suppressDomainInput = z.object({
 	domain: z.string().trim().min(1),
 	reason: z.string().trim().max(200).optional(),
@@ -51,6 +55,7 @@ export const historicalImportIdInput = z.object({
 });
 
 export type SetAutoCreateInput = z.infer<typeof setAutoCreateInput>;
+export type ReindexCalendarInput = z.infer<typeof reindexCalendarInput>;
 export type SuppressDomainInput = z.infer<typeof suppressDomainInput>;
 export type CreateHistoricalImportInput = z.infer<
 	typeof createHistoricalImportInput
@@ -89,6 +94,9 @@ export const googleSourceStatusOutput = z.object({
 	lastSyncedAt: z.string().nullable(),
 	lastError: z.string().nullable(),
 	autoCreate: z.boolean(),
+	businessUnitId: z.string().nullable(),
+	initialBackfilledAt: z.string().nullable(),
+	backfillStartedAt: z.string().nullable(),
 });
 
 export const historicalImportChunkOutput = z.object({
@@ -147,6 +155,11 @@ export const googleConnectionStatusOutput = z.object({
 
 export const purgeSyncedDataOutput = z.object({
 	purged: z.number(),
+});
+
+export const reindexCalendarOutput = z.object({
+	reindexed: z.boolean(),
+	businessUnitId: z.string().nullable(),
 });
 
 export const revokeAccessOutput = z.object({
@@ -252,6 +265,7 @@ export type HistoricalImportJobOutput = z.infer<
 	typeof historicalImportJobOutput
 >;
 export type PurgeSyncedDataOutput = z.infer<typeof purgeSyncedDataOutput>;
+export type ReindexCalendarOutput = z.infer<typeof reindexCalendarOutput>;
 export type RevokeAccessOutput = z.infer<typeof revokeAccessOutput>;
 export type SuppressDomainOutput = z.infer<typeof suppressDomainOutput>;
 export type EmailThreadOutput = z.infer<typeof emailThreadOutput>;

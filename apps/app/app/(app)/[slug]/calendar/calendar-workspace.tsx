@@ -13,6 +13,14 @@ import {
 	CardTitle,
 } from "@crm/ui/components/card";
 import { StatGroup } from "@crm/ui/components/dashboard";
+import {
+	Dialog,
+	DialogContent,
+	DialogDescription,
+	DialogHeader,
+	DialogTitle,
+	DialogTrigger,
+} from "@crm/ui/components/dialog";
 import { EmptyCellValue } from "@crm/ui/components/empty-cell";
 import { Icon } from "@crm/ui/components/icon";
 import { Input } from "@crm/ui/components/input";
@@ -182,6 +190,8 @@ export function CalendarWorkspace() {
 }
 
 function CalendarEventRow({ event }: { event: CalendarEvent }) {
+	const workspaceUrl = useWorkspaceUrl();
+
 	return (
 		<article className="grid gap-3 rounded-lg border p-4 md:grid-cols-[minmax(0,1fr)_auto]">
 			<div className="min-w-0">
@@ -205,12 +215,42 @@ function CalendarEventRow({ event }: { event: CalendarEvent }) {
 					/>
 				</p>
 				<div className="mt-3 flex flex-wrap gap-2 text-xs">
-					<EntityBadge label="Contact" value={event.contact?.name} />
-					<EntityBadge label="Company" value={event.company?.name} />
+					<EntityBadge
+						label="Contact"
+						value={event.contact?.name}
+						href={
+							event.contact
+								? workspaceUrl(`/contacts/${event.contact.id}`)
+								: undefined
+						}
+					/>
+					<EntityBadge
+						label="Company"
+						value={event.company?.name}
+						href={
+							event.company
+								? workspaceUrl(`/companies/${event.company.id}`)
+								: undefined
+						}
+					/>
 					<EntityBadge label="Booking" value={event.booking?.name} />
-					<EntityBadge label="Deal" value={event.deal?.name} />
+					<EntityBadge
+						label="Deal"
+						value={event.deal?.name}
+						href={
+							event.deal ? workspaceUrl(`/deals/${event.deal.id}`) : undefined
+						}
+					/>
 					<EntityBadge label="Conversation" value={event.conversation?.name} />
 				</div>
+				{event.contact ||
+				event.company ||
+				event.booking ||
+				event.deal ? null : (
+					<p className="mt-3 text-muted-foreground text-xs">
+						Not linked to CRM.
+					</p>
+				)}
 				{event.location || event.conferenceUrl ? (
 					<p className="mt-3 truncate text-muted-foreground text-sm">
 						{event.location ?? event.conferenceUrl}
@@ -239,6 +279,135 @@ function CalendarEventRow({ event }: { event: CalendarEvent }) {
 						</div>
 					))}
 				</div>
+				<Dialog>
+					<DialogTrigger asChild>
+						<Button variant="outline" size="sm">
+							Details
+						</Button>
+					</DialogTrigger>
+					<DialogContent className="sm:max-w-lg">
+						<DialogHeader>
+							<DialogTitle>{event.title ?? "Untitled event"}</DialogTitle>
+							<DialogDescription>
+								{event.sourceCalendar} - {event.status}
+							</DialogDescription>
+						</DialogHeader>
+						<div className="grid gap-4 text-sm">
+							<div className="grid gap-1">
+								<span className="font-medium">Time</span>
+								<span className="text-muted-foreground">
+									<LocalDateTimeRange
+										start={event.startsAt}
+										end={event.endsAt}
+										options={{
+											month: "short",
+											day: "numeric",
+											year: "numeric",
+											hour: "numeric",
+											minute: "2-digit",
+										}}
+									/>
+								</span>
+							</div>
+							<div className="grid gap-1">
+								<span className="font-medium">Calendar</span>
+								<span className="text-muted-foreground">
+									{event.organizerEmail ?? "No organizer"}
+								</span>
+							</div>
+							{event.location ? (
+								<div className="grid gap-1">
+									<span className="font-medium">Location</span>
+									<span className="text-muted-foreground">
+										{event.location}
+									</span>
+								</div>
+							) : null}
+							{event.conferenceUrl ? (
+								<div className="grid gap-1">
+									<span className="font-medium">Conference</span>
+									<a
+										href={event.conferenceUrl}
+										target="_blank"
+										rel="noreferrer"
+										className="truncate text-primary underline-offset-4 hover:underline"
+									>
+										{event.conferenceUrl}
+									</a>
+								</div>
+							) : null}
+							<div className="grid gap-2">
+								<span className="font-medium">CRM links</span>
+								{event.contact ||
+								event.company ||
+								event.booking ||
+								event.deal ||
+								event.conversation ? (
+									<div className="flex flex-wrap gap-2 text-xs">
+										<EntityBadge
+											label="Contact"
+											value={event.contact?.name}
+											href={
+												event.contact
+													? workspaceUrl(`/contacts/${event.contact.id}`)
+													: undefined
+											}
+										/>
+										<EntityBadge
+											label="Company"
+											value={event.company?.name}
+											href={
+												event.company
+													? workspaceUrl(`/companies/${event.company.id}`)
+													: undefined
+											}
+										/>
+										<EntityBadge label="Booking" value={event.booking?.name} />
+										<EntityBadge
+											label="Deal"
+											value={event.deal?.name}
+											href={
+												event.deal
+													? workspaceUrl(`/deals/${event.deal.id}`)
+													: undefined
+											}
+										/>
+										<EntityBadge
+											label="Conversation"
+											value={event.conversation?.name}
+										/>
+									</div>
+								) : (
+									<span className="text-muted-foreground">
+										Not linked to CRM.
+									</span>
+								)}
+							</div>
+							<div className="grid gap-2">
+								<span className="font-medium">Attendees</span>
+								{event.attendees.length === 0 ? (
+									<span className="text-muted-foreground">No attendees</span>
+								) : (
+									<div className="grid gap-2">
+										{event.attendees.map((attendee) => (
+											<div
+												key={attendee.id}
+												className="flex min-w-0 items-center justify-between gap-3 rounded-md border px-3 py-2 text-xs"
+											>
+												<span className="truncate">
+													{attendee.name ?? attendee.email}
+												</span>
+												<span className="shrink-0 text-muted-foreground">
+													{attendee.responseStatus ?? "Unknown"}
+												</span>
+											</div>
+										))}
+									</div>
+								)}
+							</div>
+						</div>
+					</DialogContent>
+				</Dialog>
 			</div>
 		</article>
 	);
@@ -247,15 +416,24 @@ function CalendarEventRow({ event }: { event: CalendarEvent }) {
 function EntityBadge({
 	label,
 	value,
+	href,
 }: {
 	label: string;
 	value: string | null | undefined;
+	href?: string;
 }) {
-	return value ? (
-		<span className="rounded-md bg-muted px-2 py-1 text-muted-foreground">
-			{label}: {value}
-		</span>
-	) : null;
+	if (!value) return null;
+
+	const content = `${label}: ${value}`;
+	const className = "rounded-md bg-muted px-2 py-1 text-muted-foreground";
+
+	return href ? (
+		<Link href={href} className={cn(className, "hover:text-foreground")}>
+			{content}
+		</Link>
+	) : (
+		<span className={className}>{content}</span>
+	);
 }
 
 function eventTone(event: CalendarEvent): StatusTone {

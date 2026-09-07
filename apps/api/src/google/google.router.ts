@@ -22,6 +22,8 @@ import {
 	historicalImportIdInput,
 	historicalImportJobOutput,
 	purgeSyncedDataOutput,
+	reindexCalendarInput,
+	reindexCalendarOutput,
 	revokeAccessOutput,
 	setAutoCreateInput,
 	suppressDomainInput,
@@ -75,6 +77,18 @@ export class GoogleRouter {
 	async syncNow(@Ctx() ctx: AuthedTrpcContext) {
 		await this.sync.runForUser(ctx.user.id);
 		return this.connection.status(ctx.user.id);
+	}
+
+	@Mutation({
+		input: reindexCalendarInput,
+		output: reindexCalendarOutput,
+		meta: restMeta("POST", "/google/calendar/reindex", ["Google"]),
+	})
+	async reindexCalendar(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof reindexCalendarInput>,
+	) {
+		return this.connection.reindexCalendar(ctx.user.id, input);
 	}
 
 	@Query({

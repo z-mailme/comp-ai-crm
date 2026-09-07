@@ -27,6 +27,36 @@ export type BusinessContext = {
 	};
 };
 
+export async function resolveDefaultBusinessUnitId(
+	db: Db,
+	userId: string,
+): Promise<string | null> {
+	const member = await db.member.findUnique({
+		where: {
+			organizationId_userId: {
+				organizationId: WORKSPACE_ID,
+				userId,
+			},
+		},
+		select: { role: true },
+	});
+
+	if (!member) return null;
+
+	const role = toWorkspaceRole(member.role);
+	const activeUnits = await db.businessUnit.findMany({
+		where: { status: BusinessUnitStatus.ACTIVE },
+		select: { id: true, ownerId: true },
+		orderBy: { name: "asc" },
+	});
+
+	const authorizedUnits = activeUnits.filter((unit) =>
+		canUseBusinessUnit(role, userId, unit.ownerId),
+	);
+
+	return authorizedUnits.length === 1 ? (authorizedUnits[0]?.id ?? null) : null;
+}
+
 export async function resolveBusinessContext(
 	db: Db,
 	source: BusinessContextSource,

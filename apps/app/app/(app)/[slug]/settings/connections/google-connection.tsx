@@ -196,8 +196,8 @@ function ConnectGoogle({
 					</div>
 				</CardTitle>
 				<CardDescription>
-					Read-only Gmail and Calendar. Only conversations with companies in the
-					CRM are stored.
+					Read-only Gmail and Calendar. Calendar events are stored before CRM
+					links exist.
 				</CardDescription>
 
 				<CardAction>
@@ -303,6 +303,16 @@ export function GoogleConnection({
 		}),
 	);
 
+	const reindexCalendar = useMutation(
+		trpc.google.reindexCalendar.mutationOptions({
+			onSuccess: async () => {
+				await cache.google({ settle: "record" });
+				toast.success("Calendar reindex is ready for the next check.");
+			},
+			onError: (error) => toast.error(error.message),
+		}),
+	);
+
 	if (!status.data) return null;
 
 	const { sources, hasRefreshToken, configured, linked, required } =
@@ -336,11 +346,19 @@ export function GoogleConnection({
 					</div>
 				</CardTitle>
 				<CardDescription>
-					Meetings and email threads land on the matching company as they
-					happen.
+					Calendar stores Google events first. CRM links and email threads
+					attach when a match exists.
 				</CardDescription>
 
-				<CardAction>
+				<CardAction className="flex flex-wrap gap-2">
+					<Button
+						variant="outline"
+						size="sm"
+						disabled={reindexCalendar.isPending}
+						onClick={() => reindexCalendar.mutate({})}
+					>
+						{reindexCalendar.isPending ? "Preparing…" : "Reindex calendar"}
+					</Button>
 					<Button
 						variant="contrast"
 						size="sm"

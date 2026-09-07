@@ -1372,6 +1372,9 @@ model MailboxSync {
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
   source String
 
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
   status       GoogleSyncStatus @default(IDLE)
   cursor       String?
   lastSyncedAt DateTime?
@@ -1379,11 +1382,19 @@ model MailboxSync {
   retryAfter   DateTime?
   autoCreate   Boolean          @default(false)
 
+  initialBackfilledAt DateTime?
+  backfillPageToken   String?
+  backfillStartedAt   DateTime?
+  backfillWindowStart DateTime?
+  backfillWindowEnd   DateTime?
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@unique([userId, source])
   @@index([status])
+  @@index([businessUnitId, source])
+  @@index([source, initialBackfilledAt])
   @@map("mailboxSync")
 }
 
@@ -1761,6 +1772,7 @@ model BusinessUnit {
   marketingAudiences      MarketingAudience[]
   marketingCreativeAssets MarketingCreativeAsset[]
   calendarEvents          CalendarEvent[]
+  mailboxSyncs            MailboxSync[]
   customerIdentities      CustomerIdentity[]
   conversations           Conversation[]
   businessEvents          BusinessEvent[]

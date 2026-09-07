@@ -28,6 +28,10 @@ export class GoogleSyncService {
 		}
 	}
 
+	async runCalendar(userId: string) {
+		return this.runOne(userId, "calendar");
+	}
+
 	async backfillGmail(input: GmailBackfillInput) {
 		return this.gmail.backfill(input);
 	}

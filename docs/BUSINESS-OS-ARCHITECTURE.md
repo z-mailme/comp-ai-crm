@@ -40,6 +40,8 @@ The fork already has these durable Business OS models:
 
 Email now flows through `ThreadWriterService.store` into `EmailThread`, `EmailMessage`, `Activity`, `Conversation`, `CommunicationMessage`, `BusinessEvent`, and `BusinessEventOutbox`.
 
+Calendar currently reads the primary Google Calendar only. It persists Google events before CRM matching. CRM links, booking links, deal links, conversation links, and meeting prep are enrichment steps after storage.
+
 ## Target Integration Shape
 
 External provider -> integration account -> domain record -> BusinessEvent -> CRM state -> agent run -> approval -> audited action -> memory -> analytics.
@@ -88,29 +90,21 @@ Owner HQ
 
 ## Navigation Direction
 
-Expose only real surfaces.
+Expose real surfaces and documented capability pages.
 
-Current production nav remains:
+Current grouped nav includes:
 
-- Overview
-- Inbox
-- Command
-- Chat
-- Companies
-- Contacts
-- Deals
-- Settings
-
-Future grouped nav becomes:
-
-- Core: Command Centre, Inbox, Calendar, Customers, Companies, Deals, Bookings, Tasks
+- Home: Overview, Command
+- Communication: Inbox, Calendar
+- CRM: Companies, Contacts, Deals, Bookings, Activity
 - Finance: Quotes, Invoices, Payments, Expenses, Reports
-- Marketing: Campaigns, Email Marketing, Ads Manager, Creative Studio, Audiences, Analytics
-- AI: Agents, Agent Runs, Approvals, Knowledge, Automations, Audit
-- Operations: Jobs, Schedule, Resources, Staff, Checklists, Incidents
-- Admin: Business Units, Channel Accounts, Members, Connections, Models, Safety
+- Marketing: Overview, Email, Google Ads, Meta Ads, Audiences
+- AI: Chat, Agents, Approvals, Knowledge, Automations, Observability
+- Operations: Operations, People, Assets, Procurement, Documents
+- Analytics: Tracking, Business Analytics, Reports
+- Admin: Settings, Connections, provider setup, Members, API Keys, Currencies, SSO, System Health
 
-Do not add a nav item until its route has production data, BusinessUnit rules, and empty/error states.
+Architecture-only modules route to a coming soon page. The page shows no fake records, totals, or charts.
 
 ## BusinessEvent Taxonomy
 

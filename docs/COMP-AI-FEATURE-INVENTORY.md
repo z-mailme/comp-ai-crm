@@ -14,6 +14,7 @@ Sources: local route, router, schema, and agent files. Public upstream source: [
 | --- | --- | --- | --- |
 | Overview dashboard | `/{slug}` | Fork and upstream | Shows dashboard summary with scope control. |
 | Unified Inbox | `/{slug}/inbox` | Fork Business OS | Uses `businessOs.inbox`. |
+| Calendar | `/{slug}/calendar` | Fork Business OS | Shows Google primary calendar events across Month, Week, Day, and Agenda views. |
 | Command Centre | `/{slug}/command` | Fork Business OS | Shows conversations, approvals, events, knowledge, and outbox state. |
 | Agent Chat | `/{slug}/chat` | Upstream | Durable agent chat route. |
 | Agent Builder | `/{slug}/agents` | Upstream | Includes builder chat, versions, files, runs, and agent controls. |
@@ -33,7 +34,7 @@ Sources: local route, router, schema, and agent files. Public upstream source: [
 | Feature | Surface | Status | Notes |
 | --- | --- | --- | --- |
 | Google historical import jobs | Google settings and API | Live | Resume, pause, cancel, status, chunking, and verification exist. |
-| Google event detail | `google.event` | Backend detail only | Requires an event id. No list route exists. |
+| Google event detail | `/{slug}/calendar` and `google.event` | Live | Calendar rows expose detail. The backend detail query still supports direct event reads. |
 | Email thread detail | `google.thread` | Backend detail only | Used for projected mailbox threads. |
 | Slack channels | Settings connection subroutes | Live | Channel picker and channel settings exist. |
 | Slack people matching | Settings connection subroute | Live | Match Slack users to contacts. |
@@ -43,17 +44,16 @@ Sources: local route, router, schema, and agent files. Public upstream source: [
 | Dynamic fields | Record fields and fields router | Live | Company, contact, and deal fields. |
 | Website activity | Record components and tracking router | Live | Fed by tracking collector. |
 
-## Backend Exists, UI Missing
+## Backend Exists, UI Missing Or Capability Page Only
 
 | Feature | Backend | Gap |
 | --- | --- | --- |
-| Calendar list view | `CalendarEvent`, `CalendarAttendee`, `CalendarSyncService` | No `/{slug}/calendar` route. No list query. |
 | Business OS conversation detail | `businessOs.conversation` | No dedicated route or drawer. |
 | Customer 360 | `businessOs.customer360` | Contact sheet tab exists, but no full page. |
 | Global Search | `businessOs.globalSearch` and `search.router` | No top-level search experience. |
-| Approvals | `ApprovalRequest` and `businessOs.approvals` | Visible only in Command Centre summary. |
-| Knowledge | `KnowledgeItem`, `KnowledgeVersion`, `BusinessRule` | Visible only in Command Centre summary. |
-| Automations | `AutomationRule`, `AutomationExecution` | No builder UI. |
+| Approvals | `ApprovalRequest` and `businessOs.approvals` | Visible in Command Centre and nav. Route shows a capability page. |
+| Knowledge | `KnowledgeItem`, `KnowledgeVersion`, `BusinessRule` | Visible in Command Centre and nav. Route shows a capability page. |
+| Automations | `AutomationRule`, `AutomationExecution` | Visible in nav. Route shows a capability page. |
 | BusinessEvent outbox | `BusinessEventOutbox` | No delivery worker beyond persisted outbox rows. |
 | Booking lifecycle API | `bookings.controller` and `bookings.service` | Internal API only. |
 | Booking capacity | `BookingResourceCapacity` | Internal API only. No operator/equipment model. |
@@ -65,7 +65,7 @@ Sources: local route, router, schema, and agent files. Public upstream source: [
 | --- | --- | --- |
 | Finance | Deal has quote, invoice, payment status fields | No invoice, quote, payment, expense, or receipt records exist. |
 | Booking calendar link | Booking stores `googleCalendarEventId` | No Google Calendar write path exists. |
-| Calendar CRM linking | Calendar matches company and contact | No BusinessUnit key exists on `CalendarEvent`. |
+| Calendar CRM linking | Calendar matches company and contact after storage | Calendar ownership comes from the sync account BusinessUnit. |
 | Marketing attribution | Tracking captures sources and visits | No campaign, ad, email, audience, or spend models exist. |
 | Owner HQ | BusinessUnit exists | Cross-business read is explicitly disabled. |
 | External memory | `ExternalMemoryLink` exists | No memory delivery worker is implemented. |
@@ -85,7 +85,7 @@ Sources: local route, router, schema, and agent files. Public upstream source: [
 
 | Area | Recommendation |
 | --- | --- |
-| Calendar | Reuse existing sync service. Add BusinessUnit ownership, list APIs, and UI later. |
+| Calendar | Keep primary-calendar sync now. Add multi-calendar account filtering later. |
 | Finance | Keep Comp AI as control centre. Integrate InvoiceShelf 2.x through an adapter. |
 | Marketing email | Use Listmonk as execution engine. Keep consent and attribution in Comp AI. |
 | Creative | Use Canva Connect where plan and API access allow it. Do not build a design editor. |
