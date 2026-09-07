@@ -280,26 +280,30 @@ const emailIdempotencyKey = z
 	.max(120)
 	.regex(/^[a-zA-Z0-9-]+$/);
 
-export const sendEmailInput = z.discriminatedUnion("mode", [
-	z.object({
-		mode: z.literal("reply"),
-		conversationId: z.string().trim().min(1),
+export const sendEmailInput = z
+	.object({
+		mode: z.enum(["reply", "compose"]),
+		conversationId: z.string().trim().min(1).optional(),
 		replyAll: z.boolean().default(false),
+		to: emailAddressList.default([]),
 		cc: emailAddressList.default([]),
 		bcc: emailAddressList.default([]),
+		subject: z.string().trim().min(1).max(500).optional(),
 		body: emailBody,
 		idempotencyKey: emailIdempotencyKey,
-	}),
-	z.object({
-		mode: z.literal("compose"),
-		to: emailAddressList.min(1),
-		cc: emailAddressList.default([]),
-		bcc: emailAddressList.default([]),
-		subject: z.string().trim().min(1).max(500),
-		body: emailBody,
-		idempotencyKey: emailIdempotencyKey,
-	}),
-]);
+	})
+	.refine((input) => input.mode !== "reply" || Boolean(input.conversationId), {
+		message: "A reply needs the conversation it answers.",
+		path: ["conversationId"],
+	})
+	.refine((input) => input.mode !== "compose" || input.to.length > 0, {
+		message: "A new email needs at least one recipient.",
+		path: ["to"],
+	})
+	.refine((input) => input.mode !== "compose" || Boolean(input.subject), {
+		message: "A new email needs a subject.",
+		path: ["subject"],
+	});
 
 export const sendEmailOutput = z.object({
 	status: z.enum([

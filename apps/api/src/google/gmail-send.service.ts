@@ -1,5 +1,6 @@
 import { GMAIL_SEND_SCOPE, GOOGLE_PROVIDER_ID } from "@crm/auth";
 import { type Db, EmailDirection } from "@crm/db";
+import { lockIdempotencyKey } from "@crm/db/idempotency";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
@@ -7,6 +8,7 @@ import { ThreadWriterService } from "../mailbox/thread-writer.service";
 import { GmailClient } from "./gmail.client";
 import { planReply, type StoredReplyMessage } from "./gmail-reply-plan";
 import { buildMimeMessage, encodeRawMime } from "./gmail-rfc822";
+import { GMAIL_SYNC } from "./gmail-sync.config";
 import type { SendEmailInput, SendEmailOutput } from "./google.contracts";
 
 @Injectable()
@@ -57,19 +59,6 @@ export class GmailSendService {
 		const sentAt = new Date();
 		const messageId = messageIdFor(input.idempotencyKey, mailbox);
 
-		const duplicate = await this.db.emailMessage.findUnique({
-			where: { rfcMessageId: messageId },
-			select: { gmailMessageId: true },
-		});
-		if (duplicate) {
-			return {
-				status: "sent",
-				reason: null,
-				gmailMessageId: duplicate.gmailMessageId,
-				duplicate: true,
-			};
-		}
-
 		let gmailThreadId: string | undefined;
 		if (draft.anchorGmailMessageId) {
 			const anchor = await this.gmail.getMessage(
@@ -96,53 +85,91 @@ export class GmailSendService {
 			}),
 		);
 
-		const sent = await this.gmail.sendMessage(
-			token.accessToken,
-			raw,
-			gmailThreadId,
+		const result = await this.db.$transaction(
+			async (tx) => {
+				await lockIdempotencyKey(
+					tx,
+					`gmail-send:${userId}:${input.idempotencyKey}`,
+				);
+
+				const duplicate = await tx.emailMessage.findUnique({
+					where: { rfcMessageId: messageId },
+					select: { gmailMessageId: true },
+				});
+				if (duplicate) {
+					return {
+						kind: "duplicate" as const,
+						gmailMessageId: duplicate.gmailMessageId,
+					};
+				}
+
+				const sent = await this.gmail.sendMessage(
+					token.accessToken,
+					raw,
+					gmailThreadId,
+				);
+				if (sent.outcome !== "ok") return { kind: "failed" as const, sent };
+
+				await this.persistOutbound(userId, mailbox, {
+					messageId,
+					rootId: draft.rootId,
+					subject: draft.subject,
+					body: input.body,
+					to: draft.to,
+					cc: draft.cc,
+					sentAt,
+					gmailMessageId: sent.data.id ?? null,
+					fromName: user?.name ?? null,
+				});
+
+				return { kind: "sent" as const, sent };
+			},
+			{ timeout: GMAIL_SYNC.send.transactionTimeoutMs },
 		);
-		if (sent.outcome !== "ok") {
+
+		if (result.kind === "duplicate") {
+			return {
+				status: "sent",
+				reason: null,
+				gmailMessageId: result.gmailMessageId,
+				duplicate: true,
+			};
+		}
+
+		if (result.kind === "failed") {
 			this.logger.warn({
 				message: "Gmail send failed",
 				userId,
-				outcome: sent.outcome,
-				reason: sent.reason,
+				outcome: result.sent.outcome,
+				reason: result.sent.reason,
 			});
-			return mapApiFailure(sent);
+			return mapApiFailure(result.sent);
 		}
-
-		await this.persistOutbound(userId, mailbox, {
-			messageId,
-			rootId: draft.rootId,
-			subject: draft.subject,
-			body: input.body,
-			to: draft.to,
-			cc: draft.cc,
-			sentAt,
-			gmailMessageId: sent.data.id ?? null,
-			fromName: user?.name ?? null,
-		});
 
 		this.logger.log({
 			message: "Gmail message sent",
 			userId,
-			gmailMessageId: sent.data.id ?? null,
+			gmailMessageId: result.sent.data.id ?? null,
 			mode: input.mode,
 		});
 
 		return {
 			status: "sent",
 			reason: null,
-			gmailMessageId: sent.data.id ?? null,
+			gmailMessageId: result.sent.data.id ?? null,
 			duplicate: false,
 		};
 	}
 
 	private async prepareReply(
 		userId: string,
-		input: Extract<SendEmailInput, { mode: "reply" }>,
+		input: SendEmailInput,
 		mailbox: string,
 	): Promise<PreparedDraft | SendEmailOutput> {
+		if (!input.conversationId) {
+			return outcome("failed", "A reply needs the conversation it answers.");
+		}
+
 		const conversation = await this.db.conversation.findUnique({
 			where: { id: input.conversationId },
 			select: { channel: true, emailThreadId: true },
@@ -284,13 +311,10 @@ type PreparedDraft = {
 	anchorGmailMessageId?: string;
 };
 
-function prepareCompose(
-	input: Extract<SendEmailInput, { mode: "compose" }>,
-	mailbox: string,
-): PreparedDraft {
+function prepareCompose(input: SendEmailInput, mailbox: string): PreparedDraft {
 	return {
 		rootId: messageIdFor(input.idempotencyKey, mailbox),
-		subject: input.subject,
+		subject: input.subject ?? "",
 		to: input.to.map((email) => ({ email, name: null })),
 		cc: input.cc.map((email) => ({ email, name: null })),
 		bcc: input.bcc.map((email) => ({ email, name: null })),
