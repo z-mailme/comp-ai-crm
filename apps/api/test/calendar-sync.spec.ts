@@ -233,7 +233,12 @@ async function seedContact(email: string, unitId = unitAId) {
 
 async function resetSyncArtifacts() {
 	await db.activity.deleteMany({
-		where: { calendarEvent: { iCalUid: { contains: marker } } },
+		where: {
+			OR: [
+				{ createdById: userId },
+				{ calendarEvent: { iCalUid: { contains: marker } } },
+			],
+		},
 	});
 	await db.calendarEvent.deleteMany({
 		where: { iCalUid: { contains: marker } },
@@ -361,7 +366,7 @@ describe("CalendarSyncService persistence", () => {
 	});
 
 	it("keeps sync ownership when a matched contact belongs to another unit", async () => {
-		const email = `cross-unit-${marker}@buyer.test`;
+		const email = `cross-unit-${marker}@cross-buyer.test`;
 		await seedContact(email, unitBId);
 		const setup = await kit("cross-unit", { businessUnitId: unitAId });
 		setup.calendar.setPage(undefined, {
