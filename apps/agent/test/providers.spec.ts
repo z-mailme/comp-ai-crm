@@ -1,8 +1,5 @@
 import { describe, expect, it } from "bun:test";
-import {
-	findProviderModel,
-	providerById,
-} from "@crm/validation/ai-providers";
+import { findProviderModel, providerById } from "@crm/validation/ai-providers";
 import { providerStatuses, resolveDirectModel } from "../agent/lib/providers";
 
 describe("AI provider registry", () => {

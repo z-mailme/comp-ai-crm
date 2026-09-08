@@ -385,6 +385,7 @@ model Company {
   emailThreads               EmailThread[]
   calendarEvents             CalendarEvent[]
   fieldValues                FieldValue[]
+  businessKnowledge          BusinessKnowledge[]
   createdAt                  DateTime                   @default(now())
   updatedAt                  DateTime                   @updatedAt
 
@@ -453,6 +454,7 @@ model Contact {
   calendarEvents            CalendarEvent[]
   eventAttendance           CalendarAttendee[]
   fieldValues               FieldValue[]
+  businessKnowledge         BusinessKnowledge[]
   visitors                  TrackedVisitor[]           @relation("VisitorContact")
   submissions               FormSubmission[]           @relation("SubmissionContact")
   createdAt                 DateTime                   @default(now())
@@ -1048,6 +1050,7 @@ model Deal {
   activities   Activity[]
   emailThreads EmailThread[]
   fieldValues  FieldValue[]
+  businessKnowledge BusinessKnowledge[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -1091,6 +1094,8 @@ model Booking {
   approvalRequests           ApprovalRequest[]
   businessTasks              BusinessTask[]
   conversationInsights       ConversationInsight[]
+
+  businessKnowledge BusinessKnowledge[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1653,12 +1658,79 @@ enum BusinessEventSource {
   OUTLOOK
   CALENDAR
   WEBSITE
+  WHATSAPP
   AGENT
   AUTOMATION
   N8N
   SYSTEM
   OTHER
 }
+
+enum KnowledgeKind {
+  FACT
+  POLICY
+  PRICING
+  FAQ
+  PROCESS
+  SOP
+  PRODUCT_SERVICE
+  COMMUNICATION_STYLE
+  DECISION
+  CONTACT_CONTEXT
+  COMPANY_CONTEXT
+  INFERENCE
+  RECOMMENDATION
+}
+
+model BusinessKnowledge {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  kind    KnowledgeKind
+  subject String
+  detail  String?
+  data    Json?
+
+  sourceType BusinessEventSource
+  sourceId   String?
+  sourceAt   DateTime?
+
+  extractedAt DateTime @default(now())
+  confidence  Float    @default(0.5)
+
+  aiGenerated    Boolean   @default(true)
+  humanConfirmed Boolean   @default(false)
+  confirmedById  String?
+  confirmedAt    DateTime?
+
+  validFrom     DateTime  @default(now())
+  validUntil    DateTime?
+  supersededById String?
+  supersededBy   BusinessKnowledge? @relation("KnowledgeSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersedes     BusinessKnowledge[] @relation("KnowledgeSupersession")
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  dealId    String?
+  deal      Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kind, validFrom])
+  @@index([companyId, kind])
+  @@index([contactId, kind])
+  @@index([businessUnitId, kind])
+  @@index([supersededById])
+  @@map("businessKnowledge")
+}
+
 
 enum AgentKind {
   CUSTOMER_SERVICE
@@ -1810,6 +1882,7 @@ model BusinessUnit {
   customerIdentities      CustomerIdentity[]
   conversations           Conversation[]
   businessEvents          BusinessEvent[]
+  businessKnowledge       BusinessKnowledge[]
   approvals               ApprovalRequest[]
   knowledgeItems          KnowledgeItem[]
   businessRules           BusinessRule[]
