@@ -63,7 +63,7 @@ export function MailboxWorkspace() {
 
 	return (
 		<div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border">
-			<aside className="hidden w-60 shrink-0 overflow-y-auto border-r p-2 md:block">
+			<aside className="hidden w-60 shrink-0 overflow-y-auto border-r p-2 lg:block">
 				<MailboxNav
 					labels={labels}
 					activeView={params.label ? null : params.view}
@@ -78,7 +78,7 @@ export function MailboxWorkspace() {
 					conversationOpen ? "hidden" : "flex",
 				)}
 			>
-				<div className="flex items-center gap-2 border-b px-2 py-1.5 md:hidden">
+				<div className="flex items-center gap-2 border-b px-2 py-1.5 lg:hidden">
 					<Drawer open={navOpen} onOpenChange={setNavOpen}>
 						<DrawerTrigger asChild>
 							<Button

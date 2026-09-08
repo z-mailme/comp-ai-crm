@@ -241,7 +241,7 @@ function ThreadListRow({
 			>
 				<span
 					className={cn(
-						"w-40 shrink-0 truncate text-sm",
+						"w-28 shrink-0 truncate text-sm md:w-40",
 						row.unread
 							? "font-semibold text-foreground"
 							: "text-muted-foreground",
@@ -266,7 +266,7 @@ function ThreadListRow({
 				</span>
 
 				{row.userLabelIds.length > 0 ? (
-					<span className="hidden shrink-0 items-center gap-1 lg:flex">
+					<span className="hidden shrink-0 items-center gap-1 xl:flex">
 						{row.userLabelIds.slice(0, 3).map((labelId) => (
 							<LabelChip
 								key={labelId}
