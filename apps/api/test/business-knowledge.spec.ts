@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import { db } from "@crm/db";
+import { db, type BusinessKnowledgeModel } from "@crm/db";
 import {
 	currentKnowledge,
 	recordKnowledge,
@@ -8,6 +8,38 @@ import {
 } from "@crm/db/knowledge";
 
 const suffix = process.env.TEST_RUN_ID ?? "knowledge-spec";
+
+function fixture(
+	partial: Partial<BusinessKnowledgeModel>,
+): BusinessKnowledgeModel {
+	return {
+		id: `fixture-${suffix}`,
+		businessUnitId: null,
+		kind: "FACT",
+		subject: "fixture",
+		detail: null,
+		data: null,
+		sourceType: "CRM",
+		sourceId: null,
+		sourceAt: null,
+		extractedAt: new Date(),
+		confidence: 0.5,
+		aiGenerated: true,
+		humanConfirmed: false,
+		confirmedById: null,
+		confirmedAt: null,
+		validFrom: new Date("2025-01-01T00:00:00Z"),
+		validUntil: null,
+		supersededById: null,
+		companyId: null,
+		contactId: null,
+		dealId: null,
+		bookingId: null,
+		createdAt: new Date(),
+		updatedAt: new Date(),
+		...partial,
+	};
+}
 
 async function clean(): Promise<void> {
 	await db.businessKnowledge.deleteMany({
@@ -70,47 +102,29 @@ describe("Business Brain knowledge", () => {
 	});
 
 	it("prefers a human-confirmed older rule over a newer unconfirmed one", () => {
-		const confirmed = {
+		const confirmed = fixture({
 			id: "a",
 			humanConfirmed: true,
 			confirmedAt: new Date("2025-01-01T00:00:00Z"),
-			sourceAt: null,
-			validFrom: new Date("2025-01-01T00:00:00Z"),
-			validUntil: null,
-			supersededById: null,
-		} as never;
-		const fresh = {
+		});
+		const fresh = fixture({
 			id: "b",
-			humanConfirmed: false,
-			confirmedAt: null,
 			sourceAt: new Date("2026-06-01T00:00:00Z"),
 			validFrom: new Date("2026-06-01T00:00:00Z"),
-			validUntil: null,
-			supersededById: null,
-		} as never;
+		});
 
 		const [first] = resolveCurrent([fresh, confirmed]);
-		const winner: { id: string } | undefined = first;
-		expect(winner?.id).toBe("a");
+		expect(first?.id).toBe("a");
 	});
 
 	it("drops expired and not-yet-valid knowledge", () => {
-		const future = {
-			humanConfirmed: false,
-			confirmedAt: null,
-			sourceAt: null,
+		const future = fixture({
 			validFrom: new Date(Date.now() + 86_400_000),
-			validUntil: null,
-			supersededById: null,
-		} as never;
-		const expired = {
-			humanConfirmed: false,
-			confirmedAt: null,
-			sourceAt: null,
+		});
+		const expired = fixture({
 			validFrom: new Date("2020-01-01T00:00:00Z"),
 			validUntil: new Date("2020-06-01T00:00:00Z"),
-			supersededById: null,
-		} as never;
+		});
 
 		expect(resolveCurrent([future, expired])).toHaveLength(0);
 	});
