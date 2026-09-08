@@ -436,6 +436,14 @@ export class ThreadWriterService {
 			orderBy: [{ externalAccountId: "desc" }, { createdAt: "asc" }],
 			select: { id: true, businessUnitId: true },
 		});
+		await tx.conversation.updateMany({
+			where: {
+				channel: CommunicationChannel.EMAIL,
+				externalThreadId: input.rootMessageId,
+				emailThreadId: null,
+			},
+			data: { emailThreadId: input.emailThreadId },
+		});
 		const conversation = await tx.conversation.upsert({
 			where: { emailThreadId: input.emailThreadId },
 			create: {
