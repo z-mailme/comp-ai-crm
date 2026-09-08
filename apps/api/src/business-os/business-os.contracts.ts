@@ -1,0 +1,569 @@
+import {
+	ActivityType,
+	AiProcessingStatus,
+	ApprovalRequestStatus,
+	AutomationExecutionStatus,
+	AutomationRuleStatus,
+	BookingStatus,
+	BusinessEventOutboxStatus,
+	BusinessEventSource,
+	BusinessTaskPriority,
+	BusinessTaskStatus,
+	CommunicationChannel,
+	CommunicationDirection,
+	ConversationPriority,
+	ConversationStatus,
+	DealStage,
+	KnowledgeItemType,
+	type Prisma,
+} from "@crm/db";
+import { z } from "zod";
+
+export const businessOsLimitInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	limit: z.number().int().min(1).max(100).default(50),
+});
+
+export const businessContextInput = z
+	.object({
+		businessUnitId: z.string().trim().min(1).optional(),
+	})
+	.optional()
+	.default({});
+
+export const inboxInput = businessOsLimitInput.extend({
+	status: z.nativeEnum(ConversationStatus).optional(),
+	channel: z.nativeEnum(CommunicationChannel).optional(),
+});
+
+export const conversationInput = z.object({
+	id: z.string(),
+	businessUnitId: z.string().trim().min(1).optional(),
+});
+
+export const customer360Input = z.object({
+	contactId: z.string(),
+	businessUnitId: z.string().trim().min(1).optional(),
+});
+
+export const globalSearchInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	q: z.string().default(""),
+	limit: z.number().int().min(1).max(25).default(8),
+});
+
+export const calendarInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	view: z.enum(["month", "week", "day", "agenda"]).default("week"),
+	date: z.string().trim().min(1).optional(),
+	search: z.string().default(""),
+	calendarId: z.string().trim().min(1).optional(),
+	timezone: z.string().trim().min(1).max(120).optional(),
+});
+
+const linkedRecordOutput = z.object({
+	id: z.string(),
+	name: z.string(),
+});
+
+const linkedContactOutput = z.object({
+	id: z.string(),
+	name: z.string(),
+	email: z.string().nullable(),
+	imageUrl: z.string().nullable(),
+});
+
+const linkedCompanyOutput = z.object({
+	id: z.string(),
+	name: z.string(),
+	domain: z.string().nullable(),
+	iconUrl: z.string().nullable(),
+	iconDarkUrl: z.string().nullable(),
+	iconTone: z.string().nullable(),
+});
+
+const conversationBriefOutput = z.object({
+	id: z.string(),
+	channel: z.nativeEnum(CommunicationChannel),
+	status: z.nativeEnum(ConversationStatus),
+	priority: z.nativeEnum(ConversationPriority),
+	subject: z.string().nullable(),
+	preview: z.string().nullable(),
+	lastMessageAt: z.string().nullable(),
+	unreadCount: z.number(),
+	aiProcessingStatus: z.nativeEnum(AiProcessingStatus),
+	contact: linkedContactOutput.nullable(),
+	company: linkedCompanyOutput.nullable(),
+	deal: linkedRecordOutput.nullable(),
+	booking: linkedRecordOutput.nullable(),
+	assignedOwner: linkedRecordOutput.nullable(),
+	assignedAgent: linkedRecordOutput.nullable(),
+});
+
+const messageParticipantOutput = z.object({
+	email: z.string(),
+	name: z.string().nullable(),
+});
+
+const messageRecipientOutput = messageParticipantOutput.extend({
+	kind: z.enum(["to", "cc"]),
+});
+
+export type MessageParticipant = z.infer<typeof messageParticipantOutput>;
+export type MessageRecipient = z.infer<typeof messageRecipientOutput>;
+
+const storedEmailOnly = z.object({ email: z.string() });
+
+export function parseMessageSender(
+	value: Prisma.JsonValue,
+): MessageParticipant | null {
+	const parsed = messageParticipantOutput.safeParse(value);
+	if (parsed.success) return parsed.data;
+	if (value === null) return null;
+	const emailOnly = storedEmailOnly.safeParse(value);
+	return emailOnly.success ? { email: emailOnly.data.email, name: null } : null;
+}
+
+export function parseMessageRecipients(
+	value: Prisma.JsonValue,
+): MessageRecipient[] {
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((entry) => {
+		const parsed = messageRecipientOutput.safeParse(entry);
+		if (parsed.success) return [parsed.data];
+		const emailOnly = storedEmailOnly.safeParse(entry);
+		return emailOnly.success
+			? [{ email: emailOnly.data.email, name: null, kind: "to" as const }]
+			: [];
+	});
+}
+
+const communicationMessageOutput = z.object({
+	id: z.string(),
+	channel: z.nativeEnum(CommunicationChannel),
+	direction: z.nativeEnum(CommunicationDirection),
+	sender: messageParticipantOutput.nullable(),
+	recipients: z.array(messageRecipientOutput),
+	subject: z.string().nullable(),
+	body: z.string().nullable(),
+	snippet: z.string().nullable(),
+	sentAt: z.string(),
+	aiProcessingStatus: z.nativeEnum(AiProcessingStatus),
+});
+
+const communicationParticipantOutput = z.object({
+	id: z.string(),
+	role: z.string(),
+	name: z.string().nullable(),
+	email: z.string().nullable(),
+	phone: z.string().nullable(),
+	contact: linkedContactOutput.nullable(),
+	company: linkedCompanyOutput.nullable(),
+});
+
+const businessEventOutput = z.object({
+	id: z.string(),
+	type: z.string(),
+	source: z.nativeEnum(BusinessEventSource),
+	channel: z.nativeEnum(CommunicationChannel).nullable(),
+	actorType: z.string().nullable(),
+	actorId: z.string().nullable(),
+	occurredAt: z.string(),
+	data: z.unknown(),
+});
+
+const approvalOutput = z.object({
+	id: z.string(),
+	type: z.string(),
+	summary: z.string(),
+	status: z.nativeEnum(ApprovalRequestStatus),
+	riskLevel: z.string(),
+	confidence: z.number().nullable(),
+	createdAt: z.string(),
+	requestedByAgent: linkedRecordOutput.nullable(),
+});
+
+const insightOutput = z.object({
+	id: z.string(),
+	intent: z.string().nullable(),
+	summary: z.string().nullable(),
+	sentiment: z.string().nullable(),
+	urgency: z.string().nullable(),
+	nextAction: z.string().nullable(),
+	confidence: z.number().nullable(),
+	needsHumanReview: z.boolean(),
+	processedAt: z.string().nullable(),
+});
+
+const taskOutput = z.object({
+	id: z.string(),
+	title: z.string(),
+	status: z.nativeEnum(BusinessTaskStatus),
+	priority: z.nativeEnum(BusinessTaskPriority),
+	dueAt: z.string().nullable(),
+	assignedAgent: linkedRecordOutput.nullable(),
+	assignedUser: linkedRecordOutput.nullable(),
+});
+
+export const businessOsOverviewOutput = z.object({
+	counts: z.object({
+		openConversations: z.number(),
+		waitingOnUs: z.number(),
+		needsReview: z.number(),
+		pendingApprovals: z.number(),
+		openTasks: z.number(),
+		queuedOutbox: z.number(),
+		activeKnowledgeItems: z.number(),
+		activeRules: z.number(),
+		activeAutomations: z.number(),
+		recentEvents: z.number(),
+	}),
+	killSwitch: z.boolean(),
+	recentConversations: z.array(conversationBriefOutput),
+	pendingApprovals: z.array(approvalOutput),
+	recentEvents: z.array(businessEventOutput),
+	recentAutomationExecutions: z.array(
+		z.object({
+			id: z.string(),
+			status: z.nativeEnum(AutomationExecutionStatus),
+			createdAt: z.string(),
+			rule: linkedRecordOutput,
+		}),
+	),
+});
+
+export const inboxOutput = z.object({
+	conversations: z.array(conversationBriefOutput),
+});
+
+export const conversationDetailOutput = z.object({
+	conversation: conversationBriefOutput,
+	messages: z.array(communicationMessageOutput),
+	participants: z.array(communicationParticipantOutput),
+	insights: z.array(insightOutput),
+	approvals: z.array(approvalOutput),
+	events: z.array(businessEventOutput),
+});
+
+export const customer360Output = z.object({
+	contact: linkedContactOutput,
+	company: linkedCompanyOutput.nullable(),
+	identities: z.array(
+		z.object({
+			id: z.string(),
+			kind: z.string(),
+			channel: z.nativeEnum(CommunicationChannel).nullable(),
+			value: z.string(),
+			status: z.string(),
+			confidence: z.number().nullable(),
+		}),
+	),
+	conversations: z.array(conversationBriefOutput),
+	insights: z.array(insightOutput),
+	tasks: z.array(taskOutput),
+	events: z.array(businessEventOutput),
+	approvals: z.array(approvalOutput),
+	deals: z.array(
+		z.object({
+			id: z.string(),
+			name: z.string(),
+			stage: z.string(),
+			role: z.string().nullable(),
+			amountCents: z.number().nullable(),
+			currency: z.string(),
+		}),
+	),
+	activity: z.array(
+		z.object({
+			id: z.string(),
+			type: z.string(),
+			subject: z.string().nullable(),
+			body: z.string().nullable(),
+			createdAt: z.string(),
+		}),
+	),
+	readiness: z.array(
+		z.object({
+			key: z.string(),
+			label: z.string(),
+			ready: z.boolean(),
+			detail: z.string(),
+		}),
+	),
+});
+
+export const globalSearchOutput = z.object({
+	hits: z.array(
+		z.object({
+			kind: z.enum([
+				"company",
+				"contact",
+				"deal",
+				"booking",
+				"conversation",
+				"message",
+				"activity",
+				"knowledge",
+				"event",
+			]),
+			id: z.string(),
+			label: z.string(),
+			detail: z.string().nullable(),
+			occurredAt: z.string().nullable(),
+		}),
+	),
+});
+
+export const approvalsOutput = z.object({
+	approvals: z.array(approvalOutput),
+});
+
+export const knowledgeOutput = z.object({
+	items: z.array(
+		z.object({
+			id: z.string(),
+			type: z.nativeEnum(KnowledgeItemType),
+			title: z.string(),
+			active: z.boolean(),
+			source: z.string().nullable(),
+			confidence: z.number().nullable(),
+			versions: z.number(),
+			activeVersion: z.number().nullable(),
+		}),
+	),
+	rules: z.array(
+		z.object({
+			id: z.string(),
+			title: z.string(),
+			type: z.nativeEnum(KnowledgeItemType),
+			active: z.boolean(),
+			priority: z.number(),
+		}),
+	),
+});
+
+export const observabilityOutput = z.object({
+	outbox: z.object({
+		pending: z.number(),
+		sending: z.number(),
+		sent: z.number(),
+		failed: z.number(),
+		cancelled: z.number(),
+	}),
+	automationExecutions: z.object({
+		queued: z.number(),
+		running: z.number(),
+		waitingForApproval: z.number(),
+		succeeded: z.number(),
+		failed: z.number(),
+		cancelled: z.number(),
+	}),
+	automationRules: z.object({
+		draft: z.number(),
+		active: z.number(),
+		paused: z.number(),
+		archived: z.number(),
+	}),
+});
+
+export const calendarOutput = z.object({
+	range: z.object({
+		start: z.string(),
+		end: z.string(),
+		view: z.enum(["month", "week", "day", "agenda"]),
+	}),
+	connection: z.object({
+		configured: z.boolean(),
+		connected: z.boolean(),
+		status: z.string().nullable(),
+		lastSyncedAt: z.string().nullable(),
+		lastError: z.string().nullable(),
+	}),
+	calendars: z.array(
+		z.object({
+			id: z.string(),
+			name: z.string(),
+			connected: z.boolean(),
+		}),
+	),
+	events: z.array(
+		z.object({
+			id: z.string(),
+			title: z.string().nullable(),
+			description: z.string().nullable(),
+			location: z.string().nullable(),
+			conferenceUrl: z.string().nullable(),
+			startsAt: z.string(),
+			endsAt: z.string(),
+			isAllDay: z.boolean(),
+			status: z.string(),
+			organizerEmail: z.string().nullable(),
+			recurringEventId: z.string().nullable(),
+			googleEventId: z.string().nullable(),
+			sourceCalendar: z.string(),
+			attendees: z.array(
+				z.object({
+					id: z.string(),
+					email: z.string(),
+					name: z.string().nullable(),
+					responseStatus: z.string().nullable(),
+					isOrganizer: z.boolean(),
+					contact: linkedContactOutput.nullable(),
+				}),
+			),
+			contact: linkedContactOutput.nullable(),
+			company: linkedCompanyOutput.nullable(),
+			booking: linkedRecordOutput.nullable(),
+			deal: linkedRecordOutput.nullable(),
+			conversation: linkedRecordOutput.nullable(),
+		}),
+	),
+});
+
+export const activityFeedInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	type: z.nativeEnum(ActivityType).optional(),
+	cursor: z.string().trim().min(1).optional(),
+	limit: z.number().int().min(1).max(100).default(50),
+});
+
+export const activityFeedOutput = z.object({
+	entries: z.array(
+		z.object({
+			id: z.string(),
+			type: z.nativeEnum(ActivityType),
+			subject: z.string().nullable(),
+			body: z.string().nullable(),
+			occurredAt: z.string().nullable(),
+			dueAt: z.string().nullable(),
+			completedAt: z.string().nullable(),
+			createdAt: z.string(),
+			author: linkedRecordOutput.nullable(),
+			company: linkedRecordOutput.nullable(),
+			contact: linkedContactOutput.nullable(),
+			deal: linkedRecordOutput.nullable(),
+		}),
+	),
+	nextCursor: z.string().nullable(),
+});
+
+export const bookingsInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	when: z.enum(["upcoming", "past"]).default("upcoming"),
+	search: z.string().default(""),
+	cursor: z.string().trim().min(1).optional(),
+	limit: z.number().int().min(1).max(100).default(50),
+});
+
+export const bookingsOutput = z.object({
+	bookings: z.array(
+		z.object({
+			id: z.string(),
+			bookingKey: z.string(),
+			status: z.nativeEnum(BookingStatus),
+			eventDate: z.string(),
+			startsAt: z.string().nullable(),
+			endsAt: z.string().nullable(),
+			deal: z.object({
+				id: z.string(),
+				name: z.string(),
+				amountCents: z.number().nullable(),
+				currency: z.string(),
+			}),
+			company: linkedRecordOutput.nullable(),
+			conversationId: z.string().nullable(),
+		}),
+	),
+	nextCursor: z.string().nullable(),
+});
+
+const moneyBucketOutput = z.object({
+	count: z.number(),
+	baseValueCents: z.number(),
+});
+
+export const analyticsOutput = z.object({
+	reportingCurrency: z.string(),
+	generatedAt: z.string(),
+	pipeline: z.object({
+		stages: z.array(
+			z.object({
+				stage: z.nativeEnum(DealStage),
+				count: z.number(),
+				baseValueCents: z.number(),
+			}),
+		),
+		openCount: z.number(),
+		openBaseValueCents: z.number(),
+		unconvertedOpen: z.object({
+			count: z.number(),
+			currencies: z.array(z.string()),
+		}),
+	}),
+	outcomes90d: z.object({
+		wonCount: z.number(),
+		wonBaseValueCents: z.number(),
+		lostCount: z.number(),
+		lostBaseValueCents: z.number(),
+		winRate: z.number().nullable(),
+	}),
+	weekly: z.array(
+		z.object({
+			weekStart: z.string(),
+			dealsCreated: z.number(),
+			activities: z.number(),
+		}),
+	),
+});
+
+export const financeOutput = z.object({
+	reportingCurrency: z.string(),
+	generatedAt: z.string(),
+	openPipeline: moneyBucketOutput.extend({
+		unconverted: z.object({
+			count: z.number(),
+			currencies: z.array(z.string()),
+		}),
+	}),
+	wonAllTime: moneyBucketOutput,
+	won90d: moneyBucketOutput,
+	lost90d: moneyBucketOutput,
+	avgOpenDealCents: z.number().nullable(),
+	closingSoon: z.array(
+		z.object({
+			id: z.string(),
+			name: z.string(),
+			stage: z.nativeEnum(DealStage),
+			expectedCloseDate: z.string(),
+			amountCents: z.number().nullable(),
+			currency: z.string(),
+			baseAmountCents: z.number().nullable(),
+			companyName: z.string(),
+		}),
+	),
+});
+
+export type BusinessOsOverviewOutput = z.infer<typeof businessOsOverviewOutput>;
+export type InboxInput = z.infer<typeof inboxInput>;
+export type InboxOutput = z.infer<typeof inboxOutput>;
+export type ConversationDetailOutput = z.infer<typeof conversationDetailOutput>;
+export type Customer360Output = z.infer<typeof customer360Output>;
+export type GlobalSearchInput = z.infer<typeof globalSearchInput>;
+export type GlobalSearchOutput = z.infer<typeof globalSearchOutput>;
+export type ApprovalsOutput = z.infer<typeof approvalsOutput>;
+export type KnowledgeOutput = z.infer<typeof knowledgeOutput>;
+export type ObservabilityOutput = z.infer<typeof observabilityOutput>;
+export type ActivityFeedInput = z.infer<typeof activityFeedInput>;
+export type ActivityFeedOutput = z.infer<typeof activityFeedOutput>;
+export type BookingsInput = z.infer<typeof bookingsInput>;
+export type BookingsOutput = z.infer<typeof bookingsOutput>;
+export type AnalyticsOutput = z.infer<typeof analyticsOutput>;
+export type FinanceOutput = z.infer<typeof financeOutput>;
+export type CalendarInput = z.infer<typeof calendarInput>;
+export type CalendarOutput = z.infer<typeof calendarOutput>;
+
+export const OUTBOX_STATUSES = Object.values(BusinessEventOutboxStatus);
+export const AUTOMATION_EXECUTION_STATUSES = Object.values(
+	AutomationExecutionStatus,
+);
+export const AUTOMATION_RULE_STATUSES = Object.values(AutomationRuleStatus);

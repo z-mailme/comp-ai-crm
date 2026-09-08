@@ -1,4 +1,8 @@
-import { domainFromEmail, isMachineDomain } from "../companies/domain";
+import {
+	domainFromEmail,
+	isMachineDomain,
+	normalizeDomain,
+} from "../companies/domain";
 
 export type Participant = {
 	email: string;
@@ -160,6 +164,25 @@ export function externalParticipants(
 	});
 }
 
+export function exactContactParticipants(
+	participants: readonly Participant[],
+	options: ExternalFilterOptions,
+): Participant[] {
+	return participants.filter((participant) => {
+		if (options.ourAddresses.has(participant.email)) return false;
+		if (options.suppressedEmails.has(participant.email)) return false;
+		if (isMachineAddress(participant.email)) return false;
+
+		const domain = emailDomain(participant.email);
+		if (!domain) return false;
+		if (options.ourDomains.has(domain)) return false;
+		if (options.suppressedDomains.has(domain)) return false;
+		if (isAutomatedAddress(participant.email)) return false;
+
+		return true;
+	});
+}
+
 export function dominantDomain(
 	participants: readonly Participant[],
 	preferKnown: ReadonlySet<string> = new Set(),
@@ -226,5 +249,13 @@ export function splitName(name: string | null, email: string): PersonName {
 }
 
 function isEmailish(value: string): boolean {
+	if (value.includes("\u0000")) return false;
 	return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value);
+}
+
+function emailDomain(email: string): string | null {
+	const at = email.lastIndexOf("@");
+	if (at < 1) return null;
+
+	return normalizeDomain(email.slice(at + 1));
 }

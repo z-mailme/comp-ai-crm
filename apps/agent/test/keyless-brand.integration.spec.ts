@@ -51,11 +51,13 @@ const subjectOf = (companyId: string) => ({
 });
 
 async function retiredSubjectOf(companyId: string) {
-	await db.$executeRaw`
-		UPDATE "company"
-		SET "updatedAt" = NOW() - INTERVAL '1 second'
-		WHERE id = ${companyId}
-	`;
+	const finishedAt = new Date();
+	const beforeFinishedAt = new Date(finishedAt.getTime() - 60_000);
+
+	await db.company.update({
+		where: { id: companyId },
+		data: { updatedAt: beforeFinishedAt },
+	});
 
 	const row = await db.agentTask.create({
 		data: {
@@ -64,7 +66,7 @@ async function retiredSubjectOf(companyId: string) {
 			reason: "keyless",
 			attempts: 3,
 			dueAt: new Date(),
-			finishedAt: new Date(),
+			finishedAt,
 		},
 		select: { id: true },
 	});

@@ -1,7 +1,12 @@
 import {
 	ActivityType,
+	BusinessEventSource,
+	CommunicationChannel,
+	CommunicationDirection,
+	CommunicationParticipantRole,
 	type Db,
 	EmailDirection,
+	MailboxMatchStatus,
 	type MailboxSyncModel as MailboxSync,
 	type Prisma,
 	Prisma as PrismaNamespace,
@@ -11,12 +16,14 @@ import { Injectable, Logger } from "@nestjs/common";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import type { SyncSource } from "./mailbox.constants";
+import { MailboxDealMatchService } from "./mailbox-deal-match.service";
 import {
 	MailboxMatchService,
 	type MatchContext,
 } from "./mailbox-match.service";
 import { snippetOf } from "./message-text";
 import type { Participant } from "./participants";
+import { sanitizeIncomingMessage, sanitizeMailboxJson } from "./sanitize";
 
 export type IncomingMessage = {
 	rfcMessageId: string;
@@ -29,6 +36,7 @@ export type IncomingMessage = {
 	gmailMessageId?: string | null;
 	outlookMessageId?: string | null;
 	outlookWebLink?: string | null;
+	dealId?: string | null;
 };
 
 @Injectable()
@@ -38,6 +46,7 @@ export class ThreadWriterService {
 	constructor(
 		@InjectDatabase() private readonly db: Db,
 		private readonly match: MailboxMatchService,
+		private readonly deals: MailboxDealMatchService,
 		private readonly stamp: ActivityStampService,
 	) {}
 
@@ -62,43 +71,69 @@ export class ThreadWriterService {
 		parsed: IncomingMessage,
 		context: MatchContext,
 	): Promise<boolean> {
+		const safe = sanitizeIncomingMessage(parsed);
 		const existing = await this.db.emailMessage.findUnique({
-			where: { rfcMessageId: parsed.rfcMessageId },
+			where: { rfcMessageId: safe.rfcMessageId },
 			select: {
+				id: true,
 				threadId: true,
+				communicationMessage: { select: { id: true } },
 				thread: {
 					select: {
 						companyId: true,
 						contactId: true,
-						activity: { select: { id: true } },
+						dealId: true,
+						matchStatus: true,
+						firstMessageAt: true,
+						lastMessageAt: true,
+						activity: { select: { id: true, dealId: true } },
 					},
 				},
 			},
 		});
-		if (existing?.thread.activity) return false;
+		if (
+			existing?.thread.activity?.dealId &&
+			existing.thread.dealId &&
+			existing.communicationMessage
+		) {
+			return false;
+		}
 
 		const repair = existing !== null;
-		const participants = [parsed.from, ...parsed.recipients];
-		const outbound = parsed.from.email === options.mailbox;
+		const participants = [safe.from, ...safe.recipients];
+		const outbound = safe.from.email === options.mailbox;
 
 		const thread = existing
 			? {
 					id: existing.threadId,
 					companyId: existing.thread.companyId,
 					contactId: existing.thread.contactId,
+					dealId: existing.thread.dealId,
+					matchStatus: existing.thread.matchStatus,
+					firstMessageAt: existing.thread.firstMessageAt,
+					lastMessageAt: existing.thread.lastMessageAt,
 				}
 			: await this.db.emailThread.findUnique({
-					where: { rootMessageId: parsed.rootId },
-					select: { id: true, companyId: true, contactId: true },
+					where: { rootMessageId: safe.rootId },
+					select: {
+						id: true,
+						companyId: true,
+						contactId: true,
+						dealId: true,
+						matchStatus: true,
+						firstMessageAt: true,
+						lastMessageAt: true,
+					},
 				});
 
 		let companyId = thread?.companyId ?? null;
 		let contactId = thread?.contactId ?? null;
+		let dealId = thread?.dealId ?? null;
 
-		if (!thread) {
+		if (!thread || !companyId || !contactId) {
 			const repliedTo =
 				outbound ||
-				(await this.hasOutboundInThread(parsed.rootId, options.mailbox));
+				(await this.hasOutboundInThread(safe.rootId, options.mailbox));
 
 			const match = await this.match.resolve(
 				{
@@ -110,13 +145,38 @@ export class ThreadWriterService {
 				context,
 			);
 
-			companyId = match.companyId;
-			contactId = match.contactId;
-
-			if (!companyId && !contactId) {
-				return false;
-			}
+			const nextCompanyId = companyId ?? match.companyId;
+			companyId = nextCompanyId;
+			contactId =
+				contactId ??
+				(match.contactId &&
+				(!nextCompanyId || match.companyId === nextCompanyId)
+					? match.contactId
+					: null);
 		}
+
+		const firstMessageAt =
+			thread && thread.firstMessageAt < safe.sentAt
+				? thread.firstMessageAt
+				: safe.sentAt;
+		const lastMessageAt =
+			thread && thread.lastMessageAt > safe.sentAt
+				? thread.lastMessageAt
+				: safe.sentAt;
+
+		const dealMatch = await this.deals.resolve({
+			explicitDealId: safe.dealId ?? null,
+			existingDealId: dealId,
+			companyId,
+			contactId,
+			firstMessageAt,
+			lastMessageAt,
+		});
+
+		dealId = dealMatch.dealId;
+		companyId = companyId ?? dealMatch.companyId;
+
+		const matchStatus = matchStatusFor({ companyId, contactId, dealId });
 
 		let occurredAt: Date;
 
@@ -125,42 +185,47 @@ export class ThreadWriterService {
 				const record = existing
 					? { id: existing.threadId }
 					: await tx.emailThread.upsert({
-							where: { rootMessageId: parsed.rootId },
+							where: { rootMessageId: safe.rootId },
 							create: {
-								rootMessageId: parsed.rootId,
-								subject: parsed.subject,
+								rootMessageId: safe.rootId,
+								subject: safe.subject,
+								matchStatus,
 								companyId,
 								contactId,
-								firstMessageAt: parsed.sentAt,
-								lastMessageAt: parsed.sentAt,
+								dealId,
+								firstMessageAt: safe.sentAt,
+								lastMessageAt: safe.sentAt,
 								messageCount: 0,
 							},
 							update: {},
 							select: { id: true },
 						});
 
-				if (!repair) {
-					await tx.emailMessage.create({
-						data: {
-							threadId: record.id,
-							rfcMessageId: parsed.rfcMessageId,
-							syncedByUserId: row.userId,
-							gmailMessageId: parsed.gmailMessageId ?? null,
-							outlookMessageId: parsed.outlookMessageId ?? null,
-							outlookWebLink: parsed.outlookWebLink ?? null,
-							direction: outbound
-								? EmailDirection.OUTBOUND
-								: EmailDirection.INBOUND,
-							fromEmail: parsed.from.email,
-							fromName: parsed.from.name,
-							recipients: parsed.recipients,
-							subject: parsed.subject,
-							snippet: snippetOf(parsed.body),
-							body: parsed.body || null,
-							sentAt: parsed.sentAt,
-						},
-					});
-				}
+				const message = existing
+					? { id: existing.id }
+					: await tx.emailMessage.create({
+							data: {
+								threadId: record.id,
+								rfcMessageId: safe.rfcMessageId,
+								syncedByUserId: row.userId,
+								gmailMessageId: safe.gmailMessageId ?? null,
+								outlookMessageId: safe.outlookMessageId ?? null,
+								outlookWebLink: safe.outlookWebLink ?? null,
+								direction: outbound
+									? EmailDirection.OUTBOUND
+									: EmailDirection.INBOUND,
+								fromEmail: safe.from.email,
+								fromName: safe.from.name,
+								recipients: sanitizeMailboxJson(
+									safe.recipients,
+								) as Prisma.InputJsonValue,
+								subject: safe.subject,
+								snippet: snippetOf(safe.body),
+								body: safe.body || null,
+								sentAt: safe.sentAt,
+							},
+							select: { id: true },
+						});
 
 				const stats = await tx.emailMessage.aggregate({
 					where: { threadId: record.id },
@@ -169,34 +234,74 @@ export class ThreadWriterService {
 					_max: { sentAt: true },
 				});
 
-				const firstMessageAt = stats._min.sentAt ?? parsed.sentAt;
-				const lastMessageAt = stats._max.sentAt ?? parsed.sentAt;
+				const firstMessageAt = stats._min.sentAt ?? safe.sentAt;
+				const lastMessageAt = stats._max.sentAt ?? safe.sentAt;
 
-				const data: Prisma.EmailThreadUpdateInput = {
+				const data: Prisma.EmailThreadUncheckedUpdateInput = {
 					messageCount: stats._count._all,
 					firstMessageAt,
 					lastMessageAt,
+					matchStatus,
+					companyId,
+					contactId,
+					dealId,
 				};
 
-				if (parsed.sentAt <= firstMessageAt) data.subject = parsed.subject;
+				if (safe.sentAt <= firstMessageAt) data.subject = safe.subject;
 
 				await tx.emailThread.update({ where: { id: record.id }, data });
 
-				return this.project(tx, record.id, row.userId, {
-					subject: parsed.subject ?? "(no subject)",
-					snippet: snippetOf(parsed.body),
+				await this.projectCommunication(tx, {
+					emailThreadId: record.id,
+					emailMessageId: message.id,
+					userId: row.userId,
+					rootMessageId: safe.rootId,
+					rfcMessageId: safe.rfcMessageId,
+					providerMessageId:
+						safe.gmailMessageId ?? safe.outlookMessageId ?? safe.rfcMessageId,
+					subject: safe.subject,
+					snippet: snippetOf(safe.body),
+					body: safe.body,
+					from: safe.from,
+					recipients: safe.recipients,
+					sentAt: safe.sentAt,
 					lastMessageAt,
+					direction: outbound
+						? CommunicationDirection.OUTBOUND
+						: CommunicationDirection.INBOUND,
 					companyId,
 					contactId,
+					dealId,
 					origin: options.origin,
+					mailbox: options.mailbox,
 				});
+
+				if (companyId || contactId || dealId) {
+					return this.project(tx, record.id, row.userId, {
+						subject: safe.subject ?? "(no subject)",
+						snippet: snippetOf(safe.body),
+						lastMessageAt,
+						companyId,
+						contactId,
+						dealId,
+						origin: options.origin,
+					});
+				}
+
+				return lastMessageAt;
 			});
 		} catch (error) {
-			if (await this.storedElsewhere(error, parsed.rfcMessageId)) return false;
+			if (await this.storedElsewhere(error, safe.rfcMessageId)) return false;
 			throw error;
 		}
 
-		await this.touch({ companyId, contactId }, occurredAt, parsed.rfcMessageId);
+		if (companyId || contactId || dealId) {
+			await this.touch(
+				{ companyId, contactId, dealId },
+				occurredAt,
+				safe.rfcMessageId,
+			);
+		}
 
 		return !repair;
 	}
@@ -211,7 +316,7 @@ export class ThreadWriterService {
 		if (!duplicate) return false;
 
 		const winner = await this.db.emailMessage.findFirst({
-			where: { rfcMessageId, thread: { activity: { isNot: null } } },
+			where: { rfcMessageId },
 			select: { id: true },
 		});
 
@@ -219,7 +324,11 @@ export class ThreadWriterService {
 	}
 
 	private async touch(
-		target: { companyId: string | null; contactId: string | null },
+		target: {
+			companyId: string | null;
+			contactId: string | null;
+			dealId: string | null;
+		},
 		at: Date,
 		rfcMessageId: string,
 	): Promise<void> {
@@ -262,6 +371,7 @@ export class ThreadWriterService {
 			lastMessageAt: Date;
 			companyId: string | null;
 			contactId: string | null;
+			dealId: string | null;
 			origin: SyncSource;
 		},
 	): Promise<Date> {
@@ -274,6 +384,7 @@ export class ThreadWriterService {
 				occurredAt: summary.lastMessageAt,
 				companyId: summary.companyId,
 				contactId: summary.contactId,
+				dealId: summary.dealId,
 				createdById: userId,
 				emailThreadId,
 				meta: { synced: true, source: summary.origin },
@@ -281,10 +392,265 @@ export class ThreadWriterService {
 			update: {
 				body: summary.snippet,
 				occurredAt: summary.lastMessageAt,
+				companyId: summary.companyId,
+				contactId: summary.contactId,
+				dealId: summary.dealId,
 			},
 			select: { createdAt: true },
 		});
 
 		return activity.createdAt;
+	}
+
+	private async projectCommunication(
+		tx: Prisma.TransactionClient,
+		input: {
+			emailThreadId: string;
+			emailMessageId: string;
+			userId: string;
+			rootMessageId: string;
+			rfcMessageId: string;
+			providerMessageId: string;
+			subject: string | null;
+			snippet: string | null;
+			body: string;
+			from: Participant;
+			recipients: { email: string; name: string | null; kind: "to" | "cc" }[];
+			sentAt: Date;
+			lastMessageAt: Date;
+			direction: CommunicationDirection;
+			companyId: string | null;
+			contactId: string | null;
+			dealId: string | null;
+			origin: SyncSource;
+			mailbox: string;
+		},
+	): Promise<void> {
+		const channelAccount = await tx.channelAccount.findFirst({
+			where: {
+				userId: input.userId,
+				channel: CommunicationChannel.EMAIL,
+				provider: input.origin,
+				OR: [{ externalAccountId: input.mailbox }, { externalAccountId: null }],
+			},
+			orderBy: [{ externalAccountId: "desc" }, { createdAt: "asc" }],
+			select: { id: true, businessUnitId: true },
+		});
+		await tx.conversation.updateMany({
+			where: {
+				channel: CommunicationChannel.EMAIL,
+				externalThreadId: input.rootMessageId,
+				emailThreadId: null,
+			},
+			data: { emailThreadId: input.emailThreadId },
+		});
+		const conversation = await tx.conversation.upsert({
+			where: { emailThreadId: input.emailThreadId },
+			create: {
+				businessUnitId: channelAccount?.businessUnitId ?? null,
+				channelAccountId: channelAccount?.id ?? null,
+				channel: CommunicationChannel.EMAIL,
+				subject: input.subject,
+				preview: input.snippet,
+				externalThreadId: input.rootMessageId,
+				emailThreadId: input.emailThreadId,
+				companyId: input.companyId,
+				contactId: input.contactId,
+				dealId: input.dealId,
+				firstMessageAt: input.sentAt,
+				lastMessageAt: input.lastMessageAt,
+				unreadCount: input.direction === CommunicationDirection.INBOUND ? 1 : 0,
+				metadata: sanitizeMailboxJson({
+					source: input.origin,
+					rootMessageId: input.rootMessageId,
+				}) as Prisma.InputJsonValue,
+			},
+			update: {
+				businessUnitId: channelAccount?.businessUnitId,
+				channelAccountId: channelAccount?.id,
+				subject: input.subject,
+				preview: input.snippet,
+				companyId: input.companyId,
+				contactId: input.contactId,
+				dealId: input.dealId,
+				lastMessageAt: input.lastMessageAt,
+			},
+			select: { id: true },
+		});
+
+		const message = await tx.communicationMessage.upsert({
+			where: { emailMessageId: input.emailMessageId },
+			create: {
+				conversationId: conversation.id,
+				channel: CommunicationChannel.EMAIL,
+				direction: input.direction,
+				sender: participantPayload(input.from),
+				recipients: input.recipients.map((recipient) =>
+					participantPayload(recipient),
+				),
+				subject: input.subject,
+				body: input.body || null,
+				snippet: input.snippet,
+				sentAt: input.sentAt,
+				externalMessageId: input.rfcMessageId,
+				providerMessageId: input.providerMessageId,
+				emailMessageId: input.emailMessageId,
+				metadata: sanitizeMailboxJson({
+					source: input.origin,
+					rfcMessageId: input.rfcMessageId,
+				}) as Prisma.InputJsonValue,
+			},
+			update: {
+				conversationId: conversation.id,
+				direction: input.direction,
+				sender: participantPayload(input.from),
+				recipients: input.recipients.map((recipient) =>
+					participantPayload(recipient),
+				),
+				subject: input.subject,
+				body: input.body || null,
+				snippet: input.snippet,
+				sentAt: input.sentAt,
+			},
+			select: { id: true },
+		});
+
+		await tx.communicationParticipant.deleteMany({
+			where: { messageId: message.id },
+		});
+
+		await tx.communicationParticipant.createMany({
+			data: [
+				{
+					conversationId: conversation.id,
+					messageId: message.id,
+					role: CommunicationParticipantRole.SENDER,
+					name: input.from.name,
+					email: input.from.email,
+					contactId:
+						input.direction === CommunicationDirection.INBOUND
+							? input.contactId
+							: null,
+					companyId:
+						input.direction === CommunicationDirection.INBOUND
+							? input.companyId
+							: null,
+				},
+				...input.recipients.map((recipient) => ({
+					conversationId: conversation.id,
+					messageId: message.id,
+					role:
+						recipient.kind === "cc"
+							? CommunicationParticipantRole.CC
+							: CommunicationParticipantRole.RECIPIENT,
+					name: recipient.name,
+					email: recipient.email,
+					contactId:
+						input.direction === CommunicationDirection.OUTBOUND
+							? input.contactId
+							: null,
+					companyId:
+						input.direction === CommunicationDirection.OUTBOUND
+							? input.companyId
+							: null,
+				})),
+			],
+		});
+
+		await tx.businessEvent.upsert({
+			where: {
+				idempotencyKey: `communication:${input.emailMessageId}:${input.direction.toLowerCase()}`,
+			},
+			create: {
+				businessUnitId: channelAccount?.businessUnitId ?? null,
+				type:
+					input.direction === CommunicationDirection.OUTBOUND
+						? "communication.sent"
+						: "communication.received",
+				source: eventSourceFor(input.origin),
+				channel: CommunicationChannel.EMAIL,
+				actorType:
+					input.direction === CommunicationDirection.OUTBOUND
+						? "user"
+						: "contact",
+				actorId:
+					input.direction === CommunicationDirection.OUTBOUND
+						? input.userId
+						: input.contactId,
+				actorUserId:
+					input.direction === CommunicationDirection.OUTBOUND
+						? input.userId
+						: null,
+				companyId: input.companyId,
+				contactId: input.contactId,
+				dealId: input.dealId,
+				conversationId: conversation.id,
+				messageId: message.id,
+				occurredAt: input.sentAt,
+				data: sanitizeMailboxJson({
+					subject: input.subject,
+					snippet: input.snippet,
+					rfcMessageId: input.rfcMessageId,
+					rootMessageId: input.rootMessageId,
+					providerMessageId: input.providerMessageId,
+					source: input.origin,
+				}) as Prisma.InputJsonValue,
+				correlationId: input.rootMessageId,
+				idempotencyKey: `communication:${input.emailMessageId}:${input.direction.toLowerCase()}`,
+				outbox: {
+					create: {
+						destination: "memory-bridge",
+						payload: sanitizeMailboxJson({
+							entityType: "MESSAGE",
+							entityId: message.id,
+							conversationId: conversation.id,
+							businessUnitId: channelAccount?.businessUnitId ?? null,
+							source: input.origin,
+						}) as Prisma.InputJsonValue,
+					},
+				},
+			},
+			update: {
+				businessUnitId: channelAccount?.businessUnitId,
+				companyId: input.companyId,
+				contactId: input.contactId,
+				dealId: input.dealId,
+				conversationId: conversation.id,
+				messageId: message.id,
+				occurredAt: input.sentAt,
+			},
+		});
+	}
+}
+
+function matchStatusFor(target: {
+	companyId: string | null;
+	contactId: string | null;
+	dealId: string | null;
+}): MailboxMatchStatus {
+	if (target.dealId) return MailboxMatchStatus.MATCHED_DEAL;
+	if (target.contactId) return MailboxMatchStatus.MATCHED_CONTACT;
+	if (target.companyId) return MailboxMatchStatus.MATCHED_COMPANY;
+	return MailboxMatchStatus.UNMATCHED;
+}
+
+function participantPayload(participant: {
+	email: string;
+	name: string | null;
+}): Prisma.InputJsonValue {
+	return sanitizeMailboxJson({
+		email: participant.email,
+		name: participant.name,
+	}) as Prisma.InputJsonValue;
+}
+
+function eventSourceFor(origin: SyncSource): BusinessEventSource {
+	switch (origin) {
+		case "gmail":
+			return BusinessEventSource.GMAIL;
+		case "outlook":
+			return BusinessEventSource.OUTLOOK;
+		case "calendar":
+			return BusinessEventSource.CALENDAR;
 	}
 }

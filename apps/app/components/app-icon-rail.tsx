@@ -1,11 +1,31 @@
 "use client";
 
+import Activity from "@carbon/icons-react/es/Activity";
+import AiObservability from "@carbon/icons-react/es/AiObservability";
+import Analytics from "@carbon/icons-react/es/Analytics";
+import Api from "@carbon/icons-react/es/Api";
+import Application from "@carbon/icons-react/es/Application";
 import Building from "@carbon/icons-react/es/Building";
+import Bullhorn from "@carbon/icons-react/es/Bullhorn";
+import Calendar from "@carbon/icons-react/es/Calendar";
+import ChartLine from "@carbon/icons-react/es/ChartLine";
 import Close from "@carbon/icons-react/es/Close";
 import Dashboard from "@carbon/icons-react/es/Dashboard";
+import Document from "@carbon/icons-react/es/Document";
+import Email from "@carbon/icons-react/es/Email";
+import Finance from "@carbon/icons-react/es/Finance";
+import Flow from "@carbon/icons-react/es/Flow";
+import Money from "@carbon/icons-react/es/Money";
+import Notebook from "@carbon/icons-react/es/Notebook";
 import Partnership from "@carbon/icons-react/es/Partnership";
+import Purchase from "@carbon/icons-react/es/Purchase";
+import Report from "@carbon/icons-react/es/Report";
+import Security from "@carbon/icons-react/es/Security";
 import Settings from "@carbon/icons-react/es/Settings";
+import Task from "@carbon/icons-react/es/Task";
+import Tools from "@carbon/icons-react/es/Tools";
 import UserMultiple from "@carbon/icons-react/es/UserMultiple";
+import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
 import type { CarbonIcon } from "@crm/ui/components/icon";
 import { Icon } from "@crm/ui/components/icon";
@@ -16,51 +36,61 @@ import {
 	SheetHeader,
 	SheetTitle,
 } from "@crm/ui/components/sheet";
-import {
-	Tooltip,
-	TooltipContent,
-	TooltipTrigger,
-} from "@crm/ui/components/tooltip";
 import { cn } from "@crm/ui/lib/utils";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useMemo } from "react";
-import { AgentBuilderSidebar } from "@/components/agent-builder/agent-builder-sidebar";
+import {
+	BUSINESS_OS_NAVIGATION,
+	type NavigationItem,
+	type NavigationStatus,
+} from "@/components/business-os-navigation";
 import { usePrefetchSection } from "@/components/crm/section-prefetch";
 import { useMobileNav } from "@/components/mobile-nav";
 import { useWorkspaceUrl } from "@/lib/use-workspace-url";
 
-type RailItem = {
-	title: string;
+type NavItem = Omit<NavigationItem, "href" | "related"> & {
 	href: string;
-	icon: CarbonIcon;
-	iconClassName?: string;
-	match: "exact" | "prefix";
+	section: string;
 	related?: string[];
 };
 
-const ITEMS: RailItem[] = [
-	{ title: "Overview", href: "/", icon: Dashboard, match: "exact" },
-	{
-		title: "Chat",
-		href: "/chat",
-		icon: Bot,
-		iconClassName: "size-5",
-		match: "prefix",
-		related: ["/agents"],
-	},
-	{ title: "Companies", href: "/companies", icon: Building, match: "prefix" },
-	{
-		title: "Contacts",
-		href: "/contacts",
-		icon: UserMultiple,
-		match: "prefix",
-	},
-	{ title: "Deals", href: "/deals", icon: Partnership, match: "prefix" },
-	{ title: "Settings", href: "/settings", icon: Settings, match: "prefix" },
-];
+type NavGroup = {
+	title: string;
+	items: NavItem[];
+};
 
-function isActive(item: RailItem, pathname: string): boolean {
+const ICONS = new Map<string, CarbonIcon>(
+	Object.entries({
+		activity: Activity,
+		analytics: Analytics,
+		api: Api,
+		application: Application,
+		bot: Bot,
+		building: Building,
+		calendar: Calendar,
+		chart: ChartLine,
+		command: AiObservability,
+		dashboard: Dashboard,
+		deal: Partnership,
+		document: Document,
+		email: Email,
+		finance: Finance,
+		flow: Flow,
+		marketing: Bullhorn,
+		money: Money,
+		notebook: Notebook,
+		people: UserMultiple,
+		purchase: Purchase,
+		report: Report,
+		security: Security,
+		settings: Settings,
+		task: Task,
+		tools: Tools,
+	} satisfies Record<string, CarbonIcon>),
+);
+
+function isActive(item: NavItem, pathname: string): boolean {
 	return (
 		pathname === item.href ||
 		(item.match === "prefix" && pathname.startsWith(item.href)) ||
@@ -68,63 +98,40 @@ function isActive(item: RailItem, pathname: string): boolean {
 	);
 }
 
-function RailLink({
-	item,
-	active,
-	onPrefetch,
-}: {
-	item: RailItem;
-	active: boolean;
-	onPrefetch: () => void;
-}) {
-	return (
-		<Tooltip>
-			<TooltipTrigger asChild>
-				<Button
-					asChild
-					variant="ghost"
-					size="icon"
-					className={cn(
-						"text-muted-foreground",
-						active &&
-							"bg-muted text-foreground hover:bg-muted hover:text-foreground",
-					)}
-				>
-					<Link
-						href={item.href}
-						prefetch
-						onMouseEnter={onPrefetch}
-						onFocus={onPrefetch}
-						aria-current={active ? "page" : undefined}
-						transitionTypes={["nav-lateral"]}
-					>
-						<Icon icon={item.icon} className={item.iconClassName} />
-						<span className="sr-only">{item.title}</span>
-					</Link>
-				</Button>
-			</TooltipTrigger>
-			<TooltipContent side="right">{item.title}</TooltipContent>
-		</Tooltip>
-	);
+function statusLabel(status: NavigationStatus): string | null {
+	if (status === "ACTIVE") return null;
+	if (status === "NOT_CONFIGURED") return "Setup";
+	if (status === "COMING_SOON") return "Soon";
+	if (status === "ADMIN_ONLY") return "Admin";
+	if (status === "DISABLED") return "Off";
+	return null;
 }
 
-function MobileRailLink({
+function NavLink({
 	item,
 	active,
 	onNavigate,
 	onPrefetch,
+	compact = false,
 }: {
-	item: RailItem;
+	item: NavItem;
 	active: boolean;
-	onNavigate: () => void;
+	onNavigate?: () => void;
 	onPrefetch: () => void;
+	compact?: boolean;
 }) {
+	const icon = ICONS.get(item.icon) ?? Application;
+	const label = statusLabel(item.status);
+
 	return (
 		<Button
 			asChild
 			variant="ghost"
+			size={compact ? "icon" : "sm"}
 			className={cn(
-				"justify-start gap-3 text-muted-foreground",
+				compact
+					? "text-muted-foreground"
+					: "h-9 w-full justify-start gap-2 px-2 text-muted-foreground",
 				active &&
 					"bg-muted text-foreground hover:bg-muted hover:text-foreground",
 			)}
@@ -134,74 +141,117 @@ function MobileRailLink({
 				prefetch
 				onMouseEnter={onPrefetch}
 				onFocus={onPrefetch}
-				aria-current={active ? "page" : undefined}
 				onClick={onNavigate}
+				aria-current={active ? "page" : undefined}
 				transitionTypes={[
 					item.title === "Chat" ? "nav-forward" : "nav-lateral",
 				]}
 			>
-				<Icon icon={item.icon} className={item.iconClassName} />
-				<span>{item.title}</span>
+				<Icon
+					icon={icon}
+					className={item.icon === "bot" ? "size-5" : undefined}
+				/>
+				{compact ? (
+					<span className="sr-only">{item.title}</span>
+				) : (
+					<>
+						<span className="min-w-0 flex-1 truncate text-left">
+							{item.title}
+						</span>
+						{label ? (
+							<Badge
+								variant="outline"
+								className="h-5 shrink-0 px-1.5 text-[10px]"
+							>
+								{label}
+							</Badge>
+						) : null}
+					</>
+				)}
 			</Link>
 		</Button>
 	);
 }
 
-function MobileRailIconLink({
-	item,
-	active,
+function NavGroupView({
+	group,
+	pathname,
 	onNavigate,
 	onPrefetch,
 }: {
-	item: RailItem;
-	active: boolean;
-	onNavigate: () => void;
-	onPrefetch: () => void;
+	group: NavGroup;
+	pathname: string;
+	onNavigate?: () => void;
+	onPrefetch: (section: string) => void;
 }) {
 	return (
-		<Button
-			asChild
-			variant="ghost"
-			size="icon"
-			className={cn(
-				"text-muted-foreground",
-				active &&
-					"bg-muted text-foreground hover:bg-muted hover:text-foreground",
-			)}
-		>
-			<Link
-				href={item.href}
-				prefetch
-				onMouseEnter={onPrefetch}
-				onFocus={onPrefetch}
-				aria-current={active ? "page" : undefined}
-				onClick={onNavigate}
-			>
-				<Icon icon={item.icon} className={item.iconClassName} />
-				<span className="sr-only">{item.title}</span>
-			</Link>
-		</Button>
+		<details open className="group">
+			<summary className="flex h-8 cursor-pointer list-none items-center px-2 font-medium text-muted-foreground text-xs uppercase tracking-normal">
+				{group.title}
+			</summary>
+			<div className="grid gap-1">
+				{group.items.map((item) => (
+					<NavLink
+						key={item.href}
+						item={item}
+						active={isActive(item, pathname)}
+						onNavigate={onNavigate}
+						onPrefetch={() => onPrefetch(item.section)}
+					/>
+				))}
+			</div>
+		</details>
+	);
+}
+
+function useNavigationGroups(): NavGroup[] {
+	const workspaceUrl = useWorkspaceUrl();
+
+	return useMemo(
+		() =>
+			BUSINESS_OS_NAVIGATION.map((group) => ({
+				title: group.title,
+				items: group.items.map((item) => ({
+					...item,
+					section: item.prefetchSection ?? item.href,
+					href: workspaceUrl(item.href),
+					related: item.related?.map((path) => workspaceUrl(path)),
+				})),
+			})),
+		[workspaceUrl],
 	);
 }
 
 export function AppIconRailFallback() {
+	const groups = BUSINESS_OS_NAVIGATION;
+
 	return (
 		<nav
 			aria-label="Primary"
 			aria-busy="true"
-			className="hidden w-14 shrink-0 flex-col items-center gap-1 border-r py-3 md:flex [view-transition-name:app-rail]"
+			className="hidden w-64 shrink-0 flex-col gap-3 overflow-y-auto border-r bg-background p-3 md:flex [view-transition-name:app-rail]"
 		>
-			{ITEMS.map((item) => (
-				<Button
-					key={item.href}
-					variant="ghost"
-					size="icon"
-					disabled
-					className="text-muted-foreground"
-				>
-					<Icon icon={item.icon} className={item.iconClassName} />
-					<span className="sr-only">{item.title}</span>
-				</Button>
+			{groups.map((group) => (
+				<div key={group.title} className="grid gap-1">
+					<div className="h-8 px-2 font-medium text-muted-foreground text-xs uppercase">
+						{group.title}
+					</div>
+					{group.items.slice(0, 3).map((item) => {
+						const icon = ICONS.get(item.icon) ?? Application;
+						return (
+							<Button
+								key={item.href}
+								variant="ghost"
+								size="sm"
+								disabled
+								className="h-9 justify-start gap-2 text-muted-foreground"
+							>
+								<Icon icon={icon} />
+								<span>{item.title}</span>
+							</Button>
+						);
+					})}
+				</div>
 			))}
 		</nav>
 	);
@@ -209,54 +259,32 @@ export function AppIconRailFallback() {
 
 export function AppIconRail() {
 	const pathname = usePathname();
-	const workspaceUrl = useWorkspaceUrl();
 	const { open, setOpen } = useMobileNav();
 	const prefetchSection = usePrefetchSection();
-
-	const items = useMemo(
-		() =>
-			ITEMS.map((item) => ({
-				...item,
-				section: item.href,
-				href: workspaceUrl(item.href),
-				related: item.related?.map((path) => workspaceUrl(path)),
-			})),
-		[workspaceUrl],
-	);
-	const inChat = items.some(
-		(item) => item.title === "Chat" && isActive(item, pathname),
-	);
+	const groups = useNavigationGroups();
+	const items = groups.flatMap((group) => group.items);
 
 	return (
 		<>
 			<nav
 				aria-label="Primary"
-				className="hidden w-14 shrink-0 flex-col items-center gap-1 border-r py-3 md:flex [view-transition-name:app-rail]"
+				className="hidden w-64 shrink-0 flex-col gap-3 overflow-y-auto border-r bg-background p-3 md:flex [view-transition-name:app-rail]"
 			>
-				{items.map((item) => (
-					<RailLink
-						key={item.href}
-						item={item}
-						active={isActive(item, pathname)}
-						onPrefetch={() => prefetchSection(item.section)}
+				{groups.map((group) => (
+					<NavGroupView
+						key={group.title}
+						group={group}
+						pathname={pathname}
+						onPrefetch={prefetchSection}
 					/>
 				))}
 			</nav>
 
 			<Sheet open={open} onOpenChange={setOpen}>
-				{inChat ? (
-					<SheetContent
-						side="left"
-						showCloseButton={false}
-						className="w-5/6 max-w-sm flex-row gap-0 p-0"
-					>
-						<SheetHeader className="sr-only">
-							<SheetTitle>Navigation and agent chats</SheetTitle>
-						</SheetHeader>
-						<nav
-							aria-label="Primary"
-							className="flex w-14 shrink-0 flex-col items-center gap-1 border-r py-3"
-						>
+				<SheetContent side="left" className="w-80 gap-0 p-0">
+					<SheetHeader className="border-b">
+						<div className="flex items-center justify-between gap-3">
+							<SheetTitle>Navigation</SheetTitle>
 							<Button
 								variant="ghost"
 								size="icon"
@@ -265,43 +293,38 @@ export function AppIconRail() {
 							>
 								<Icon icon={Close} />
 							</Button>
-							<div className="my-1 h-px w-5 bg-border" />
-							{items.map((item) => (
-								<MobileRailIconLink
-									key={item.href}
-									item={item}
-									active={isActive(item, pathname)}
-									onNavigate={() => setOpen(false)}
-									onPrefetch={() => prefetchSection(item.section)}
-								/>
-							))}
-						</nav>
-						<AgentBuilderSidebar
-							className="flex flex-1"
-							onNavigate={() => setOpen(false)}
-						/>
-					</SheetContent>
-				) : (
-					<SheetContent side="left" className="w-64 gap-0 p-0">
-						<SheetHeader>
-							<SheetTitle>Navigation</SheetTitle>
-						</SheetHeader>
-						<nav
-							aria-label="Primary"
-							className="flex flex-1 flex-col gap-1 p-2"
-						>
-							{items.map((item) => (
-								<MobileRailLink
-									key={item.href}
-									item={item}
-									active={isActive(item, pathname)}
-									onNavigate={() => setOpen(false)}
-									onPrefetch={() => prefetchSection(item.section)}
-								/>
-							))}
-						</nav>
-					</SheetContent>
-				)}
+						</div>
+					</SheetHeader>
+					<nav
+						aria-label="Primary"
+						className="flex flex-1 flex-col gap-3 overflow-y-auto p-3"
+					>
+						{groups.map((group) => (
+							<NavGroupView
+								key={group.title}
+								group={group}
+								pathname={pathname}
+								onNavigate={() => setOpen(false)}
+								onPrefetch={prefetchSection}
+							/>
+						))}
+					</nav>
+					<nav
+						aria-label="Quick navigation"
+						className="grid grid-cols-6 gap-1 border-t p-2 md:hidden"
+					>
+						{items.slice(0, 6).map((item) => (
+							<NavLink
+								key={item.href}
+								item={item}
+								active={isActive(item, pathname)}
+								onNavigate={() => setOpen(false)}
+								onPrefetch={() => prefetchSection(item.section)}
+								compact
+							/>
+						))}
+					</nav>
+				</SheetContent>
 			</Sheet>
 		</>
 	);

@@ -2,9 +2,11 @@ import {
 	type Db,
 	GoogleSyncStatus,
 	type MailboxSyncModel as MailboxSync,
+	Prisma as PrismaNamespace,
 } from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
+import type { MailboxResult } from "../mailbox/mailbox-api.client";
 import type { MatchContext } from "../mailbox/mailbox-match.service";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
 import {
@@ -17,15 +19,21 @@ import {
 	type IncomingMessage,
 	ThreadWriterService,
 } from "../mailbox/thread-writer.service";
-import { GmailClient, type GmailMessage } from "./gmail.client";
+import {
+	GmailClient,
+	type GmailMessage,
+	type HistoryList,
+	type MessageList,
+	type Profile,
+} from "./gmail.client";
+import type { GmailBackfillInput } from "./gmail-backfill";
 import {
 	type GmailHeader,
 	header,
 	plainTextBody,
 	rootMessageId,
 } from "./gmail-mime";
-
-const MAX_MESSAGES_PER_TICK = 120;
+import { GMAIL_SYNC } from "./gmail-sync.config";
 
 export type GmailSyncOutcome = {
 	source: "gmail";
@@ -34,6 +42,71 @@ export type GmailSyncOutcome = {
 	messagesWritten?: number;
 	threadsTouched?: number;
 	reason?: string;
+	failedMessageId?: string;
+};
+
+type GmailBackfillStatus = GmailSyncOutcome["status"] | "retryable-failed";
+
+export type GmailBackfillOutcome = Omit<GmailSyncOutcome, "status"> & {
+	status: GmailBackfillStatus;
+	dryRun: boolean;
+	after: string;
+	before: string;
+	max: number;
+	q?: string;
+	messagesMatched?: number;
+	messagesAlreadyStored?: number;
+	messagesWouldFetch?: number;
+	messagesAttempted?: number;
+	pagesRead?: number;
+	resultSizeEstimate?: number | null;
+	truncated?: boolean;
+	messagesWritten?: number;
+	messagesRemaining?: number;
+	messagesIgnored?: number;
+	ignoredMessageIds?: string[];
+	retryAfterMs?: number;
+	failedMessageId?: string;
+};
+
+type MailboxFailure<T> = Exclude<MailboxResult<T>, { outcome: "ok" }>;
+
+type ListedBackfillMessages =
+	| {
+			outcome: "ok";
+			ids: string[];
+			pagesRead: number;
+			resultSizeEstimate: number | null;
+			truncated: boolean;
+	  }
+	| (MailboxFailure<MessageList> & {
+			ids: string[];
+			pagesRead: number;
+			resultSizeEstimate: number | null;
+			truncated: boolean;
+	  });
+
+type StrictBackfillIngestOutcome = {
+	written: number;
+	remaining: number;
+	attempted: number;
+	ignored: number;
+	ignoredIds: string[];
+	alreadyStored: number;
+	failure?: StrictBackfillFailure;
+};
+
+type IncrementalIngestOutcome = {
+	written: number;
+	remaining: number;
+	failure?: StrictBackfillFailure;
+};
+
+type StrictBackfillFailure = {
+	status: Exclude<GmailBackfillStatus, "synced" | "skipped">;
+	reason: string;
+	retryAfterMs?: number;
+	failedMessageId?: string;
 };
 
 @Injectable()
@@ -95,6 +168,118 @@ export class GmailSyncService {
 		return this.incremental(row, token.accessToken, mailbox, row.cursor);
 	}
 
+	async backfill(input: GmailBackfillInput): Promise<GmailBackfillOutcome> {
+		const base = this.backfillBase(input);
+		const row = await this.state.get(input.userId, "gmail");
+
+		if (!row) {
+			return {
+				...base,
+				status: "skipped",
+				reason: "No Gmail sync row exists.",
+			};
+		}
+
+		const token = await this.tokens.accessTokenFor(row.userId, "gmail");
+
+		if (token.outcome === "not-connected") {
+			return { ...base, status: "skipped", reason: token.reason };
+		}
+
+		if (token.outcome === "needs-reconnect") {
+			await this.state.markNeedsReconnect(row.id, token.reason);
+			return { ...base, status: "reconnect", reason: token.reason };
+		}
+
+		const profile = await this.gmail.profile(token.accessToken);
+		if (profile.outcome !== "ok") {
+			return this.backfillFailure(input, row, profile);
+		}
+
+		const mailbox = profile.data.emailAddress?.toLowerCase() ?? null;
+		if (!mailbox) {
+			return { ...base, status: "failed", reason: "No mailbox address." };
+		}
+
+		const listed = await this.listBackfillMessages(token.accessToken, input);
+		if (listed.outcome !== "ok") {
+			return this.backfillFailure(input, row, listed);
+		}
+
+		const alreadyStored = await this.existingGmailIds(listed.ids);
+		const pending = listed.ids.length - alreadyStored.size;
+
+		if (input.dryRun) {
+			return {
+				...base,
+				status: "synced",
+				messagesMatched: listed.ids.length,
+				messagesAlreadyStored: alreadyStored.size,
+				messagesWouldFetch: pending,
+				pagesRead: listed.pagesRead,
+				resultSizeEstimate: listed.resultSizeEstimate,
+				truncated: listed.truncated,
+			};
+		}
+
+		const ingested = await this.strictBackfillIngest(
+			row,
+			token.accessToken,
+			mailbox,
+			listed.ids,
+			alreadyStored,
+			input.max,
+			input,
+		);
+
+		this.logger.log({
+			message: "Gmail historical backfill",
+			userId: row.userId,
+			messagesWritten: ingested.written,
+			messagesMatched: listed.ids.length,
+			messagesAttempted: ingested.attempted,
+			messagesRemaining: ingested.remaining,
+			messagesIgnored: ingested.ignored,
+			dryRun: false,
+		});
+
+		if (ingested.failure) {
+			await this.markBackfillFailure(row, ingested.failure);
+			return {
+				...base,
+				status: ingested.failure.status,
+				reason: ingested.failure.reason,
+				messagesMatched: listed.ids.length,
+				messagesAlreadyStored: alreadyStored.size + ingested.alreadyStored,
+				messagesAttempted: ingested.attempted,
+				messagesWritten: ingested.written,
+				messagesRemaining: ingested.remaining,
+				messagesIgnored: ingested.ignored,
+				ignoredMessageIds: ingested.ignoredIds,
+				pagesRead: listed.pagesRead,
+				resultSizeEstimate: listed.resultSizeEstimate,
+				truncated: listed.truncated,
+				retryAfterMs: ingested.failure.retryAfterMs,
+				failedMessageId: ingested.failure.failedMessageId,
+			};
+		}
+
+		return {
+			...base,
+			status: "synced",
+			messagesMatched: listed.ids.length,
+			messagesAlreadyStored: alreadyStored.size + ingested.alreadyStored,
+			messagesAttempted: ingested.attempted,
+			messagesWritten: ingested.written,
+			messagesRemaining: ingested.remaining,
+			messagesIgnored: ingested.ignored,
+			ignoredMessageIds: ingested.ignoredIds,
+			pagesRead: listed.pagesRead,
+			resultSizeEstimate: listed.resultSizeEstimate,
+			truncated: listed.truncated,
+		};
+	}
+
 	private async start(
 		row: MailboxSync,
 		historyId: string | null,
@@ -128,9 +313,29 @@ export class GmailSyncService {
 		mailbox: string,
 		startHistoryId: string,
 	): Promise<GmailSyncOutcome> {
-		const history = await this.gmail.listHistory(accessToken, {
+		let history = await this.gmail.listHistory(accessToken, {
 			startHistoryId,
 		});
+		let finalHistoryId = startHistoryId;
+		const ids = new Set<string>();
+
+		while (history.outcome === "ok") {
+			for (const entry of history.data.history ?? []) {
+				for (const added of entry.messagesAdded ?? []) {
+					if (added.message?.id) ids.add(added.message.id);
+				}
+			}
+
+			finalHistoryId = history.data.historyId ?? finalHistoryId;
+
+			const pageToken = history.data.nextPageToken;
+			if (!pageToken) break;
+
+			history = await this.gmail.listHistory(accessToken, {
+				startHistoryId,
+				pageToken,
+			});
+		}
 
 		if (history.outcome === "cursor-invalid") {
 			await this.state.clearCursor(row.id, history.reason);
@@ -147,25 +352,27 @@ export class GmailSyncService {
 			return this.handleFailure(row, history);
 		}
 
-		const ids = new Set<string>();
-		for (const entry of history.data.history ?? []) {
-			for (const added of entry.messagesAdded ?? []) {
-				if (added.message?.id) ids.add(added.message.id);
-			}
-		}
-
-		const { written, remaining } = await this.ingest(
+		const { written, remaining, failure } = await this.ingest(
 			row,
 			accessToken,
 			mailbox,
 			[...ids],
 		);
 
+		if (failure) {
+			await this.state.markFailed(row.id, failure.reason);
+			return {
+				source: "gmail",
+				userId: row.userId,
+				status: "failed",
+				messagesWritten: written,
+				reason: failure.reason,
+				failedMessageId: failure.failedMessageId,
+			};
+		}
+
 		await this.state.settle(row.id, {
-			cursor:
-				remaining > 0
-					? startHistoryId
-					: (history.data.historyId ?? startHistoryId),
+			cursor: remaining > 0 ? startHistoryId : finalHistoryId,
 			status: GoogleSyncStatus.RUNNING,
 		});
 
@@ -191,19 +398,16 @@ export class GmailSyncService {
 		accessToken: string,
 		mailbox: string,
 		ids: readonly string[],
-	): Promise<{ written: number; remaining: number }> {
+		options: { maxMessages: number } = {
+			maxMessages: GMAIL_SYNC.incremental.maxMessagesPerTick,
+		},
+	): Promise<IncrementalIngestOutcome> {
 		if (ids.length === 0) return { written: 0, remaining: 0 };
 
-		const alreadyHave = await this.db.emailMessage.findMany({
-			where: { gmailMessageId: { in: [...ids] } },
-			select: { gmailMessageId: true },
-		});
-		const seen = new Set(
-			alreadyHave.map((existing) => existing.gmailMessageId),
-		);
+		const seen = await this.existingGmailIds(ids);
 
 		const pending = ids.filter((id) => !seen.has(id));
-		const batch = pending.slice(0, MAX_MESSAGES_PER_TICK);
+		const batch = pending.slice(0, options.maxMessages);
 		const remaining = pending.length - batch.length;
 
 		if (batch.length === 0) return { written: 0, remaining };
@@ -211,24 +415,202 @@ export class GmailSyncService {
 		const context: MatchContext = await this.threads.context();
 
 		let written = 0;
+		let processed = 0;
 
 		for (const id of batch) {
 			const message = await this.gmail.getMessage(accessToken, id);
-			if (message.outcome !== "ok") continue;
+			if (message.outcome !== "ok") {
+				processed += 1;
+				continue;
+			}
 
 			const parsed = this.parse(message.data);
-			if (!parsed) continue;
+			if (!parsed) {
+				processed += 1;
+				continue;
+			}
 
-			const stored = await this.threads.store(
-				row,
-				{ mailbox, origin: "gmail" },
-				parsed,
-				context,
-			);
+			let stored: boolean;
+			try {
+				stored = await this.threads.store(
+					row,
+					{ mailbox, origin: "gmail" },
+					parsed,
+					context,
+				);
+			} catch (error) {
+				return {
+					written,
+					remaining: pending.length - processed,
+					failure: this.persistenceFailureForMessage(error, row, message.data),
+				};
+			}
 			if (stored) written += 1;
+			processed += 1;
 		}
 
-		return { written, remaining };
+		return { written, remaining: pending.length - processed };
+	}
+
+	private async strictBackfillIngest(
+		row: MailboxSync,
+		accessToken: string,
+		mailbox: string,
+		ids: readonly string[],
+		alreadyStored: ReadonlySet<string>,
+		maxMessages: number,
+		input: GmailBackfillInput,
+	): Promise<StrictBackfillIngestOutcome> {
+		if (ids.length === 0) {
+			return {
+				written: 0,
+				remaining: 0,
+				attempted: 0,
+				ignored: 0,
+				ignoredIds: [],
+				alreadyStored: 0,
+			};
+		}
+
+		const pending = ids.filter((id) => !alreadyStored.has(id));
+		const batch = pending.slice(0, maxMessages);
+		const context: MatchContext = await this.threads.context();
+
+		let written = 0;
+		let attempted = 0;
+		let ignored = 0;
+		const ignoredIds: string[] = [];
+		let storedElsewhere = 0;
+
+		for (const id of batch) {
+			attempted += 1;
+			const message = await this.gmail.getMessage(accessToken, id);
+
+			if (message.outcome !== "ok") {
+				return {
+					written,
+					attempted,
+					ignored,
+					ignoredIds,
+					alreadyStored: storedElsewhere,
+					remaining: pending.length - written - ignored - storedElsewhere,
+					failure: backfillFailureForMessage(id, message),
+				};
+			}
+
+			const parsed = this.parse(message.data);
+			if (!parsed) {
+				ignored += 1;
+				ignoredIds.push(id);
+				continue;
+			}
+
+			let stored: boolean;
+			try {
+				stored = await this.threads.store(
+					row,
+					{ mailbox, origin: "gmail" },
+					parsed,
+					context,
+				);
+			} catch (error) {
+				return {
+					written,
+					attempted,
+					ignored,
+					ignoredIds,
+					alreadyStored: storedElsewhere,
+					remaining: pending.length - written - ignored - storedElsewhere,
+					failure: this.persistenceFailureForMessage(
+						error,
+						row,
+						message.data,
+						input,
+					),
+				};
+			}
+			if (stored) {
+				written += 1;
+			} else {
+				storedElsewhere += 1;
+			}
+		}
+
+		return {
+			written,
+			attempted,
+			ignored,
+			ignoredIds,
+			alreadyStored: storedElsewhere,
+			remaining: pending.length - written - ignored - storedElsewhere,
+		};
+	}
+
+	private async listBackfillMessages(
+		accessToken: string,
+		input: GmailBackfillInput,
+	): Promise<ListedBackfillMessages> {
+		const ids = new Set<string>();
+		let pageToken: string | undefined;
+		let pagesRead = 0;
+		let resultSizeEstimate: number | null = null;
+
+		while (ids.size < input.max) {
+			const page = await this.gmail.listMessages(accessToken, {
+				after: input.after,
+				before: input.before,
+				query: input.q,
+				pageToken,
+				maxResults: Math.min(
+					GMAIL_SYNC.backfill.pageSize,
+					input.max - ids.size,
+				),
+			});
+
+			if (page.outcome !== "ok") {
+				return {
+					...page,
+					ids: [...ids],
+					pagesRead,
+					resultSizeEstimate,
+					truncated: true,
+				};
+			}
+
+			pagesRead += 1;
+			resultSizeEstimate = page.data.resultSizeEstimate ?? resultSizeEstimate;
+
+			for (const message of page.data.messages ?? []) {
+				if (message.id) ids.add(message.id);
+				if (ids.size >= input.max) break;
+			}
+
+			pageToken = page.data.nextPageToken;
+			if (!pageToken) break;
+		}
+
+		return {
+			outcome: "ok",
+			ids: [...ids],
+			pagesRead,
+			resultSizeEstimate,
+			truncated: Boolean(pageToken),
+		};
+	}
+
+	private async existingGmailIds(ids: readonly string[]): Promise<Set<string>> {
+		if (ids.length === 0) return new Set();
+
+		const alreadyHave = await this.db.emailMessage.findMany({
+			where: { gmailMessageId: { in: [...ids] } },
+			select: { gmailMessageId: true },
+		});
+
+		return new Set(
+			alreadyHave
+				.map((existing) => existing.gmailMessageId)
+				.filter((id): id is string => id !== null),
+		);
 	}
 
 	private parse(message: GmailMessage): IncomingMessage | null {
@@ -319,4 +701,186 @@ export class GmailSyncService {
 			reason: result.reason,
 		};
 	}
+
+	private backfillBase(input: GmailBackfillInput): GmailBackfillOutcome {
+		return {
+			source: "gmail",
+			userId: input.userId,
+			status: "synced",
+			dryRun: input.dryRun,
+			after: input.after.toISOString(),
+			before: input.before.toISOString(),
+			max: input.max,
+			q: input.q,
+		};
+	}
+
+	private async backfillFailure(
+		input: GmailBackfillInput,
+		row: MailboxSync,
+		result:
+			| MailboxFailure<Profile | HistoryList>
+			| (MailboxFailure<MessageList> & {
+					ids?: string[];
+					pagesRead?: number;
+					resultSizeEstimate?: number | null;
+					truncated?: boolean;
+			  }),
+	): Promise<GmailBackfillOutcome> {
+		const base = this.backfillBase(input);
+		const partial = {
+			messagesMatched: "ids" in result ? (result.ids?.length ?? 0) : 0,
+			pagesRead: "pagesRead" in result ? (result.pagesRead ?? 0) : 0,
+			resultSizeEstimate:
+				"resultSizeEstimate" in result ? result.resultSizeEstimate : undefined,
+			truncated: "truncated" in result ? (result.truncated ?? false) : false,
+		};
+
+		if (result.outcome === "unauthorized") {
+			await this.state.markNeedsReconnect(row.id, result.reason);
+			return {
+				...base,
+				...partial,
+				status: "reconnect",
+				reason: result.reason,
+			};
+		}
+
+		if (result.outcome === "rate-limited") {
+			await this.state.markRateLimited(row.id, result.retryAfterMs);
+			return {
+				...base,
+				...partial,
+				status: "rate-limited",
+				reason: result.reason,
+				retryAfterMs: result.retryAfterMs,
+			};
+		}
+
+		if (result.outcome === "cursor-invalid") {
+			await this.state.markFailed(row.id, result.reason);
+			return { ...base, ...partial, status: "failed", reason: result.reason };
+		}
+
+		const status = result.retryable ? "retryable-failed" : "failed";
+		await this.state.markFailed(row.id, result.reason);
+		return { ...base, ...partial, status, reason: result.reason };
+	}
+
+	private async markBackfillFailure(
+		row: MailboxSync,
+		failure: StrictBackfillFailure,
+	): Promise<void> {
+		if (failure.status === "reconnect") {
+			await this.state.markNeedsReconnect(row.id, failure.reason);
+			return;
+		}
+
+		if (failure.status === "rate-limited") {
+			await this.state.markRateLimited(row.id, failure.retryAfterMs ?? 60_000);
+			return;
+		}
+
+		await this.state.markFailed(row.id, failure.reason);
+	}
+
+	private persistenceFailureForMessage(
+		cause: unknown,
+		row: MailboxSync,
+		message: GmailMessage,
+		input?: GmailBackfillInput,
+	): StrictBackfillFailure {
+		const category = persistenceFailureCategory(cause);
+
+		this.logger.error(
+			{
+				message: "Gmail message persistence failed",
+				userId: row.userId,
+				gmailMessageId: message.id ?? null,
+				gmailThreadId: message.threadId ?? null,
+				historicalImportJobId: input?.historicalImportJobId,
+				historicalImportChunkId: input?.historicalImportChunkId,
+				chunkAfter: input?.after.toISOString(),
+				chunkBefore: input?.before.toISOString(),
+				failureCategory: category,
+			},
+			stackOf(cause),
+		);
+
+		return {
+			status: retryablePersistenceFailure(cause)
+				? "retryable-failed"
+				: "failed",
+			reason: `Gmail message persistence failed (${category}).`,
+			failedMessageId: message.id ?? undefined,
+		};
+	}
+}
+
+function backfillFailureForMessage(
+	id: string,
+	result: MailboxFailure<GmailMessage>,
+): StrictBackfillFailure {
+	if (result.outcome === "unauthorized") {
+		return {
+			status: "reconnect",
+			reason: result.reason,
+			failedMessageId: id,
+		};
+	}
+
+	if (result.outcome === "rate-limited") {
+		return {
+			status: "rate-limited",
+			reason: result.reason,
+			retryAfterMs: result.retryAfterMs,
+			failedMessageId: id,
+		};
+	}
+
+	if (result.outcome === "cursor-invalid") {
+		return {
+			status: "failed",
+			reason: result.reason,
+			failedMessageId: id,
+		};
+	}
+
+	return {
+		status: result.retryable ? "retryable-failed" : "failed",
+		reason: result.reason,
+		failedMessageId: id,
+	};
+}
+
+function persistenceFailureCategory(cause: unknown): string {
+	if (cause instanceof PrismaNamespace.PrismaClientKnownRequestError) {
+		return `prisma-${cause.code.toLowerCase()}`;
+	}
+
+	const message = cause instanceof Error ? cause.message : String(cause);
+	const lower = message.toLowerCase();
+	if (lower.includes("22021") || lower.includes("invalid byte sequence")) {
+		return "postgres-invalid-text-encoding";
+	}
+
+	if (lower.includes("nul") || lower.includes("\\u0000")) {
+		return "postgres-invalid-text-encoding";
+	}
+
+	const name = cause instanceof Error && cause.name ? cause.name : "unknown";
+	return name.replace(/[^a-z0-9_.-]+/gi, "-").toLowerCase();
+}
+
+function retryablePersistenceFailure(cause: unknown): boolean {
+	if (!(cause instanceof PrismaNamespace.PrismaClientKnownRequestError)) {
+		return false;
+	}
+
+	return ["P1001", "P1002", "P1008", "P2024", "P2034"].includes(cause.code);
+}
+
+function stackOf(cause: unknown): string {
+	if (cause instanceof Error) return cause.stack ?? cause.message;
+	return String(cause);
 }

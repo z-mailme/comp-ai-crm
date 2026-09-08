@@ -8,6 +8,8 @@ import { ApiKeysModule } from "./api-keys/api-keys.module";
 import { ArchiveModule } from "./archive/archive.module";
 import { AuthModule } from "./auth/auth.module";
 import { BackfillModule } from "./backfill/backfill.module";
+import { BookingsModule } from "./bookings/bookings.module";
+import { BusinessOsModule } from "./business-os/business-os.module";
 import { AppCacheModule } from "./cache/cache.module";
 import { CompaniesModule } from "./companies/companies.module";
 import { validateEnv } from "./config/env.validation";
@@ -25,6 +27,7 @@ import { HealthModule } from "./health/health.module";
 import { LoggingModule } from "./logging/logging.module";
 import { logAuthRoute } from "./logging/request-logger.middleware";
 import { MailboxModule } from "./mailbox/mailbox.module";
+import { MarketingModule } from "./marketing/marketing.module";
 import { MicrosoftModule } from "./microsoft/microsoft.module";
 import { SavedViewsModule } from "./saved-views/saved-views.module";
 import { SearchModule } from "./search/search.module";
@@ -55,6 +58,8 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		TrpcModule,
 		UsersModule,
 		ApiKeysModule,
+		BookingsModule,
+		BusinessOsModule,
 		CompaniesModule,
 		ContactsModule,
 		ConversationsModule,
@@ -67,6 +72,7 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		DashboardModule,
 		SearchModule,
 		MailboxModule,
+		MarketingModule,
 		GoogleModule,
 		MicrosoftModule,
 		SyncModule,

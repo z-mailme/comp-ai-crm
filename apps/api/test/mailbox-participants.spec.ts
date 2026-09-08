@@ -1,6 +1,7 @@
 import { describe, expect, it } from "bun:test";
 import {
 	dominantDomain,
+	exactContactParticipants,
 	externalParticipants,
 	isAutomatedAddress,
 	isDerivedName,
@@ -211,6 +212,37 @@ describe("externalParticipants", () => {
 				options,
 			),
 		).toEqual([]);
+	});
+});
+
+describe("exactContactParticipants", () => {
+	const options = {
+		ourDomains: new Set(["trycomp.ai"]),
+		ourAddresses: new Set(["lewis@trycomp.ai"]),
+		suppressedDomains: new Set(["blocked.com"]),
+		suppressedEmails: new Set(["deleted@gmail.com"]),
+	};
+
+	it("keeps free-mail addresses for exact CRM contact lookup", () => {
+		expect(
+			exactContactParticipants([person("customer@gmail.com")], options),
+		).toEqual([person("customer@gmail.com")]);
+	});
+
+	it("keeps internal and suppression protections", () => {
+		const result = exactContactParticipants(
+			[
+				person("lewis@trycomp.ai"),
+				person("colleague@trycomp.ai"),
+				person("deleted@gmail.com"),
+				person("buyer@blocked.com"),
+				person("noreply@gmail.com"),
+				person("customer@gmail.com"),
+			],
+			options,
+		);
+
+		expect(result).toEqual([person("customer@gmail.com")]);
 	});
 });
 

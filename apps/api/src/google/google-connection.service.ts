@@ -1,12 +1,22 @@
 import { isGoogleConfigured, signsInWithGoogle } from "@crm/auth";
 import type { Db, Prisma } from "@crm/db";
-import { Injectable, Logger, NotFoundException } from "@nestjs/common";
+import {
+	BadRequestException,
+	Injectable,
+	Logger,
+	NotFoundException,
+} from "@nestjs/common";
+import {
+	resolveBusinessContext,
+	resolveDefaultBusinessUnitId,
+} from "../business-os/business-context";
 import { normalizeDomain } from "../companies/domain";
 import { ActivityStampService } from "../crm/activity-stamp.service";
 import { InjectDatabase } from "../database/database.constants";
 import { MailboxMatchService } from "../mailbox/mailbox-match.service";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
 import { SyncStateService } from "../mailbox/sync-state.service";
+import { GmailHistoricalImportService } from "./gmail-historical-import.service";
 import {
 	GOOGLE_PROVIDER_ID,
 	GOOGLE_SYNC_SOURCES,
@@ -17,6 +27,8 @@ import type {
 	GoogleConnectionStatus,
 	GoogleSourceStatus,
 	PurgeSyncedDataOutput,
+	ReindexCalendarInput,
+	ReindexCalendarOutput,
 	RevokeAccessOutput,
 	SuppressDomainOutput,
 } from "./google.contracts";
@@ -33,17 +45,20 @@ export class GoogleConnectionService {
 		private readonly state: SyncStateService,
 		private readonly match: MailboxMatchService,
 		private readonly stamp: ActivityStampService,
+		private readonly historicalImport: GmailHistoricalImportService,
 	) {}
 
 	async status(userId: string): Promise<GoogleConnectionStatus> {
 		await this.onConnected(userId);
 
-		const [granted, rows, hasRefreshToken, accounts] = await Promise.all([
-			this.tokens.grantedScopes(userId, GOOGLE_PROVIDER_ID),
-			this.state.listForUser(userId, GOOGLE_SYNC_SOURCES),
-			this.tokens.hasRefreshToken(userId, GOOGLE_PROVIDER_ID),
-			this.tokens.signInAccounts(userId),
-		]);
+		const [granted, rows, hasRefreshToken, accounts, historicalImport] =
+			await Promise.all([
+				this.tokens.grantedScopes(userId, GOOGLE_PROVIDER_ID),
+				this.state.listForUser(userId, GOOGLE_SYNC_SOURCES),
+				this.tokens.hasRefreshToken(userId, GOOGLE_PROVIDER_ID),
+				this.tokens.signInAccounts(userId),
+				this.historicalImport.latest(userId),
+			]);
 
 		const bySource = new Map(rows.map((row) => [row.source, row]));
 
@@ -58,6 +73,9 @@ export class GoogleConnectionService {
 				lastSyncedAt: row?.lastSyncedAt?.toISOString() ?? null,
 				lastError: row?.lastError ?? null,
 				autoCreate: row?.autoCreate ?? false,
+				businessUnitId: row?.businessUnitId ?? null,
+				initialBackfilledAt: row?.initialBackfilledAt?.toISOString() ?? null,
+				backfillStartedAt: row?.backfillStartedAt?.toISOString() ?? null,
 			};
 		});
 
@@ -69,25 +87,39 @@ export class GoogleConnectionService {
 			required: signsInWithGoogle(accounts),
 			hasRefreshToken,
 			sources,
+			historicalImport,
 		};
 	}
 
 	async onConnected(userId: string): Promise<void> {
-		const [granted, existing] = await Promise.all([
+		const [granted, existing, defaultBusinessUnitId] = await Promise.all([
 			this.tokens.grantedScopes(userId, GOOGLE_PROVIDER_ID),
 			this.state.listForUser(userId, GOOGLE_SYNC_SOURCES),
+			resolveDefaultBusinessUnitId(this.db, userId),
 		]);
 
-		const known = new Set(existing.map((row) => row.source));
+		const bySource = new Map(existing.map((row) => [row.source, row]));
 
 		const added: string[] = [];
 
 		for (const source of GOOGLE_SYNC_SOURCES) {
 			if (!granted.has(SCOPE_FOR_SOURCE[source])) continue;
-			if (known.has(source)) continue;
+			const row = bySource.get(source);
+
+			if (row) {
+				if (source === "calendar" && defaultBusinessUnitId) {
+					await this.state.assignBusinessUnitIfMissing(
+						row.id,
+						defaultBusinessUnitId,
+					);
+				}
+				continue;
+			}
 
 			await this.state.ensure(userId, source, {
 				autoCreate: source === "calendar",
+				businessUnitId:
+					source === "calendar" ? defaultBusinessUnitId : undefined,
 			});
 
 			added.push(source);
@@ -173,6 +205,33 @@ export class GoogleConnectionService {
 		}
 
 		await this.state.setAutoCreate(userId, source, enabled);
+	}
+
+	async reindexCalendar(
+		userId: string,
+		input: ReindexCalendarInput,
+	): Promise<ReindexCalendarOutput> {
+		const row = await this.state.get(userId, "calendar");
+		if (!row) {
+			throw new NotFoundException("Calendar is not connected.");
+		}
+
+		const businessUnitId = input.businessUnitId
+			? (
+					await resolveBusinessContext(this.db, {
+						userId,
+						businessUnitId: input.businessUnitId,
+					})
+				).businessUnitId
+			: await resolveDefaultBusinessUnitId(this.db, userId);
+
+		if (!businessUnitId) {
+			throw new BadRequestException("Choose a business unit.");
+		}
+
+		await this.state.reindexCalendar(userId, businessUnitId);
+
+		return { reindexed: true, businessUnitId };
 	}
 
 	async suppressDomain(

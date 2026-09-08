@@ -10,6 +10,7 @@ import {
 	AccordionItem,
 	AccordionTrigger,
 } from "@crm/ui/components/accordion";
+import { Badge } from "@crm/ui/components/badge";
 import { Button } from "@crm/ui/components/button";
 import { EmptyCellValue } from "@crm/ui/components/empty-cell";
 import {
@@ -51,7 +52,11 @@ import {
 	DetailSheetStats,
 	type DetailSheetTab,
 } from "@/components/detail-sheet";
-import { LocalDateTime, LocalRelativeDate } from "@/components/local-date-time";
+import {
+	LocalDateTime,
+	LocalRelativeDate,
+	LocalRelativeTime,
+} from "@/components/local-date-time";
 import { factsByField } from "@/lib/contact-facts";
 import { ENRICHMENT_POLL_MS, isEnriching } from "@/lib/enrichment-status";
 import { savingField } from "@/lib/pending-field";
@@ -129,6 +134,11 @@ export function ContactSheet({ contactId }: { contactId: string }) {
 					value: "activity",
 					label: "Activity",
 					content: <Timeline anchor={{ contactId: contact.id }} />,
+				},
+				{
+					value: "customer360",
+					label: "360",
+					content: <Contact360 contactId={contact.id} />,
 				},
 				{
 					value: "agent",
@@ -632,5 +642,109 @@ function ContactDeals({ contact }: { contact: Contact }) {
 				</SimpleTableRow>
 			))}
 		</SimpleTable>
+	);
+}
+
+function Contact360({ contactId }: { contactId: string }) {
+	const trpc = useTRPC();
+	const query = useQuery(
+		trpc.businessOs.customer360.queryOptions({ contactId }),
+	);
+	const profile = query.data;
+
+	if (!profile) {
+		return (
+			<DetailSheetBody>
+				<DetailSheetSection>
+					<span className="text-muted-foreground text-xs">
+						Loading Customer 360…
+					</span>
+				</DetailSheetSection>
+			</DetailSheetBody>
+		);
+	}
+
+	return (
+		<DetailSheetBody>
+			<DetailSheetSection title="Foundation">
+				<DetailSheetProperties columns={1}>
+					{profile.readiness.map((item) => (
+						<DetailSheetProperty key={item.key} label={item.label}>
+							<StatusIndicator
+								tone={item.ready ? "success" : "warning"}
+								label={item.detail}
+							/>
+						</DetailSheetProperty>
+					))}
+				</DetailSheetProperties>
+			</DetailSheetSection>
+
+			<DetailSheetSection title="Identity">
+				{profile.identities.length === 0 ? (
+					<DetailSheetProse>No unified identity is stored.</DetailSheetProse>
+				) : (
+					<DetailSheetProperties columns={1}>
+						{profile.identities.map((identity) => (
+							<DetailSheetProperty key={identity.id} label={identity.kind}>
+								<span className="flex min-w-0 items-center gap-2">
+									<span className="truncate">{identity.value}</span>
+									<Badge variant="outline">{identity.status}</Badge>
+								</span>
+							</DetailSheetProperty>
+						))}
+					</DetailSheetProperties>
+				)}
+			</DetailSheetSection>
+
+			<DetailSheetSection title="Conversations">
+				{profile.conversations.length === 0 ? (
+					<DetailSheetProse>
+						No unified conversation is linked to this contact.
+					</DetailSheetProse>
+				) : (
+					<div className="flex flex-col divide-y">
+						{profile.conversations.map((conversation) => (
+							<div
+								key={conversation.id}
+								className="flex min-w-0 items-start justify-between gap-3 py-2"
+							>
+								<span className="flex min-w-0 flex-col">
+									<span className="truncate text-xs font-medium">
+										{conversation.subject ?? "Conversation"}
+									</span>
+									<span className="truncate text-muted-foreground text-xs">
+										{conversation.preview ?? "No preview"}
+									</span>
+								</span>
+								<span className="shrink-0 text-muted-foreground text-xs">
+									{conversation.lastMessageAt ? (
+										<LocalRelativeTime date={conversation.lastMessageAt} />
+									) : (
+										"Never"
+									)}
+								</span>
+							</div>
+						))}
+					</div>
+				)}
+			</DetailSheetSection>
+
+			<DetailSheetSection title="Agent signals">
+				<DetailSheetProperties columns={1}>
+					<DetailSheetProperty label="Insights">
+						<span className="tabular-nums">{profile.insights.length}</span>
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Approvals">
+						<span className="tabular-nums">{profile.approvals.length}</span>
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Tasks">
+						<span className="tabular-nums">{profile.tasks.length}</span>
+					</DetailSheetProperty>
+					<DetailSheetProperty label="Events">
+						<span className="tabular-nums">{profile.events.length}</span>
+					</DetailSheetProperty>
+				</DetailSheetProperties>
+			</DetailSheetSection>
+		</DetailSheetBody>
 	);
 }

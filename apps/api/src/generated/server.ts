@@ -16,6 +16,7 @@ const publicProcedure = t.procedure;
 import { timelineInput, timelineOutput, timelineCountsInput, timelineCountsOutput, myTasksInput, myTasksOutput, activityCreateInput, activityCreateOutput, completeInput, completeOutput } from "../activities/activities.contracts";
 import { agentListOutput, agentReviseInput, agentReviseOutput, agentIdInput, agentFilesOutput, agentSaveFileInput, agentSaveFileOutput, agentByIdOutput, agentHistoryInput, agentHistoryOutput, agentActivityOutput, agentUpdateInput, agentUpdateOutput, agentDeployInput, agentDeployOutput, agentPauseOutput, agentResumeOutput, agentArchiveOutput, agentRestoreOutput, agentRemoveOutput, agentRunNowInput, agentRunNowOutput, agentRetryRunInput, agentRetryRunOutput, agentCancelRunInput, agentCancelRunOutput } from "../agent/agents.contracts";
 import { apiKeyListInput, apiKeyListOutput, createApiKeyInput, createApiKeyOutput, revokeApiKeyInput, revokeApiKeyOutput } from "../api-keys/api-keys.contracts";
+import { businessContextInput, businessOsOverviewOutput, inboxInput, inboxOutput, calendarInput, calendarOutput, conversationInput, conversationDetailOutput, customer360Input, customer360Output, globalSearchInput, globalSearchOutput, approvalsOutput, knowledgeOutput, observabilityOutput, activityFeedInput, activityFeedOutput, bookingsInput, bookingsOutput, analyticsOutput, financeOutput } from "../business-os/business-os.contracts";
 import { companyListInput, companyListOutput, companyIdInput, companyDetailOutput, companyOptionsInput, companyOptionOutput, companyCreateInput, companySummaryOutput, companyUpdateArgs, companyArchiveResultOutput, companyBulkOwnerInput, companyBulkResultOutput, companyBulkInput, companyEnrichOutput, companyResearchOutput, setPrimaryContactInput, companySetPrimaryContactOutput } from "../companies/companies.contracts";
 import { contactListInput, contactListOutput, contactIdInput, contactByIdOutput, contactCreateInput, contactBasicOutput, contactUpdateArgs, contactNameOutput, contactEnrichOutput, contactBulkOwnerInput, bulkResultOutput, contactBulkCompanyInput, contactBulkInput, factDecisionInput, decideFactOutput } from "../contacts/contacts.contracts";
 import { conversationListInput, conversationListOutput, builderListOutput, builderResourceSearchInput, builderResourcesOutput, conversationIdInput, builderConversationDetailOutput, conversationEventsInput, conversationEventsOutput, conversationSaveInput, conversationIdOutput, builderConversationCreateInput, builderConversationSubmitInput, builderQuestionResponseInput, builderResponseRatingInput, builderResponseRatingOutput, conversationShareStatusOutput, conversationShareTokenOutput, sharedConversationInput, sharedConversationOutput } from "../conversations/conversations.contracts";
@@ -24,8 +25,9 @@ import { dashboardSummaryInput, dashboardSummaryOutput } from "../dashboard/dash
 import { dealListInput, dealListOutput, dealIdInput, dealDetailOutput, dealCreateInput, dealCreateOutput, dealUpdateArgs, dealMutateOutput, setStageInput, dealSetStageOutput, dealContactsInput, dealContactOptionsOutput, dealAttachContactInput, dealContactLinkOutput, dealDetachContactInput, dealContactRoleInput, dealContactRoleOutput, dealBulkOwnerInput, dealBulkResultOutput, dealBulkStageInput, dealBulkInput } from "../deals/deals.contracts";
 import { enrichmentQueueInput } from "@crm/validation/enrichment-queue";
 import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput, fieldEntityInput, fieldFiltersOutput, fieldIdInput, fieldCoverageOutput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput, fieldReorderOutput, fieldDeleteOutput, fieldBackfillOutput } from "../fields/fields.contracts";
-import { googleConnectionStatusOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
+import { googleConnectionStatusOutput, reindexCalendarInput, reindexCalendarOutput, historicalImportJobOutput, createHistoricalImportInput, historicalImportIdInput, sendEmailInput, sendEmailOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
+import { marketingContextInput, marketingOverviewOutput, emailMarketingOutput, adsWorkspaceOutput, listmonkConnectionInput, marketingIntegrationOutput, adsConnectionInput, marketingProviderInput, createListmonkCampaignInput, createListmonkCampaignOutput, sendListmonkTestInput, requestMarketingActionInput, approvalRequestOutput } from "../marketing/marketing.contracts";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
 import { agentModelOutput, modelCatalogOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput } from "../settings/settings.contracts";
 import { slackStatusOutput, slackMatchesOutput, slackChannelsInput, slackChannelsOutput, slackJoinChannelInput, slackJoinChannelOutput, slackRefreshPeopleOutput, slackCreateChannelInput, slackCreateChannelOutput, slackDisconnectOutput } from "../slack/slack.contracts";
@@ -139,6 +141,60 @@ const appRouter = t.router({
       .input(revokeApiKeyInput)
       .output(revokeApiKeyOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  businessOs: t.router({
+    overview: publicProcedure
+      .input(businessContextInput)
+      .output(businessOsOverviewOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    inbox: publicProcedure
+      .input(inboxInput)
+      .output(inboxOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    calendar: publicProcedure
+      .input(calendarInput)
+      .output(calendarOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    conversation: publicProcedure
+      .input(conversationInput)
+      .output(conversationDetailOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    customer360: publicProcedure
+      .input(customer360Input)
+      .output(customer360Output)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    globalSearch: publicProcedure
+      .input(globalSearchInput)
+      .output(globalSearchOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    approvals: publicProcedure
+      .input(businessContextInput)
+      .output(approvalsOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    knowledge: publicProcedure
+      .input(businessContextInput)
+      .output(knowledgeOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    observability: publicProcedure
+      .input(businessContextInput)
+      .output(observabilityOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    activityFeed: publicProcedure
+      .input(activityFeedInput)
+      .output(activityFeedOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    bookings: publicProcedure
+      .input(bookingsInput)
+      .output(bookingsOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    analytics: publicProcedure
+      .input(businessContextInput)
+      .output(analyticsOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    finance: publicProcedure
+      .input(businessContextInput)
+      .output(financeOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   companies: t.router({
     list: publicProcedure
@@ -541,6 +597,36 @@ const appRouter = t.router({
     syncNow: publicProcedure
       .output(googleConnectionStatusOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    reindexCalendar: publicProcedure
+      .input(reindexCalendarInput)
+      .output(reindexCalendarOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    historicalImport: publicProcedure
+      .output(historicalImportJobOutput.nullable())
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    historicalImports: publicProcedure
+      .output(historicalImportJobOutput.array())
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    createHistoricalImport: publicProcedure
+      .input(createHistoricalImportInput)
+      .output(historicalImportJobOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    pauseHistoricalImport: publicProcedure
+      .input(historicalImportIdInput)
+      .output(historicalImportJobOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    resumeHistoricalImport: publicProcedure
+      .input(historicalImportIdInput)
+      .output(historicalImportJobOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    cancelHistoricalImport: publicProcedure
+      .input(historicalImportIdInput)
+      .output(historicalImportJobOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    sendEmail: publicProcedure
+      .input(sendEmailInput)
+      .output(sendEmailOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     setAutoCreate: publicProcedure
       .input(setAutoCreateInput)
       .output(googleConnectionStatusOutput)
@@ -557,6 +643,48 @@ const appRouter = t.router({
       .input(calendarEventInput)
       .output(calendarEventOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  marketing: t.router({
+    overview: publicProcedure
+      .input(marketingContextInput)
+      .output(marketingOverviewOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    email: publicProcedure
+      .input(marketingContextInput)
+      .output(emailMarketingOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    googleAds: publicProcedure
+      .input(marketingContextInput)
+      .output(adsWorkspaceOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    metaAds: publicProcedure
+      .input(marketingContextInput)
+      .output(adsWorkspaceOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    connectListmonk: publicProcedure
+      .input(listmonkConnectionInput)
+      .output(marketingIntegrationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    connectAds: publicProcedure
+      .input(adsConnectionInput)
+      .output(marketingIntegrationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    disconnect: publicProcedure
+      .input(marketingProviderInput)
+      .output(marketingIntegrationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    createListmonkCampaign: publicProcedure
+      .input(createListmonkCampaignInput)
+      .output(createListmonkCampaignOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    sendListmonkTest: publicProcedure
+      .input(sendListmonkTestInput)
+      .output(z.object({ ok: z.boolean() }))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    requestAction: publicProcedure
+      .input(requestMarketingActionInput)
+      .output(approvalRequestOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   microsoft: t.router({
     status: publicProcedure

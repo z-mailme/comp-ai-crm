@@ -4,6 +4,7 @@ import {
 	type MailboxResult,
 } from "../mailbox/mailbox-api.client";
 import type { GmailPart } from "./gmail-mime";
+import { GMAIL_SYNC } from "./gmail-sync.config";
 
 const BASE = "https://gmail.googleapis.com/gmail/v1/users/me";
 
@@ -53,16 +54,25 @@ export class GmailClient {
 		options: {
 			after: Date;
 			before: Date;
+			query?: string;
 			pageToken?: string;
 			maxResults?: number;
 		},
 	): Promise<MailboxResult<MessageList>> {
 		const after = Math.floor(options.after.getTime() / 1000);
 		const before = Math.ceil(options.before.getTime() / 1000);
+		const query = [
+			WORK_MAIL_QUERY,
+			options.query?.trim(),
+			`after:${after}`,
+			`before:${before}`,
+		]
+			.filter((value): value is string => Boolean(value))
+			.join(" ");
 
 		return this.api.get<MessageList>(`${BASE}/messages`, accessToken, {
-			q: `${WORK_MAIL_QUERY} after:${after} before:${before}`,
-			maxResults: options.maxResults ?? 100,
+			q: query,
+			maxResults: options.maxResults ?? GMAIL_SYNC.backfill.pageSize,
 			pageToken: options.pageToken,
 		});
 	}
@@ -74,7 +84,7 @@ export class GmailClient {
 		return this.api.get<HistoryList>(`${BASE}/history`, accessToken, {
 			startHistoryId: options.startHistoryId,
 			historyTypes: "messageAdded",
-			maxResults: 500,
+			maxResults: GMAIL_SYNC.incremental.historyPageSize,
 			pageToken: options.pageToken,
 		});
 	}
@@ -85,6 +95,17 @@ export class GmailClient {
 	): Promise<MailboxResult<GmailMessage>> {
 		return this.api.get<GmailMessage>(`${BASE}/messages/${id}`, accessToken, {
 			format: "full",
+		});
+	}
+
+	async sendMessage(
+		accessToken: string,
+		raw: string,
+		threadId?: string,
+	): Promise<MailboxResult<GmailMessage>> {
+		return this.api.post<GmailMessage>(`${BASE}/messages/send`, accessToken, {
+			raw,
+			threadId,
 		});
 	}
 }

@@ -31,6 +31,7 @@ export type CrmCache = {
 	removed(record: RemovedRecord): Promise<void>;
 	removedMany(records: RemovedRecords): Promise<void>;
 	conversationRemoved(id: string): Promise<void>;
+	conversation(id?: string, options?: Options): Promise<void>;
 	activity(options?: Options): Promise<void>;
 	google(options?: Options): Promise<void>;
 	microsoft(options?: Options): Promise<void>;
@@ -232,6 +233,18 @@ export function useCrmCache(): CrmCache {
 			return run([trpc.conversations.builderList.pathKey()], []);
 		},
 
+		conversation: (id, options) =>
+			run(
+				[
+					trpc.businessOs.inbox.queryKey(),
+					id
+						? trpc.businessOs.conversation.queryKey({ id })
+						: trpc.businessOs.conversation.queryKey(),
+				],
+				[...activityKeys()],
+				options,
+			),
+
 		activity: (options) =>
 			run(
 				activityKeys(),
@@ -247,7 +260,10 @@ export function useCrmCache(): CrmCache {
 
 		google: (options) =>
 			run(
-				[trpc.google.status.queryKey()],
+				[
+					trpc.google.status.queryKey(),
+					trpc.google.historicalImport.queryKey(),
+				],
 				[
 					...activityKeys(),
 					...listKeys(),

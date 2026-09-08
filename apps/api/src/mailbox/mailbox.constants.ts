@@ -48,3 +48,13 @@ export const PROVIDER_FOR_SOURCE = {
 	gmail: GOOGLE_PROVIDER_ID,
 	outlook: MICROSOFT_PROVIDER_ID,
 } satisfies Record<SyncSource, MailboxProviderId>;
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+export const MAILBOX_MATCH = {
+	deal: {
+		createdBeforeThreadMs: 180 * DAY_MS,
+		createdAfterThreadMs: 7 * DAY_MS,
+		eventEndedBeforeThreadMs: 14 * DAY_MS,
+	},
+} as const;

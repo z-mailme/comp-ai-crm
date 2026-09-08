@@ -89,5 +89,12 @@ export function normaliseMessageId(value: string): string {
 export function snippetOf(body: string, limit = 200): string | null {
 	const flat = body.replace(/\s+/g, " ").trim();
 	if (!flat) return null;
-	return flat.length > limit ? `${flat.slice(0, limit - 1)}…` : flat;
+	if (flat.length <= limit) return flat;
+	return `${safePrefix(flat, limit - 1)}…`;
+}
+
+function safePrefix(value: string, end: number): string {
+	const code = value.charCodeAt(end - 1);
+	if (code >= 0xd800 && code <= 0xdbff) return value.slice(0, end - 1);
+	return value.slice(0, end);
 }
