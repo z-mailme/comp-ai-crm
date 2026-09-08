@@ -30,6 +30,7 @@ model User {
   activities                  Activity[]                   @relation("ActivityAuthor")
   mailboxSyncs                MailboxSync[]
   mailboxHistoricalImportJobs MailboxHistoricalImportJob[]
+  brainAnalysisJobs           BrainAnalysisJob[]
   factDecisions               ContactFact[]                @relation("FactDecider")
   conversations               AgentConversation[]          @relation("ConversationOwner")
   fieldValues                 FieldValue[]                 @relation("FieldValueUser")
@@ -1680,6 +1681,48 @@ enum KnowledgeKind {
   COMPANY_CONTEXT
   INFERENCE
   RECOMMENDATION
+}
+
+enum BrainAnalysisJobStatus {
+  PLANNING
+  RUNNING
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model BrainAnalysisJob {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  source String @default("gmail")
+  status BrainAnalysisJobStatus @default(PLANNING)
+
+  cursorLastMessageAt DateTime?
+  cursorThreadId      String?
+
+  totalThreads      Int @default(0)
+  processedThreads  Int @default(0)
+  knowledgeWritten  Int @default(0)
+  conflictsFound    Int @default(0)
+
+  tokensInput  Int @default(0)
+  tokensOutput Int @default(0)
+  modelUsed    String?
+  providerUsed String?
+
+  lastError String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([status])
+  @@map("brainAnalysisJob")
 }
 
 model BusinessKnowledge {

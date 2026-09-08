@@ -1,5 +1,5 @@
 import { afterAll, describe, expect, it } from "bun:test";
-import { db, type BusinessKnowledgeModel } from "@crm/db";
+import { type BusinessKnowledgeModel, db } from "@crm/db";
 import {
 	currentKnowledge,
 	recordKnowledge,

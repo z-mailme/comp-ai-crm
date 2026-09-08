@@ -2,6 +2,8 @@ import { EnrichmentStatus, type Prisma } from "@crm/db";
 import { fieldBackfillPayload } from "@crm/validation/field-backfill";
 import { z } from "zod";
 import { APP_AUTH, type AppAuth } from "./app-auth";
+import { aiExtractor } from "./brain-extractor";
+import { runBrainScan } from "./brain-scan";
 import { brandOutcome, runBrand } from "./brand";
 import { queueEventAgentRuns } from "./custom-agent-dispatch";
 import { settledWithin } from "./deadline";
@@ -19,6 +21,7 @@ import {
 	DIRECT_KINDS,
 	type LeasedTask,
 	noteSession,
+	scheduleTask,
 } from "./tasks";
 
 export const VISIBLE_BATCH = DISPATCH.visible.batch;
@@ -143,6 +146,28 @@ async function handleDirect(task: LeasedTask): Promise<void> {
 			result.ok
 				? `${providerId} answered. ${result.models} models listed.`
 				: (result.reason ?? `${providerId} could not be reached.`),
+		);
+		return;
+	}
+
+	if (task.kind === "brain-scan") {
+		const outcome = await runBrainScan(task.payload, aiExtractor());
+
+		if (!outcome.finished) {
+			await scheduleTask({
+				kind: "brain-scan",
+				reason: "Continue the Business Brain mailbox analysis",
+				payload: task.payload as Prisma.InputJsonValue,
+				dueAt: new Date(),
+				priority: task.priority,
+				budget: task.budget,
+			});
+		}
+
+		await completeTask(
+			task.id,
+			outcome.reason ??
+				`Analysed ${outcome.processed} threads, wrote ${outcome.written} facts, found ${outcome.conflicts} conflicts.`,
 		);
 		return;
 	}

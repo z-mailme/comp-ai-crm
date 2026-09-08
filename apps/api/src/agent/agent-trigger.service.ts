@@ -108,6 +108,17 @@ export class AgentTriggerService {
 		});
 	}
 
+	async brainScanRequested(jobId: string): Promise<boolean> {
+		return this.enqueue({
+			kind: "brain-scan",
+			reason: "Analyse the mailbox into the Business Brain",
+			priority: PRIORITY.requested,
+			budget: 50,
+			payload: { jobId },
+			subject: { path: ["jobId"], value: jobId },
+		});
+	}
+
 	async workspaceChanged(website: string, reason: string): Promise<void> {
 		await this.enqueue({
 			kind: "workspace-profile",

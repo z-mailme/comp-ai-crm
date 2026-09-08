@@ -15,6 +15,7 @@ import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
 import { AgentModel } from "./agent-model";
 import { AiProviders } from "./ai-providers";
 import { ArchiveRetention } from "./archive-retention";
+import { BusinessBrain } from "./business-brain";
 import { ResearchKey } from "./research-key";
 import { WorkspaceForm } from "./workspace-form";
 
@@ -65,6 +66,7 @@ async function Settings() {
 				<ArchiveRetention />
 				<AgentModel />
 				<AiProviders />
+				<BusinessBrain />
 			</div>
 		</HydrateClient>
 	);
