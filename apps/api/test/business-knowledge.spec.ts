@@ -90,7 +90,8 @@ describe("Business Brain knowledge", () => {
 		} as never;
 
 		const [first] = resolveCurrent([fresh, confirmed]);
-		expect((first as { id: string }).id).toBe("a");
+		const winner: { id: string } | undefined = first;
+		expect(winner?.id).toBe("a");
 	});
 
 	it("drops expired and not-yet-valid knowledge", () => {
