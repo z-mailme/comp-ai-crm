@@ -35,6 +35,8 @@ type CatalogModel = {
 	provider: string;
 	contextWindowTokens: number;
 	pricing: { input: number; output: number } | null;
+	source: "gateway" | "direct";
+	keyConfigured: boolean;
 };
 
 const FOLLOW_DEFAULT = "__default__";
@@ -150,17 +152,23 @@ export function AgentModel() {
 									<CommandGroup key={provider} heading={provider}>
 										{group.map((model) => {
 											const price = priceHint(model);
+											const locked =
+												model.source === "direct" && !model.keyConfigured;
 
 											return (
 												<CommandItem
 													key={model.id}
 													value={`${model.name} ${model.provider} ${model.id}`}
 													data-checked={current === model.id}
+													disabled={locked}
 													onSelect={() => choose(model.id)}
 												>
 													<span>{model.name}</span>
 													<span className="ml-auto text-muted-foreground text-xs">
-														{price ?? contextHint(model.contextWindowTokens)}
+														{locked
+															? "needs API key"
+															: (price ??
+																contextHint(model.contextWindowTokens))}
 													</span>
 												</CommandItem>
 											);

@@ -97,6 +97,17 @@ export class AgentTriggerService {
 		return brand || profile;
 	}
 
+	async providerTest(provider: string): Promise<boolean> {
+		return this.enqueue({
+			kind: "provider-test",
+			reason: `Test the ${provider} connection from Settings`,
+			priority: PRIORITY.requested,
+			budget: 1,
+			payload: { provider },
+			subject: { path: ["provider"], value: provider },
+		});
+	}
+
 	async workspaceChanged(website: string, reason: string): Promise<void> {
 		await this.enqueue({
 			kind: "workspace-profile",

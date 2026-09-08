@@ -1,8 +1,10 @@
 import { db } from "@crm/db";
 import { readAgentModel } from "@crm/db/settings";
+import type { LanguageModel } from "ai";
+import { resolveDirectModel } from "./providers";
 
 export interface ModelSelection {
-	model: string;
+	model: string | LanguageModel;
 	modelContextWindowTokens: number;
 }
 
@@ -12,8 +14,10 @@ export async function selectedModel(): Promise<ModelSelection | null> {
 
 		if (setting.isDefault) return null;
 
+		const direct = resolveDirectModel(setting.id);
+
 		return {
-			model: setting.id,
+			model: direct ?? setting.id,
 			modelContextWindowTokens: setting.contextWindowTokens,
 		};
 	} catch (error) {

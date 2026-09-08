@@ -1,16 +1,20 @@
 import { Inject } from "@nestjs/common";
 import { Input, Mutation, Query, Router, UseMiddlewares } from "nestjs-trpc";
 import type { z } from "zod";
+import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
 import {
 	agentModelOutput,
+	aiProviderStatusOutput,
 	archiveRetentionOutput,
 	modelCatalogOutput,
 	researchKeyOutput,
 	setAgentModelInput,
 	setArchiveRetentionDaysInput,
 	setResearchKeyInput,
+	testProviderInput,
+	testProviderOutput,
 } from "./settings.contracts";
 import { SettingsService } from "./settings.service";
 
@@ -19,6 +23,7 @@ import { SettingsService } from "./settings.service";
 export class SettingsRouter {
 	constructor(
 		@Inject(SettingsService) private readonly settings: SettingsService,
+		@Inject(AgentTriggerService) private readonly agent: AgentTriggerService,
 	) {}
 
 	@Query({
@@ -35,6 +40,23 @@ export class SettingsRouter {
 	})
 	async modelCatalog() {
 		return this.settings.modelCatalog();
+	}
+
+	@Query({
+		output: aiProviderStatusOutput.array(),
+		meta: restMeta("GET", "/settings/providers", ["Settings"]),
+	})
+	async providers() {
+		return this.settings.providers();
+	}
+
+	@Mutation({
+		input: testProviderInput,
+		output: testProviderOutput,
+		meta: restMeta("POST", "/settings/providers/test", ["Settings"]),
+	})
+	async testProvider(@Input() input: z.infer<typeof testProviderInput>) {
+		return { queued: await this.agent.providerTest(input.provider) };
 	}
 
 	@Mutation({

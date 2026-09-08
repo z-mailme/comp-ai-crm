@@ -10,6 +10,8 @@ export const catalogModelOutput = z.object({
 	provider: z.string(),
 	contextWindowTokens: z.number(),
 	pricing: z.object({ input: z.number(), output: z.number() }).nullable(),
+	source: z.enum(["gateway", "direct"]),
+	keyConfigured: z.boolean(),
 });
 
 export type CatalogModel = z.infer<typeof catalogModelOutput>;
@@ -30,6 +32,43 @@ export const modelCatalogOutput = z.object({
 });
 
 export type ModelCatalogResult = z.infer<typeof modelCatalogOutput>;
+
+export const aiProviderStatusOutput = z.object({
+	id: z.string(),
+	label: z.string(),
+	envKey: z.string(),
+	configured: z.boolean(),
+	models: z.array(
+		z.object({
+			id: z.string(),
+			label: z.string(),
+			contextWindowTokens: z.number(),
+			toolUse: z.boolean(),
+			reasoning: z.boolean(),
+		}),
+	),
+	lastTest: z
+		.object({
+			outcome: z.string().nullable(),
+			finishedAt: z.string().nullable(),
+			pending: z.boolean(),
+		})
+		.nullable(),
+});
+
+export type AiProviderStatus = z.infer<typeof aiProviderStatusOutput>;
+
+export const testProviderInput = z.object({
+	provider: z.enum(["deepseek", "moonshot"]),
+});
+
+export type TestProviderInput = z.infer<typeof testProviderInput>;
+
+export const testProviderOutput = z.object({
+	queued: z.boolean(),
+});
+
+export type TestProviderOutput = z.infer<typeof testProviderOutput>;
 
 export const researchKeyOutput = z.object({
 	configured: z.boolean(),

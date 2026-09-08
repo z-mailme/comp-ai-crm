@@ -1,5 +1,6 @@
-import { EnrichmentStatus } from "@crm/db";
+import { EnrichmentStatus, type Prisma } from "@crm/db";
 import { fieldBackfillPayload } from "@crm/validation/field-backfill";
+import { z } from "zod";
 import { APP_AUTH, type AppAuth } from "./app-auth";
 import { brandOutcome, runBrand } from "./brand";
 import { queueEventAgentRuns } from "./custom-agent-dispatch";
@@ -8,6 +9,7 @@ import { DISPATCH } from "./dispatch-config";
 import { markRunning, settle } from "./enrichment";
 import { collapsing, runLimited } from "./pool";
 import { runPortrait } from "./portrait";
+import { testProviderConnection } from "./providers";
 import { runSlackChannelJoin } from "./slack-join-task";
 import { runSlackPeopleMatch } from "./slack-people";
 import { staleTaskSweep } from "./stale-tasks";
@@ -128,7 +130,31 @@ async function handleDirect(task: LeasedTask): Promise<void> {
 		return;
 	}
 
+	if (task.kind === "provider-test") {
+		const providerId = providerIdOf(task.payload);
+		if (!providerId) {
+			await completeTask(task.id, "No provider was named.");
+			return;
+		}
+
+		const result = await testProviderConnection(providerId);
+		await completeTask(
+			task.id,
+			result.ok
+				? `${providerId} answered. ${result.models} models listed.`
+				: (result.reason ?? `${providerId} could not be reached.`),
+		);
+		return;
+	}
+
 	await completeTask(task.id, "The record this names is gone.");
+}
+
+const providerTestPayload = z.object({ provider: z.string() });
+
+function providerIdOf(payload: Prisma.JsonValue | null): string | null {
+	const parsed = providerTestPayload.safeParse(payload);
+	return parsed.success ? parsed.data.provider : null;
 }
 
 export async function runResearchLane(

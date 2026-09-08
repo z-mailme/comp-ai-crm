@@ -13,6 +13,7 @@ import { requireSession } from "@/lib/session";
 import { HydrateClient } from "@/lib/trpc/hydrate";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
 import { AgentModel } from "./agent-model";
+import { AiProviders } from "./ai-providers";
 import { ArchiveRetention } from "./archive-retention";
 import { ResearchKey } from "./research-key";
 import { WorkspaceForm } from "./workspace-form";
@@ -63,6 +64,7 @@ async function Settings() {
 				<ResearchKey />
 				<ArchiveRetention />
 				<AgentModel />
+				<AiProviders />
 			</div>
 		</HydrateClient>
 	);
