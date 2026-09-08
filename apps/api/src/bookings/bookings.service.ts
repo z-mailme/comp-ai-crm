@@ -239,12 +239,10 @@ export class BookingsService {
 				operationalStartAt: timing.operationalStartAt,
 				operationalEndAt: timing.operationalEndAt,
 				source: RecordSource.IMPORT,
-				...(Object.hasOwn(input, "googleCalendarEventId")
-					? { googleCalendarEventId: input.googleCalendarEventId ?? null }
-					: {}),
-				...(input.calendarStatus
-					? { calendarStatus: input.calendarStatus }
-					: {}),
+				googleCalendarEventId: Object.hasOwn(input, "googleCalendarEventId")
+					? (input.googleCalendarEventId ?? null)
+					: undefined,
+				calendarStatus: input.calendarStatus ?? undefined,
 			} satisfies Prisma.BookingUncheckedUpdateInput;
 
 			const booking = existing

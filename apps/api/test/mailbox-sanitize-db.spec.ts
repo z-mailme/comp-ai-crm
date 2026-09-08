@@ -281,8 +281,8 @@ describe("postgres persistence of the ten failure classes", () => {
 			try {
 				const rejected = await write(dirtySubject, dirtyBody, "raw").then(
 					() => null,
-					(error: unknown) =>
-						error instanceof Error ? error.message : String(error),
+					(cause: unknown) =>
+						cause instanceof Error ? cause.message : String(cause),
 				);
 
 				expect(rejected).not.toBeNull();

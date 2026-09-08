@@ -682,7 +682,9 @@ function hostnameOf(value: string): string | null {
 function configRecord(
 	value: Prisma.JsonValue | null,
 ): Record<string, Prisma.JsonValue> {
-	if (!value || typeof value !== "object" || Array.isArray(value)) return {};
+	if (value === null || Array.isArray(value) || !(value instanceof Object)) {
+		return {};
+	}
 	return Object.fromEntries(Object.entries(value)) as Record<
 		string,
 		Prisma.JsonValue
@@ -690,7 +692,8 @@ function configRecord(
 }
 
 function textOf(value: Prisma.JsonValue | undefined): string | null {
-	return typeof value === "string" ? value : null;
+	const parsed = z.string().safeParse(value);
+	return parsed.success ? parsed.data : null;
 }
 
 function sourceWithBusinessUnit(

@@ -160,7 +160,7 @@ describe("malformed Unicode from external mail", () => {
 			safe.recipients[0]?.name,
 			safe.body,
 		]) {
-			if (typeof value !== "string") continue;
+			if (value === null || value === undefined) continue;
 			expect(wellFormed(value)).toBe(true);
 			expect(value.includes(NUL)).toBe(false);
 		}

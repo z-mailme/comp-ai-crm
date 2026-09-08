@@ -153,7 +153,9 @@ export class ListmonkClient {
 	}
 }
 
-function authHeaders(config: ListmonkConfig): Record<string, string> {
+type AuthHeaders = { authorization: string };
+
+function authHeaders(config: ListmonkConfig): AuthHeaders {
 	if (config.authMethod === "token" && config.token) {
 		return { authorization: `Bearer ${config.token}` };
 	}

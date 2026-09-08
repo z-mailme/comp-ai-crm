@@ -88,12 +88,12 @@ export class SyncController {
 			"The bounded Gmail backfill ran, or dry-run counted candidates.",
 	})
 	async gmailBackfill(
-		@Headers("authorization") authorization?: string,
-		@Query() query?: Record<string, unknown>,
+		@Headers("authorization") authorization: string | undefined,
+		@Query() query: Record<string, string | string[] | undefined> = {},
 	) {
 		this.authorize(authorization);
 
-		const parsed = gmailBackfillInput.safeParse(query ?? {});
+		const parsed = gmailBackfillInput.safeParse(query);
 		if (!parsed.success) {
 			throw new BadRequestException(
 				parsed.error.issues.map((issue) => issue.message).join(" "),

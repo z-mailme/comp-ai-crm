@@ -12,10 +12,8 @@ import { toast } from "sonner";
 import { useCrmCache } from "@/lib/trpc/cache";
 import { useTRPC } from "@/lib/trpc/client";
 import type { RouterOutputs } from "@/lib/trpc/types";
-import { parseParticipant, parseParticipants } from "./conversation-detail";
 
 type Message = RouterOutputs["businessOs"]["conversation"]["messages"][number];
-type SendEmailOutput = RouterOutputs["google"]["sendEmail"];
 
 export function ReplyComposer({
 	conversationId,
@@ -203,21 +201,16 @@ function displayRecipients(messages: Message[], replyAll: boolean): string[] {
 	if (!anchor) return [];
 
 	if (anchor.direction === "INBOUND") {
-		const sender = parseParticipant(anchor.sender);
+		const sender = anchor.sender;
 		const to = sender ? [sender.name ?? sender.email] : [];
 		if (!replyAll) return to;
 		return [
 			...to,
-			...parseParticipants(anchor.recipients).map(
-				(entry) => entry.name ?? entry.email,
-			),
+			...anchor.recipients.map((entry) => entry.name ?? entry.email),
 		];
 	}
 
-	const recipients = parseParticipants(anchor.recipients).map(
-		(entry) => entry.name ?? entry.email,
-	);
-	return recipients;
+	return anchor.recipients.map((entry) => entry.name ?? entry.email);
 }
 
 export function splitEmails(value: string): string[] {

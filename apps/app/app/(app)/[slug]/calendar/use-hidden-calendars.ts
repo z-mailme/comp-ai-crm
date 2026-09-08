@@ -1,9 +1,12 @@
 "use client";
 
 import { useCallback, useSyncExternalStore } from "react";
+import { z } from "zod";
 
 const STORAGE_KEY = "comp-ai:calendar:hidden-calendars";
 const EMPTY: ReadonlySet<string> = new Set();
+
+const storedHiddenCalendars = z.array(z.string());
 
 const listeners = new Set<() => void>();
 let cachedRaw: string | null = null;
@@ -38,7 +41,7 @@ function subscribe(listener: () => void): () => void {
 }
 
 function readHidden(): ReadonlySet<string> {
-	if (typeof window === "undefined") return EMPTY;
+	if (!("window" in globalThis)) return EMPTY;
 
 	const raw = window.localStorage.getItem(STORAGE_KEY);
 	if (raw === cachedRaw) return cachedSet;
@@ -46,12 +49,8 @@ function readHidden(): ReadonlySet<string> {
 	let parsed: string[] = [];
 	if (raw) {
 		try {
-			const value: unknown = JSON.parse(raw);
-			if (Array.isArray(value)) {
-				parsed = value.filter(
-					(entry): entry is string => typeof entry === "string",
-				);
-			}
+			const result = storedHiddenCalendars.safeParse(JSON.parse(raw));
+			parsed = result.success ? result.data : [];
 		} catch {
 			parsed = [];
 		}

@@ -31,7 +31,7 @@ type ActivityTypeFilter = Entry["type"] | "ALL";
 
 const CELL = "px-3 py-2.5 align-middle";
 
-const TYPE_LABELS: Record<ActivityTypeFilter, string> = {
+const TYPE_LABELS = {
 	ALL: "All",
 	NOTE: "Notes",
 	CALL: "Calls",
@@ -40,7 +40,7 @@ const TYPE_LABELS: Record<ActivityTypeFilter, string> = {
 	TASK: "Tasks",
 	STAGE_CHANGE: "Stage changes",
 	ENRICHMENT: "Enrichment",
-};
+} satisfies Record<ActivityTypeFilter, string>;
 
 const TYPE_ORDER: readonly ActivityTypeFilter[] = [
 	"ALL",
@@ -77,7 +77,7 @@ export function ActivityFeed() {
 
 	const feed = useInfiniteQuery({
 		...trpc.businessOs.activityFeed.infiniteQueryOptions(
-			{ limit: 50, ...(type === "ALL" ? {} : { type }) },
+			{ limit: 50, type: type === "ALL" ? undefined : type },
 			{ getNextPageParam: (page) => page.nextCursor ?? undefined },
 		),
 	});

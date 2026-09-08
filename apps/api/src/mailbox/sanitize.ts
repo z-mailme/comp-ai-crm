@@ -26,21 +26,20 @@ export function sanitizeMailboxText(value: string): string {
 export function sanitizeMailboxTextNullable<
 	T extends string | null | undefined,
 >(value: T): T {
-	return (typeof value === "string" ? sanitizeMailboxText(value) : value) as T;
+	if (value === null || value === undefined) return value;
+	return sanitizeMailboxText(value) as T;
 }
 
 export function sanitizeMailboxJson(
 	value: Prisma.InputJsonValue,
 ): Prisma.InputJsonValue {
-	if (typeof value === "string") return sanitizeMailboxText(value);
-
 	if (Array.isArray(value)) {
 		return value.map((entry) =>
 			sanitizeMailboxJson(entry as Prisma.InputJsonValue),
 		);
 	}
 
-	if (value && typeof value === "object") {
+	if (value !== null && value instanceof Object) {
 		return Object.fromEntries(
 			Object.entries(value).map(([key, entry]) => [
 				key,
@@ -49,7 +48,7 @@ export function sanitizeMailboxJson(
 		);
 	}
 
-	return value;
+	return String(value) === value ? sanitizeMailboxText(value) : value;
 }
 
 export function sanitizeIncomingMessage<T extends MailboxTextMessage>(

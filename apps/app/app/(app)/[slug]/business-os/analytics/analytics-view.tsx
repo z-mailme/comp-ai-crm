@@ -17,6 +17,7 @@ import {
 	formatPercent,
 } from "@crm/ui/lib/format";
 import { useQuery } from "@tanstack/react-query";
+import { z } from "zod";
 import { BarTrend, DonutStat } from "@/components/dashboard-charts";
 import { LocalDateTime } from "@/components/local-date-time";
 import { dealStageColor, dealStageLabel } from "@/lib/deal-stage";
@@ -42,8 +43,10 @@ export function AnalyticsView() {
 
 	const money = (cents: number) =>
 		formatMoney(cents, analytics.reportingCurrency);
-	const exact = (value: number | string) =>
-		typeof value === "number" ? money(value) : value;
+	const exact = (value: number | string) => {
+		const parsed = z.number().safeParse(value);
+		return parsed.success ? money(parsed.data) : String(value);
+	};
 	const stageSlices = analytics.pipeline.stages
 		.filter((stage) => stage.count > 0)
 		.map((stage) => ({

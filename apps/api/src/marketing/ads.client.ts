@@ -123,7 +123,14 @@ export class AdsClient {
 			"LIMIT 50",
 		].join(" ");
 
-		const headers: Record<string, string> = {
+		type GoogleAdsHeaders = {
+			authorization: string;
+			"developer-token": string;
+			"content-type": string;
+			"login-customer-id"?: string;
+		};
+
+		const headers: GoogleAdsHeaders = {
 			authorization: `Bearer ${config.accessToken}`,
 			"developer-token": config.developerToken,
 			"content-type": "application/json",

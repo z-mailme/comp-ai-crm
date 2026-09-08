@@ -15,6 +15,7 @@ import {
 	ConversationStatus,
 	DealStage,
 	KnowledgeItemType,
+	type Prisma,
 } from "@crm/db";
 import { z } from "zod";
 
@@ -99,12 +100,50 @@ const conversationBriefOutput = z.object({
 	assignedAgent: linkedRecordOutput.nullable(),
 });
 
+const messageParticipantOutput = z.object({
+	email: z.string(),
+	name: z.string().nullable(),
+});
+
+const messageRecipientOutput = messageParticipantOutput.extend({
+	kind: z.enum(["to", "cc"]),
+});
+
+export type MessageParticipant = z.infer<typeof messageParticipantOutput>;
+export type MessageRecipient = z.infer<typeof messageRecipientOutput>;
+
+const storedEmailOnly = z.object({ email: z.string() });
+
+export function parseMessageSender(
+	value: Prisma.JsonValue,
+): MessageParticipant | null {
+	const parsed = messageParticipantOutput.safeParse(value);
+	if (parsed.success) return parsed.data;
+	if (value === null) return null;
+	const emailOnly = storedEmailOnly.safeParse(value);
+	return emailOnly.success ? { email: emailOnly.data.email, name: null } : null;
+}
+
+export function parseMessageRecipients(
+	value: Prisma.JsonValue,
+): MessageRecipient[] {
+	if (!Array.isArray(value)) return [];
+	return value.flatMap((entry) => {
+		const parsed = messageRecipientOutput.safeParse(entry);
+		if (parsed.success) return [parsed.data];
+		const emailOnly = storedEmailOnly.safeParse(entry);
+		return emailOnly.success
+			? [{ email: emailOnly.data.email, name: null, kind: "to" as const }]
+			: [];
+	});
+}
+
 const communicationMessageOutput = z.object({
 	id: z.string(),
 	channel: z.nativeEnum(CommunicationChannel),
 	direction: z.nativeEnum(CommunicationDirection),
-	sender: z.unknown(),
-	recipients: z.unknown(),
+	sender: messageParticipantOutput.nullable(),
+	recipients: z.array(messageRecipientOutput),
 	subject: z.string().nullable(),
 	body: z.string().nullable(),
 	snippet: z.string().nullable(),

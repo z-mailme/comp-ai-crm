@@ -1,11 +1,20 @@
+import { z } from "zod";
 import type { AddressInput } from "./gmail-rfc822";
+
+export const storedRecipient = z.object({
+	email: z.string().trim().min(1),
+	name: z.string().nullable().catch(null),
+	kind: z.enum(["to", "cc"]).catch("to"),
+});
+
+export type StoredRecipient = z.infer<typeof storedRecipient>;
 
 export type StoredReplyMessage = {
 	rfcMessageId: string;
 	direction: "INBOUND" | "OUTBOUND";
 	fromEmail: string;
 	fromName: string | null;
-	recipients: { email: string; name: string | null; kind: "to" | "cc" }[];
+	recipients: StoredRecipient[];
 	sentAt: Date;
 };
 

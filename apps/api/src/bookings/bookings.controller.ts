@@ -1,6 +1,5 @@
 import {
 	BadRequestException,
-	Body,
 	Controller,
 	Get,
 	Headers,
@@ -20,9 +19,15 @@ import {
 } from "@nestjs/swagger";
 import { AllowAnonymous } from "@thallesp/nestjs-better-auth";
 import type { EnvironmentVariables } from "../config/env.validation";
-import { availabilityInput, bookingUpsertInput } from "./bookings.contracts";
+import {
+	type AvailabilityInput,
+	availabilityInput,
+	type BookingUpsertInput,
+	bookingUpsertInput,
+} from "./bookings.contracts";
 import { BookingsService } from "./bookings.service";
 import { authorizeBookingInternalRequest } from "./bookings-auth";
+import { zodBody } from "./zod-body";
 
 @ApiTags("Internal — Bookings")
 @ApiHeader({
@@ -78,20 +83,12 @@ export class BookingsController {
 		description: "Capacity and booking conflicts for the window.",
 	})
 	async availability(
-		@Headers("authorization") authorization?: string,
-		@Body() body?: unknown,
+		@Headers("authorization") authorization: string | undefined,
+		@zodBody(availabilityInput) input: AvailabilityInput,
 	) {
 		this.authorize(authorization);
 
-		const parsed = availabilityInput.safeParse(body);
-
-		if (!parsed.success) {
-			throw new BadRequestException(
-				parsed.error.issues.map((issue) => issue.message).join(" "),
-			);
-		}
-
-		return this.bookings.availability(parsed.data);
+		return this.bookings.availability(input);
 	}
 
 	@Post("upsert")
@@ -162,20 +159,12 @@ export class BookingsController {
 		description: "The canonical booking after the write.",
 	})
 	async upsert(
-		@Headers("authorization") authorization?: string,
-		@Body() body?: unknown,
+		@Headers("authorization") authorization: string | undefined,
+		@zodBody(bookingUpsertInput) input: BookingUpsertInput,
 	) {
 		this.authorize(authorization);
 
-		const parsed = bookingUpsertInput.safeParse(body);
-
-		if (!parsed.success) {
-			throw new BadRequestException(
-				parsed.error.issues.map((issue) => issue.message).join(" "),
-			);
-		}
-
-		return this.bookings.upsert(parsed.data);
+		return this.bookings.upsert(input);
 	}
 
 	@Get("by-deal/:dealId")

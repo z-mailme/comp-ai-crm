@@ -40,16 +40,13 @@ type When = "upcoming" | "past";
 
 const CELL = "px-3 py-2.5 align-middle";
 
-const STATUS_PRESENTATION: Record<
-	Booking["status"],
-	{ label: string; tone: StatusTone }
-> = {
+const STATUS_PRESENTATION = {
 	PROVISIONAL: { label: "Provisional", tone: "warning" },
 	HELD: { label: "Held", tone: "info" },
 	CONFIRMED: { label: "Confirmed", tone: "success" },
 	COMPLETED: { label: "Completed", tone: "neutral" },
 	CANCELLED: { label: "Cancelled", tone: "error" },
-};
+} satisfies Record<Booking["status"], { label: string; tone: StatusTone }>;
 
 const COLUMNS: SimpleTableColumn[] = [
 	{ id: "booking", header: "Booking" },

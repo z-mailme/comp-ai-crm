@@ -39,12 +39,12 @@ export type CalendarOutput = RouterOutputs["businessOs"]["calendar"];
 export type CalendarEvent = CalendarOutput["events"][number];
 export type CalendarListEntry = CalendarOutput["calendars"][number];
 
-const VIEW_LABELS: Record<CalendarView, string> = {
+const VIEW_LABELS = {
 	week: "Week",
 	day: "Day",
 	month: "Month",
 	agenda: "Agenda",
-};
+} satisfies Record<CalendarView, string>;
 
 const AGENDA_DAY_COUNT = 30;
 

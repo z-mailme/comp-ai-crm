@@ -1,12 +1,17 @@
 import { GMAIL_SEND_SCOPE, GOOGLE_PROVIDER_ID } from "@crm/auth";
-import { type Db, EmailDirection } from "@crm/db";
+import { type Db, EmailDirection, type Prisma } from "@crm/db";
 import { lockIdempotencyKey } from "@crm/db/idempotency";
 import { Injectable, Logger } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
 import { MailboxTokenService } from "../mailbox/mailbox-token.service";
 import { ThreadWriterService } from "../mailbox/thread-writer.service";
 import { GmailClient } from "./gmail.client";
-import { planReply, type StoredReplyMessage } from "./gmail-reply-plan";
+import {
+	planReply,
+	type StoredRecipient,
+	type StoredReplyMessage,
+	storedRecipient,
+} from "./gmail-reply-plan";
 import { buildMimeMessage, encodeRawMime } from "./gmail-rfc822";
 import { GMAIL_SYNC } from "./gmail-sync.config";
 import type { SendEmailInput, SendEmailOutput } from "./google.contracts";
@@ -334,20 +339,12 @@ function replySubject(subject: string | null): string {
 	return base ? `Re: ${base}` : "Re:";
 }
 
-function recipientsOf(
-	value: unknown,
-): { email: string; name: string | null; kind: "to" | "cc" }[] {
+function recipientsOf(value: Prisma.JsonValue): StoredRecipient[] {
 	if (!Array.isArray(value)) return [];
-	const out: { email: string; name: string | null; kind: "to" | "cc" }[] = [];
+	const out: StoredRecipient[] = [];
 	for (const entry of value) {
-		if (!entry || typeof entry !== "object") continue;
-		const candidate = entry as Record<string, unknown>;
-		if (typeof candidate.email !== "string" || !candidate.email) continue;
-		out.push({
-			email: candidate.email,
-			name: typeof candidate.name === "string" ? candidate.name : null,
-			kind: candidate.kind === "cc" ? "cc" : "to",
-		});
+		const parsed = storedRecipient.safeParse(entry);
+		if (parsed.success) out.push(parsed.data);
 	}
 	return out;
 }

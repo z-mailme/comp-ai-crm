@@ -119,8 +119,8 @@ export function ConversationDetail({ id }: { id: string }) {
 }
 
 function MessageCard({ message }: { message: Message }) {
-	const sender = parseParticipant(message.sender);
-	const recipients = parseParticipants(message.recipients);
+	const sender = message.sender;
+	const recipients = message.recipients;
 	const outbound = message.direction === "OUTBOUND";
 
 	return (
@@ -162,27 +162,4 @@ function MessageCard({ message }: { message: Message }) {
 			</p>
 		</article>
 	);
-}
-
-export function parseParticipant(
-	value: unknown,
-): { email: string; name: string | null } | null {
-	if (!value || typeof value !== "object") return null;
-	const candidate = value as Record<string, unknown>;
-	if (typeof candidate.email !== "string") return null;
-	return {
-		email: candidate.email,
-		name: typeof candidate.name === "string" ? candidate.name : null,
-	};
-}
-
-export function parseParticipants(
-	value: unknown,
-): { email: string; name: string | null }[] {
-	if (!Array.isArray(value)) return [];
-	return value
-		.map(parseParticipant)
-		.filter((entry): entry is { email: string; name: string | null } =>
-			Boolean(entry),
-		);
 }

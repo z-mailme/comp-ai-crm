@@ -785,12 +785,12 @@ export class GmailSyncService {
 	}
 
 	private persistenceFailureForMessage(
-		error: unknown,
+		cause: unknown,
 		row: MailboxSync,
 		message: GmailMessage,
 		input?: GmailBackfillInput,
 	): StrictBackfillFailure {
-		const category = persistenceFailureCategory(error);
+		const category = persistenceFailureCategory(cause);
 
 		this.logger.error(
 			{
@@ -804,11 +804,11 @@ export class GmailSyncService {
 				chunkBefore: input?.before.toISOString(),
 				failureCategory: category,
 			},
-			stackOf(error),
+			stackOf(cause),
 		);
 
 		return {
-			status: retryablePersistenceFailure(error)
+			status: retryablePersistenceFailure(cause)
 				? "retryable-failed"
 				: "failed",
 			reason: `Gmail message persistence failed (${category}).`,
@@ -853,12 +853,12 @@ function backfillFailureForMessage(
 	};
 }
 
-function persistenceFailureCategory(error: unknown): string {
-	if (error instanceof PrismaNamespace.PrismaClientKnownRequestError) {
-		return `prisma-${error.code.toLowerCase()}`;
+function persistenceFailureCategory(cause: unknown): string {
+	if (cause instanceof PrismaNamespace.PrismaClientKnownRequestError) {
+		return `prisma-${cause.code.toLowerCase()}`;
 	}
 
-	const message = error instanceof Error ? error.message : String(error);
+	const message = cause instanceof Error ? cause.message : String(cause);
 	const lower = message.toLowerCase();
 	if (lower.includes("22021") || lower.includes("invalid byte sequence")) {
 		return "postgres-invalid-text-encoding";
@@ -868,19 +868,19 @@ function persistenceFailureCategory(error: unknown): string {
 		return "postgres-invalid-text-encoding";
 	}
 
-	const name = error instanceof Error && error.name ? error.name : "unknown";
+	const name = cause instanceof Error && cause.name ? cause.name : "unknown";
 	return name.replace(/[^a-z0-9_.-]+/gi, "-").toLowerCase();
 }
 
-function retryablePersistenceFailure(error: unknown): boolean {
-	if (!(error instanceof PrismaNamespace.PrismaClientKnownRequestError)) {
+function retryablePersistenceFailure(cause: unknown): boolean {
+	if (!(cause instanceof PrismaNamespace.PrismaClientKnownRequestError)) {
 		return false;
 	}
 
-	return ["P1001", "P1002", "P1008", "P2024", "P2034"].includes(error.code);
+	return ["P1001", "P1002", "P1008", "P2024", "P2034"].includes(cause.code);
 }
 
-function stackOf(error: unknown): string {
-	if (error instanceof Error) return error.stack ?? error.message;
-	return String(error);
+function stackOf(cause: unknown): string {
+	if (cause instanceof Error) return cause.stack ?? cause.message;
+	return String(cause);
 }

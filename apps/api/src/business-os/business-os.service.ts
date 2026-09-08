@@ -42,6 +42,10 @@ import type {
 	KnowledgeOutput,
 	ObservabilityOutput,
 } from "./business-os.contracts";
+import {
+	parseMessageRecipients,
+	parseMessageSender,
+} from "./business-os.contracts";
 import { calendarRange } from "./calendar-range";
 import { countIntoWeeks, utcWeekStarts } from "./weekly-buckets";
 
@@ -602,6 +606,8 @@ export class BusinessOsService {
 			conversation: conversationSummary(conversation),
 			messages: messages.map((message) => ({
 				...message,
+				sender: parseMessageSender(message.sender),
+				recipients: parseMessageRecipients(message.recipients),
 				sentAt: message.sentAt.toISOString(),
 			})),
 			participants: participants.map((participant) => ({
@@ -944,7 +950,8 @@ export class BusinessOsService {
 			},
 			orderBy: [{ createdAt: "desc" }, { id: "desc" }],
 			take: input.limit + 1,
-			...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}),
+			cursor: input.cursor ? { id: input.cursor } : undefined,
+			skip: input.cursor ? 1 : undefined,
 			select: {
 				id: true,
 				type: true,
@@ -1029,7 +1036,8 @@ export class BusinessOsService {
 				{ id: "asc" },
 			],
 			take: input.limit + 1,
-			...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}),
+			cursor: input.cursor ? { id: input.cursor } : undefined,
+			skip: input.cursor ? 1 : undefined,
 			select: {
 				id: true,
 				bookingKey: true,

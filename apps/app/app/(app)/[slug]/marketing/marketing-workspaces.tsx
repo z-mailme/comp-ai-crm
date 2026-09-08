@@ -807,7 +807,8 @@ function formatNumber(value: number): string {
 
 function required(form: FormData, name: string): string {
 	const value = form.get(name);
-	return typeof value === "string" ? value.trim() : "";
+	if (value === null || value instanceof File) return "";
+	return value.trim();
 }
 
 function optional(form: FormData, name: string): string | undefined {

@@ -9,10 +9,12 @@ export type CalendarRangeInput = {
 	timezone?: string;
 };
 
-export function calendarRange(input: CalendarRangeInput): {
+export type CalendarRange = {
 	start: Date;
 	end: Date;
-} {
+};
+
+export function calendarRange(input: CalendarRangeInput): CalendarRange {
 	const timeZone = normalizeTimeZone(input.timezone);
 	const selected = civilDate(input.date, timeZone);
 
@@ -93,17 +95,16 @@ function offsetMs(instant: Date, timeZone: string): number {
 	return asUtc - Math.floor(instant.getTime() / 1000) * 1000;
 }
 
-function zonedParts(
-	instant: Date,
-	timeZone: string,
-): {
+type ZonedParts = {
 	year: number;
 	month: number;
 	day: number;
 	hour: number;
 	minute: number;
 	second: number;
-} {
+};
+
+function zonedParts(instant: Date, timeZone: string): ZonedParts {
 	const formatter = new Intl.DateTimeFormat("en-US", {
 		timeZone,
 		hourCycle: "h23",
