@@ -24,6 +24,8 @@ import {
 	googleConnectionStatusOutput,
 	historicalImportIdInput,
 	historicalImportJobOutput,
+	mailboxThreadsInput,
+	mailboxThreadsOutput,
 	purgeSyncedDataOutput,
 	reindexCalendarInput,
 	reindexCalendarOutput,
@@ -37,6 +39,7 @@ import {
 } from "./google.contracts";
 import { GoogleConnectionService } from "./google-connection.service";
 import { GoogleSyncService } from "./google-sync.service";
+import { MailboxListService } from "./mailbox-list.service";
 
 @Router({ alias: "google" })
 @UseMiddlewares(AuthMiddleware)
@@ -53,6 +56,8 @@ export class GoogleRouter {
 		private readonly gmailSend: GmailSendService,
 		@Inject(GmailLabelSyncService)
 		private readonly labels: GmailLabelSyncService,
+		@Inject(MailboxListService)
+		private readonly mailboxList: MailboxListService,
 	) {}
 
 	@Query({
@@ -61,6 +66,18 @@ export class GoogleRouter {
 	})
 	async gmailLabels(@Ctx() ctx: AuthedTrpcContext) {
 		return this.labels.listForUser(ctx.user.id);
+	}
+
+	@Query({
+		input: mailboxThreadsInput,
+		output: mailboxThreadsOutput,
+		meta: restMeta("GET", "/google/gmail/threads", ["Google"]),
+	})
+	async mailboxThreads(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof mailboxThreadsInput>,
+	) {
+		return this.mailboxList.threads(ctx.user.id, input);
 	}
 
 	@Query({

@@ -42,6 +42,59 @@ export const gmailLabelOutput = z.object({
 	messageListVisibility: z.string().nullable(),
 });
 
+export const MAILBOX_VIEWS = [
+	"inbox",
+	"starred",
+	"sent",
+	"drafts",
+	"important",
+	"all",
+	"spam",
+	"trash",
+] as const;
+
+export type MailboxView = (typeof MAILBOX_VIEWS)[number];
+
+export const mailboxThreadsInput = z.object({
+	view: z.enum(MAILBOX_VIEWS).default("inbox"),
+	labelId: z.string().trim().min(1).max(200).optional(),
+	q: z.string().trim().max(200).optional(),
+	unreadOnly: z.boolean().default(false),
+	starredOnly: z.boolean().default(false),
+	cursor: z.string().trim().min(1).max(300).optional(),
+	limit: z.number().int().min(1).max(100).default(50),
+});
+
+export type MailboxThreadsInput = z.infer<typeof mailboxThreadsInput>;
+
+export const mailboxThreadOutput = z.object({
+	providerThreadId: z.string(),
+	emailThreadId: z.string(),
+	subject: z.string().nullable(),
+	snippet: z.string().nullable(),
+	fromName: z.string().nullable(),
+	fromEmail: z.string(),
+	messageCount: z.number(),
+	lastMessageAt: z.string(),
+	unread: z.boolean(),
+	starred: z.boolean(),
+	important: z.boolean(),
+	userLabelIds: z.array(z.string()),
+	match: z
+		.object({
+			status: z.string(),
+			contactName: z.string().nullable(),
+			companyName: z.string().nullable(),
+			dealName: z.string().nullable(),
+		})
+		.nullable(),
+});
+
+export const mailboxThreadsOutput = z.object({
+	rows: z.array(mailboxThreadOutput),
+	nextCursor: z.string().nullable(),
+});
+
 export const calendarEventInput = z.object({
 	eventId: z.string(),
 });

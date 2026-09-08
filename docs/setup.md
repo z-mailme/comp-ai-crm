@@ -175,3 +175,40 @@ A rebuild drops the database and re-runs every migration, and it says which of t
 two reasons fired. Force one with `bun run db:test --reset`. Nothing else in the
 repo may drop a database, and this may only because the `_test` suffix is checked
 first.
+
+## Postgres without Docker: the WSL disposable install
+
+When Docker Desktop cannot start and there is no native Postgres, a user-space
+PostgreSQL runs inside the `Ubuntu` WSL distro. It needs no sudo and no system
+change. It backs both `DATABASE_URL` (`crm`) and `TEST_DATABASE_URL`
+(`crm_test`) through WSL localhost forwarding on port 5432.
+
+Setup (once):
+
+```sh
+# inside the Ubuntu distro (wsl -d Ubuntu)
+mkdir -p ~/pg/debs && cd ~/pg/debs
+# download postgresql-16, postgresql-client-16 from apt.postgresql.org pool
+# download libpq5 from archive.ubuntu.com pool, then:
+mkdir -p ~/pg/root
+for d in *.deb; do dpkg-deb -x "$d" ~/pg/root; done
+export PATH=$HOME/pg/root/usr/lib/postgresql/16/bin:$PATH
+export LD_LIBRARY_PATH=$HOME/pg/root/usr/lib/x86_64-linux-gnu
+initdb -D ~/pgdata -U postgres --auth=trust -E UTF8 --locale=C
+printf 'port = 5432\nlisten_addresses = '\''127.0.0.1'\''\nunix_socket_directories = '\''/home/zsudo/pgdata'\''\n' >> ~/pgdata/postgresql.conf
+pg_ctl -D ~/pgdata -l ~/pgdata.log -w -t 30 start
+createdb -h 127.0.0.1 -U postgres crm
+createdb -h 127.0.0.1 -U postgres crm_test
+```
+
+Notes:
+
+- Auth is `trust`; the password in `.env` is accepted but not required.
+- `unix_socket_directories` must point at the data directory. The default
+  `/var/run/postgresql` needs root.
+- Start it again with the same `pg_ctl ... start` line after a WSL restart.
+- A native Windows postgres binary tree fails here: connection backends die
+  with exception `0xC0000142` under this machine's process model. Do not
+  debug it again; use the WSL path.
+- `pgdata-dev` and `pgsql-portable` in the Windows home directory are the
+  failed native attempt. They can be deleted.
