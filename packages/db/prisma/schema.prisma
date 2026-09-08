@@ -1568,6 +1568,8 @@ model EmailMessage {
   createdAt DateTime @default(now())
 
   @@index([threadId, sentAt])
+  @@index([gmailThreadId])
+  @@index([labelIds], type: Gin)
   @@map("emailMessage")
 }
 

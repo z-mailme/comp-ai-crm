@@ -21,6 +21,7 @@ import { GoogleSyncService } from "./google-sync.service";
 		CalendarSyncService,
 		GmailClient,
 		GmailHistoricalImportService,
+		GmailLabelSyncService,
 		GmailSendService,
 		GmailSyncService,
 		GoogleSyncService,

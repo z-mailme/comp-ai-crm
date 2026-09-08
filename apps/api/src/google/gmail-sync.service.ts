@@ -112,6 +112,7 @@ type IncrementalIngestOutcome = {
 type LabelChange = {
 	added: Set<string>;
 	removed: Set<string>;
+	threadId: string | null;
 };
 
 const HISTORY_TYPES = "messageAdded,messageDeleted,labelAdded,labelRemoved";
@@ -588,7 +589,12 @@ export class GmailSyncService {
 		)) {
 			const rows = await this.db.emailMessage.findMany({
 				where: { gmailMessageId: { in: batch } },
-				select: { id: true, gmailMessageId: true, labelIds: true },
+				select: {
+					id: true,
+					gmailMessageId: true,
+					gmailThreadId: true,
+					labelIds: true,
+				},
 			});
 
 			for (const message of rows) {
@@ -602,11 +608,19 @@ export class GmailSyncService {
 				for (const labelId of change.removed) next.delete(labelId);
 
 				const updated = [...next];
-				if (sameMembers(message.labelIds, updated)) continue;
+				const labelsChanged = !sameMembers(message.labelIds, updated);
+				const threadMissing =
+					message.gmailThreadId === null && change.threadId !== null;
+
+				if (!labelsChanged && !threadMissing) continue;
+
+				const data: PrismaNamespace.EmailMessageUncheckedUpdateInput = {};
+				if (labelsChanged) data.labelIds = updated;
+				if (threadMissing) data.gmailThreadId = change.threadId;
 
 				await this.db.emailMessage.update({
 					where: { id: message.id },
-					data: { labelIds: updated },
+					data,
 				});
 				relabelled += 1;
 			}
@@ -1051,7 +1065,11 @@ function mergeLabelChange(
 	const id = record.message?.id;
 	if (!id) return;
 
-	const change = changes.get(id) ?? { added: new Set(), removed: new Set() };
+	const change = changes.get(id) ?? {
+		added: new Set(),
+		removed: new Set(),
+		threadId: record.message?.threadId ?? null,
+	};
 	for (const labelId of record.labelIds ?? []) {
 		change[kind].add(labelId);
 	}
