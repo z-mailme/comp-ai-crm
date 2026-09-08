@@ -95,6 +95,47 @@ export const mailboxThreadsOutput = z.object({
 	nextCursor: z.string().nullable(),
 });
 
+export const MAILBOX_ACTIONS = [
+	"markRead",
+	"markUnread",
+	"star",
+	"unstar",
+	"important",
+	"unimportant",
+	"archive",
+	"moveToInbox",
+	"spam",
+	"notSpam",
+	"trash",
+	"untrash",
+	"applyLabel",
+	"removeLabel",
+] as const;
+
+export const mailboxActionInput = z.object({
+	action: z.enum(MAILBOX_ACTIONS),
+	providerThreadIds: z.array(z.string().trim().min(1).max(200)).min(1).max(50),
+	labelId: z.string().trim().min(1).max(200).optional(),
+});
+
+export type MailboxActionInput = z.infer<typeof mailboxActionInput>;
+
+export const mailboxActionOutput = z.object({
+	status: z.enum([
+		"applied",
+		"scope-required",
+		"reconnect-required",
+		"not-connected",
+		"rate-limited",
+		"failed",
+	]),
+	reason: z.string().nullable(),
+	modified: z.number(),
+	retryAfterMs: z.number().nullable().optional(),
+});
+
+export type MailboxActionOutput = z.infer<typeof mailboxActionOutput>;
+
 export const calendarEventInput = z.object({
 	eventId: z.string(),
 });

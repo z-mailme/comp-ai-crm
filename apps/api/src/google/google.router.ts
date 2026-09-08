@@ -14,6 +14,7 @@ import { restMeta } from "../trpc/openapi";
 import { ConversationService } from "./conversation.service";
 import { GmailHistoricalImportService } from "./gmail-historical-import.service";
 import { GmailLabelSyncService } from "./gmail-label-sync.service";
+import { GmailModifyService } from "./gmail-modify.service";
 import { GmailSendService } from "./gmail-send.service";
 import {
 	calendarEventInput,
@@ -24,6 +25,8 @@ import {
 	googleConnectionStatusOutput,
 	historicalImportIdInput,
 	historicalImportJobOutput,
+	mailboxActionInput,
+	mailboxActionOutput,
 	mailboxThreadsInput,
 	mailboxThreadsOutput,
 	purgeSyncedDataOutput,
@@ -58,6 +61,8 @@ export class GoogleRouter {
 		private readonly labels: GmailLabelSyncService,
 		@Inject(MailboxListService)
 		private readonly mailboxList: MailboxListService,
+		@Inject(GmailModifyService)
+		private readonly modify: GmailModifyService,
 	) {}
 
 	@Query({
@@ -78,6 +83,18 @@ export class GoogleRouter {
 		@Input() input: z.infer<typeof mailboxThreadsInput>,
 	) {
 		return this.mailboxList.threads(ctx.user.id, input);
+	}
+
+	@Mutation({
+		input: mailboxActionInput,
+		output: mailboxActionOutput,
+		meta: restMeta("POST", "/google/gmail/actions", ["Google"]),
+	})
+	async mailboxAction(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof mailboxActionInput>,
+	) {
+		return this.modify.act(ctx.user.id, input);
 	}
 
 	@Query({

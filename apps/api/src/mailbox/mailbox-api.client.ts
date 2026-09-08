@@ -35,7 +35,10 @@ export class MailboxApiClient {
 	async post<T>(
 		url: string,
 		accessToken: string,
-		body: Record<string, string | number | boolean | null | undefined>,
+		body: Record<
+			string,
+			string | number | boolean | null | undefined | string[]
+		>,
 	): Promise<MailboxResult<T>> {
 		return this.request<T>(new URL(url), {
 			method: "POST",

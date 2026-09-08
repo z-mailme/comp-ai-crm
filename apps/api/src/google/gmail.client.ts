@@ -125,6 +125,25 @@ export class GmailClient {
 		return this.api.get<LabelList>(`${BASE}/labels`, accessToken);
 	}
 
+	async batchModify(
+		accessToken: string,
+		input: {
+			ids: string[];
+			addLabelIds?: string[];
+			removeLabelIds?: string[];
+		},
+	): Promise<MailboxResult<Record<string, never>>> {
+		return this.api.post<Record<string, never>>(
+			`${BASE}/messages/batchModify`,
+			accessToken,
+			{
+				ids: input.ids,
+				addLabelIds: input.addLabelIds,
+				removeLabelIds: input.removeLabelIds,
+			},
+		);
+	}
+
 	async getMessage(
 		accessToken: string,
 		id: string,
