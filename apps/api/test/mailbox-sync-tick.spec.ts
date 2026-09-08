@@ -3,6 +3,7 @@ import {
 	GoogleSyncStatus,
 	type MailboxSyncModel as MailboxSync,
 } from "@crm/db";
+import type { AgentTriggerService } from "../src/agent/agent-trigger.service";
 import type { GoogleConnectionService } from "../src/google/google-connection.service";
 import type { GoogleSyncService } from "../src/google/google-sync.service";
 import {
@@ -123,6 +124,11 @@ function build(
 		provider as unknown as MicrosoftSyncService,
 		noConnections as unknown as GoogleConnectionService,
 		noConnections as unknown as MicrosoftConnectionService,
+		{
+			async eventBridgeRequested(): Promise<boolean> {
+				return true;
+			},
+		} as unknown as AgentTriggerService,
 	);
 }
 

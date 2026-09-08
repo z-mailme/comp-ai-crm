@@ -1,5 +1,6 @@
 import { syncError } from "@crm/telemetry";
 import { Injectable, Logger } from "@nestjs/common";
+import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { GoogleConnectionService } from "../google/google-connection.service";
 import { GoogleSyncService } from "../google/google-sync.service";
 import {
@@ -31,6 +32,7 @@ export class MailboxSyncService {
 		private readonly microsoft: MicrosoftSyncService,
 		private readonly googleConnections: GoogleConnectionService,
 		private readonly microsoftConnections: MicrosoftConnectionService,
+		private readonly agent: AgentTriggerService,
 	) {}
 
 	async runDue(): Promise<TickSummary> {
@@ -98,6 +100,17 @@ export class MailboxSyncService {
 		}
 
 		summary.durationMs = Date.now() - startedAt;
+
+		if (summary.synced > 0) {
+			try {
+				await this.agent.eventBridgeRequested();
+			} catch (error) {
+				this.logger.warn({
+					message: "Event bridge could not be queued",
+					reason: error instanceof Error ? error.message : String(error),
+				});
+			}
+		}
 
 		this.logger.log({
 			message: "Mailbox sync tick",

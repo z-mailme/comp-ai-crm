@@ -37,6 +37,12 @@ export const DISPATCH = {
 		retire: 100,
 	},
 
+	bridge: {
+		batchSize: 25,
+		maxAttempts: 4,
+		retryBackoffMs: 5 * MINUTE_MS,
+	},
+
 	sweep: {
 		timeoutMs: 4 * MINUTE_MS,
 		staleQueueMs: 5 * MINUTE_MS,

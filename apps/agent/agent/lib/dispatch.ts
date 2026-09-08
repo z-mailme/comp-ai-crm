@@ -9,6 +9,7 @@ import { queueEventAgentRuns } from "./custom-agent-dispatch";
 import { settledWithin } from "./deadline";
 import { DISPATCH } from "./dispatch-config";
 import { markRunning, settle } from "./enrichment";
+import { drainMemoryBridge } from "./event-bridge";
 import { collapsing, runLimited } from "./pool";
 import { runPortrait } from "./portrait";
 import { testProviderConnection } from "./providers";
@@ -168,6 +169,26 @@ async function handleDirect(task: LeasedTask): Promise<void> {
 			task.id,
 			outcome.reason ??
 				`Analysed ${outcome.processed} threads, wrote ${outcome.written} facts, found ${outcome.conflicts} conflicts.`,
+		);
+		return;
+	}
+
+	if (task.kind === "event-bridge") {
+		const outcome = await drainMemoryBridge();
+
+		if (outcome.processed >= DISPATCH.bridge.batchSize) {
+			await scheduleTask({
+				kind: "event-bridge",
+				reason: "Continue draining business events",
+				dueAt: new Date(),
+				priority: task.priority,
+				budget: task.budget,
+			});
+		}
+
+		await completeTask(
+			task.id,
+			`Processed ${outcome.processed} events, detected ${outcome.pops} proofs of payment, ${outcome.failed} failed.`,
 		);
 		return;
 	}

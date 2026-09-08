@@ -119,6 +119,15 @@ export class AgentTriggerService {
 		});
 	}
 
+	async eventBridgeRequested(): Promise<boolean> {
+		return this.enqueue({
+			kind: "event-bridge",
+			reason: "New business events are waiting",
+			priority: PRIORITY.event,
+			budget: 5,
+		});
+	}
+
 	async workspaceChanged(website: string, reason: string): Promise<void> {
 		await this.enqueue({
 			kind: "workspace-profile",
