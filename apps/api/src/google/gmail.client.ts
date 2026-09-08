@@ -18,6 +18,11 @@ export type GmailMessage = {
 	payload?: GmailPart;
 };
 
+export type GmailMessageRef = {
+	message?: { id?: string; threadId?: string };
+	labelIds?: string[];
+};
+
 export type MessageList = {
 	messages?: { id?: string; threadId?: string }[];
 	nextPageToken?: string;
@@ -27,10 +32,30 @@ export type MessageList = {
 export type HistoryList = {
 	history?: {
 		id?: string;
-		messagesAdded?: { message?: { id?: string; threadId?: string } }[];
+		messagesAdded?: GmailMessageRef[];
+		messagesDeleted?: GmailMessageRef[];
+		labelsAdded?: GmailMessageRef[];
+		labelsRemoved?: GmailMessageRef[];
 	}[];
 	nextPageToken?: string;
 	historyId?: string;
+};
+
+export type GmailLabel = {
+	id?: string;
+	name?: string;
+	type?: string;
+	color?: { backgroundColor?: string; textColor?: string };
+	messagesTotal?: number;
+	messagesUnread?: number;
+	threadsTotal?: number;
+	threadsUnread?: number;
+	labelListVisibility?: string;
+	messageListVisibility?: string;
+};
+
+export type LabelList = {
+	labels?: GmailLabel[];
 };
 
 export type Profile = {
@@ -57,12 +82,14 @@ export class GmailClient {
 			query?: string;
 			pageToken?: string;
 			maxResults?: number;
+			mirror?: boolean;
+			includeSpamTrash?: boolean;
 		},
 	): Promise<MailboxResult<MessageList>> {
 		const after = Math.floor(options.after.getTime() / 1000);
 		const before = Math.ceil(options.before.getTime() / 1000);
 		const query = [
-			WORK_MAIL_QUERY,
+			options.mirror ? undefined : WORK_MAIL_QUERY,
 			options.query?.trim(),
 			`after:${after}`,
 			`before:${before}`,
@@ -74,19 +101,28 @@ export class GmailClient {
 			q: query,
 			maxResults: options.maxResults ?? GMAIL_SYNC.backfill.pageSize,
 			pageToken: options.pageToken,
+			includeSpamTrash: options.includeSpamTrash,
 		});
 	}
 
 	async listHistory(
 		accessToken: string,
-		options: { startHistoryId: string; pageToken?: string },
+		options: {
+			startHistoryId: string;
+			pageToken?: string;
+			historyTypes?: string;
+		},
 	): Promise<MailboxResult<HistoryList>> {
 		return this.api.get<HistoryList>(`${BASE}/history`, accessToken, {
 			startHistoryId: options.startHistoryId,
-			historyTypes: "messageAdded",
+			historyTypes: options.historyTypes ?? "messageAdded",
 			maxResults: GMAIL_SYNC.incremental.historyPageSize,
 			pageToken: options.pageToken,
 		});
+	}
+
+	async listLabels(accessToken: string): Promise<MailboxResult<LabelList>> {
+		return this.api.get<LabelList>(`${BASE}/labels`, accessToken);
 	}
 
 	async getMessage(

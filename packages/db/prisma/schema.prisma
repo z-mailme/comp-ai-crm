@@ -1387,6 +1387,9 @@ model MailboxSync {
   backfillStartedAt   DateTime?
   backfillWindowStart DateTime?
   backfillWindowEnd   DateTime?
+  lastFullReconcileAt DateTime?
+
+  gmailLabels GmailLabel[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1396,6 +1399,33 @@ model MailboxSync {
   @@index([businessUnitId, source])
   @@index([source, initialBackfilledAt])
   @@map("mailboxSync")
+}
+
+model GmailLabel {
+  id            String      @id @default(cuid())
+  mailboxSyncId String
+  mailboxSync   MailboxSync @relation(fields: [mailboxSyncId], references: [id], onDelete: Cascade)
+
+  gmailLabelId String
+  name         String
+  type         String
+
+  colorBackground String?
+  colorText       String?
+
+  messagesTotal  Int?
+  messagesUnread Int?
+  threadsTotal   Int?
+  threadsUnread  Int?
+
+  labelListVisibility   String?
+  messageListVisibility String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mailboxSyncId, gmailLabelId])
+  @@map("gmailLabel")
 }
 
 model MailboxHistoricalImportJob {
@@ -1519,6 +1549,8 @@ model EmailMessage {
   rfcMessageId     String  @unique
   syncedByUserId   String?
   gmailMessageId   String?
+  gmailThreadId    String?
+  labelIds         String[] @default([])
   outlookMessageId String?
   outlookWebLink   String?
 

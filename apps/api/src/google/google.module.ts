@@ -7,6 +7,7 @@ import { CalendarSyncService } from "./calendar-sync.service";
 import { ConversationService } from "./conversation.service";
 import { GmailClient } from "./gmail.client";
 import { GmailHistoricalImportService } from "./gmail-historical-import.service";
+import { GmailLabelSyncService } from "./gmail-label-sync.service";
 import { GmailSendService } from "./gmail-send.service";
 import { GmailSyncService } from "./gmail-sync.service";
 import { GoogleRouter } from "./google.router";

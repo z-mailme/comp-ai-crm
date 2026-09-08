@@ -21,4 +21,8 @@ export const GMAIL_SYNC = {
 	send: {
 		transactionTimeoutMs: 20_000,
 	},
+	reconcile: {
+		mailboxEpochMs: 1_080_777_600_000,
+		labelBatchSize: 200,
+	},
 } as const;

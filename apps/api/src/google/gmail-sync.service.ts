@@ -1,6 +1,7 @@
 import {
 	type Db,
 	GoogleSyncStatus,
+	MailboxHistoricalImportJobStatus,
 	type MailboxSyncModel as MailboxSync,
 	Prisma as PrismaNamespace,
 } from "@crm/db";
@@ -22,11 +23,17 @@ import {
 import {
 	GmailClient,
 	type GmailMessage,
+	type GmailMessageRef,
 	type HistoryList,
 	type MessageList,
 	type Profile,
 } from "./gmail.client";
-import type { GmailBackfillInput } from "./gmail-backfill";
+import {
+	chunkSortIndex,
+	type GmailBackfillInput,
+	monthRanges,
+} from "./gmail-backfill";
+import { GmailLabelSyncService } from "./gmail-label-sync.service";
 import {
 	type GmailHeader,
 	header,
@@ -102,6 +109,22 @@ type IncrementalIngestOutcome = {
 	failure?: StrictBackfillFailure;
 };
 
+type LabelChange = {
+	added: Set<string>;
+	removed: Set<string>;
+};
+
+const HISTORY_TYPES = "messageAdded,messageDeleted,labelAdded,labelRemoved";
+
+const ACTIVE_RECONCILE_STATUSES = [
+	MailboxHistoricalImportJobStatus.PLANNING,
+	MailboxHistoricalImportJobStatus.READY,
+	MailboxHistoricalImportJobStatus.RUNNING,
+	MailboxHistoricalImportJobStatus.VERIFYING,
+	MailboxHistoricalImportJobStatus.WAITING_RATE_LIMIT,
+	MailboxHistoricalImportJobStatus.WAITING_RETRY,
+] as const;
+
 type StrictBackfillFailure = {
 	status: Exclude<GmailBackfillStatus, "synced" | "skipped">;
 	reason: string;
@@ -119,6 +142,7 @@ export class GmailSyncService {
 		private readonly tokens: MailboxTokenService,
 		private readonly state: SyncStateService,
 		private readonly threads: ThreadWriterService,
+		private readonly labels: GmailLabelSyncService,
 	) {}
 
 	async sync(row: MailboxSync): Promise<GmailSyncOutcome> {
@@ -165,7 +189,18 @@ export class GmailSyncService {
 			return this.start(row, profile.data.historyId ?? null);
 		}
 
-		return this.incremental(row, token.accessToken, mailbox, row.cursor);
+		const outcome = await this.incremental(
+			row,
+			token.accessToken,
+			mailbox,
+			row.cursor,
+		);
+
+		if (outcome.status === "synced") {
+			await this.labels.sync(row, token.accessToken);
+		}
+
+		return outcome;
 	}
 
 	async backfill(input: GmailBackfillInput): Promise<GmailBackfillOutcome> {
@@ -315,14 +350,29 @@ export class GmailSyncService {
 	): Promise<GmailSyncOutcome> {
 		let history = await this.gmail.listHistory(accessToken, {
 			startHistoryId,
+			historyTypes: HISTORY_TYPES,
 		});
 		let finalHistoryId = startHistoryId;
 		const ids = new Set<string>();
+		const deletedIds = new Set<string>();
+		const labelChanges = new Map<string, LabelChange>();
 
 		while (history.outcome === "ok") {
 			for (const entry of history.data.history ?? []) {
 				for (const added of entry.messagesAdded ?? []) {
 					if (added.message?.id) ids.add(added.message.id);
+				}
+
+				for (const deleted of entry.messagesDeleted ?? []) {
+					if (deleted.message?.id) deletedIds.add(deleted.message.id);
+				}
+
+				for (const change of entry.labelsAdded ?? []) {
+					mergeLabelChange(labelChanges, change, "added");
+				}
+
+				for (const change of entry.labelsRemoved ?? []) {
+					mergeLabelChange(labelChanges, change, "removed");
 				}
 			}
 
@@ -334,23 +384,22 @@ export class GmailSyncService {
 			history = await this.gmail.listHistory(accessToken, {
 				startHistoryId,
 				pageToken,
+				historyTypes: HISTORY_TYPES,
 			});
 		}
 
 		if (history.outcome === "cursor-invalid") {
-			await this.state.clearCursor(row.id, history.reason);
-
-			return {
-				source: "gmail",
-				userId: row.userId,
-				status: "synced",
-				reason: "History expired; resuming from now.",
-			};
+			return this.reconcile(row, accessToken, history.reason);
 		}
 
 		if (history.outcome !== "ok") {
 			return this.handleFailure(row, history);
 		}
+
+		for (const id of deletedIds) ids.delete(id);
+
+		const removed = await this.applyDeletions(row.userId, [...deletedIds]);
+		const relabelled = await this.applyLabelChanges(labelChanges);
 
 		const { written, remaining, failure } = await this.ingest(
 			row,
@@ -376,11 +425,13 @@ export class GmailSyncService {
 			status: GoogleSyncStatus.RUNNING,
 		});
 
-		if (written > 0 || remaining > 0) {
+		if (written > 0 || remaining > 0 || removed > 0 || relabelled > 0) {
 			this.logger.log({
 				message: "Gmail incremental sync",
 				userId: row.userId,
 				messagesWritten: written,
+				messagesRemoved: removed,
+				messagesRelabelled: relabelled,
 				remaining,
 			});
 		}
@@ -391,6 +442,177 @@ export class GmailSyncService {
 			status: "synced",
 			messagesWritten: written,
 		};
+	}
+
+	private async reconcile(
+		row: MailboxSync,
+		accessToken: string,
+		reason: string,
+	): Promise<GmailSyncOutcome> {
+		await this.state.clearCursor(row.id, reason);
+
+		const profile = await this.gmail.profile(accessToken);
+		if (profile.outcome !== "ok") {
+			return this.handleFailure(row, profile);
+		}
+
+		const jobId = await this.queueFullReconcile(row.userId);
+
+		await this.db.mailboxSync.update({
+			where: { id: row.id },
+			data: { lastFullReconcileAt: new Date() },
+		});
+
+		await this.state.settle(row.id, {
+			cursor: profile.data.historyId ?? null,
+			status: GoogleSyncStatus.RUNNING,
+		});
+
+		this.logger.log({
+			message: "Gmail history expired; full reconciliation queued",
+			userId: row.userId,
+			historicalImportJobId: jobId,
+		});
+
+		return {
+			source: "gmail",
+			userId: row.userId,
+			status: "synced",
+			reason: "History expired; full reconciliation queued.",
+		};
+	}
+
+	private async queueFullReconcile(userId: string): Promise<string> {
+		const active = await this.db.mailboxHistoricalImportJob.findFirst({
+			where: {
+				userId,
+				source: "gmail",
+				status: { in: [...ACTIVE_RECONCILE_STATUSES] },
+			},
+			select: { id: true },
+		});
+
+		if (active) return active.id;
+
+		const after = new Date(GMAIL_SYNC.reconcile.mailboxEpochMs);
+		const before = new Date();
+
+		const job = await this.db.mailboxHistoricalImportJob.create({
+			data: {
+				userId,
+				source: "gmail",
+				requestedAfter: after,
+				requestedBefore: before,
+				status: MailboxHistoricalImportJobStatus.PLANNING,
+			},
+			select: { id: true },
+		});
+
+		await this.db.mailboxHistoricalImportChunk.createMany({
+			data: monthRanges(after, before).map((range) => ({
+				jobId: job.id,
+				after: range.after,
+				before: range.before,
+				sortIndex: chunkSortIndex(range.after),
+			})),
+		});
+
+		return job.id;
+	}
+
+	private async applyDeletions(
+		userId: string,
+		ids: readonly string[],
+	): Promise<number> {
+		if (ids.length === 0) return 0;
+
+		let removed = 0;
+
+		for (const batch of chunked(ids, GMAIL_SYNC.reconcile.labelBatchSize)) {
+			const rows = await this.db.emailMessage.findMany({
+				where: { gmailMessageId: { in: batch } },
+				select: { id: true, threadId: true },
+			});
+
+			if (rows.length === 0) continue;
+
+			await this.db.emailMessage.deleteMany({
+				where: { id: { in: rows.map((message) => message.id) } },
+			});
+
+			removed += rows.length;
+
+			const threadIds = [...new Set(rows.map((message) => message.threadId))];
+			for (const threadId of threadIds) {
+				const stats = await this.db.emailMessage.aggregate({
+					where: { threadId },
+					_count: { _all: true },
+					_min: { sentAt: true },
+					_max: { sentAt: true },
+				});
+
+				const data: PrismaNamespace.EmailThreadUncheckedUpdateInput = {
+					messageCount: stats._count._all,
+				};
+				if (stats._min.sentAt) data.firstMessageAt = stats._min.sentAt;
+				if (stats._max.sentAt) data.lastMessageAt = stats._max.sentAt;
+
+				await this.db.emailThread.update({
+					where: { id: threadId },
+					data,
+				});
+			}
+		}
+
+		if (removed > 0) {
+			this.logger.log({
+				message: "Gmail deletions applied",
+				userId,
+				messagesRemoved: removed,
+			});
+		}
+
+		return removed;
+	}
+
+	private async applyLabelChanges(
+		changes: ReadonlyMap<string, LabelChange>,
+	): Promise<number> {
+		if (changes.size === 0) return 0;
+
+		let relabelled = 0;
+
+		for (const batch of chunked(
+			[...changes.keys()],
+			GMAIL_SYNC.reconcile.labelBatchSize,
+		)) {
+			const rows = await this.db.emailMessage.findMany({
+				where: { gmailMessageId: { in: batch } },
+				select: { id: true, gmailMessageId: true, labelIds: true },
+			});
+
+			for (const message of rows) {
+				if (!message.gmailMessageId) continue;
+
+				const change = changes.get(message.gmailMessageId);
+				if (!change) continue;
+
+				const next = new Set(message.labelIds);
+				for (const labelId of change.added) next.add(labelId);
+				for (const labelId of change.removed) next.delete(labelId);
+
+				const updated = [...next];
+				if (sameMembers(message.labelIds, updated)) continue;
+
+				await this.db.emailMessage.update({
+					where: { id: message.id },
+					data: { labelIds: updated },
+				});
+				relabelled += 1;
+			}
+		}
+
+		return relabelled;
 	}
 
 	private async ingest(
@@ -565,6 +787,8 @@ export class GmailSyncService {
 					GMAIL_SYNC.backfill.pageSize,
 					input.max - ids.size,
 				),
+				mirror: true,
+				includeSpamTrash: true,
 			});
 
 			if (page.outcome !== "ok") {
@@ -650,6 +874,8 @@ export class GmailSyncService {
 			body,
 			sentAt,
 			gmailMessageId: message.id ?? null,
+			gmailThreadId: message.threadId ?? null,
+			labelIds: message.labelIds ?? [],
 		};
 	}
 
@@ -815,6 +1041,38 @@ export class GmailSyncService {
 			failedMessageId: message.id ?? undefined,
 		};
 	}
+}
+
+function mergeLabelChange(
+	changes: Map<string, LabelChange>,
+	record: GmailMessageRef,
+	kind: "added" | "removed",
+): void {
+	const id = record.message?.id;
+	if (!id) return;
+
+	const change = changes.get(id) ?? { added: new Set(), removed: new Set() };
+	for (const labelId of record.labelIds ?? []) {
+		change[kind].add(labelId);
+	}
+	changes.set(id, change);
+}
+
+function chunked<T>(values: readonly T[], size: number): T[][] {
+	const batches: T[][] = [];
+	for (let index = 0; index < values.length; index += size) {
+		batches.push(values.slice(index, index + size));
+	}
+	return batches;
+}
+
+function sameMembers(
+	current: readonly string[],
+	next: readonly string[],
+): boolean {
+	if (current.length !== next.length) return false;
+	const set = new Set(current);
+	return next.every((value) => set.has(value));
 }
 
 function backfillFailureForMessage(

@@ -27,6 +27,21 @@ export const threadInput = z.object({
 	threadId: z.string(),
 });
 
+export const gmailLabelOutput = z.object({
+	id: z.string(),
+	gmailLabelId: z.string(),
+	name: z.string(),
+	type: z.string(),
+	colorBackground: z.string().nullable(),
+	colorText: z.string().nullable(),
+	messagesTotal: z.number().nullable(),
+	messagesUnread: z.number().nullable(),
+	threadsTotal: z.number().nullable(),
+	threadsUnread: z.number().nullable(),
+	labelListVisibility: z.string().nullable(),
+	messageListVisibility: z.string().nullable(),
+});
+
 export const calendarEventInput = z.object({
 	eventId: z.string(),
 });

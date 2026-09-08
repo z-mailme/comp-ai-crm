@@ -17,6 +17,7 @@ import type {
 	Profile,
 } from "../src/google/gmail.client";
 import type { GmailBackfillInput } from "../src/google/gmail-backfill";
+import type { GmailLabelSyncService } from "../src/google/gmail-label-sync.service";
 import { GmailSyncService } from "../src/google/gmail-sync.service";
 import type { SyncSource } from "../src/mailbox/mailbox.constants";
 import type { MailboxResult } from "../src/mailbox/mailbox-api.client";
@@ -177,6 +178,11 @@ async function kit(
 		tokens,
 		state,
 		threads,
+		{
+			async sync() {
+				return 0;
+			},
+		} as unknown as GmailLabelSyncService,
 	);
 
 	return { marker, userId, mailbox, row, gmail, service };
@@ -1004,6 +1010,11 @@ describe("GmailSyncService history pagination", () => {
 			} as unknown as MailboxTokenService,
 			new SyncStateService(db),
 			failingThreads,
+			{
+				async sync() {
+					return 0;
+				},
+			} as unknown as GmailLabelSyncService,
 		);
 
 		const failed = await service.sync(setup.row);

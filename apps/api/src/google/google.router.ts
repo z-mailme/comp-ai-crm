@@ -13,12 +13,14 @@ import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
 import { ConversationService } from "./conversation.service";
 import { GmailHistoricalImportService } from "./gmail-historical-import.service";
+import { GmailLabelSyncService } from "./gmail-label-sync.service";
 import { GmailSendService } from "./gmail-send.service";
 import {
 	calendarEventInput,
 	calendarEventOutput,
 	createHistoricalImportInput,
 	emailThreadOutput,
+	gmailLabelOutput,
 	googleConnectionStatusOutput,
 	historicalImportIdInput,
 	historicalImportJobOutput,
@@ -49,7 +51,17 @@ export class GoogleRouter {
 		private readonly conversations: ConversationService,
 		@Inject(GmailSendService)
 		private readonly gmailSend: GmailSendService,
+		@Inject(GmailLabelSyncService)
+		private readonly labels: GmailLabelSyncService,
 	) {}
+
+	@Query({
+		output: gmailLabelOutput.array(),
+		meta: restMeta("GET", "/google/gmail/labels", ["Google"]),
+	})
+	async gmailLabels(@Ctx() ctx: AuthedTrpcContext) {
+		return this.labels.listForUser(ctx.user.id);
+	}
 
 	@Query({
 		output: googleConnectionStatusOutput,
