@@ -107,6 +107,14 @@ export class EnvironmentVariables {
 
 	@IsOptional()
 	@IsString()
+	WHATSAPP_VERIFY_TOKEN?: string;
+
+	@IsOptional()
+	@IsString()
+	WHATSAPP_APP_SECRET?: string;
+
+	@IsOptional()
+	@IsString()
 	BLOB_READ_WRITE_TOKEN?: string;
 
 	@IsOptional()
