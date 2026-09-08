@@ -28,6 +28,7 @@ import {
 } from "@crm/db";
 import { WORKSPACE_ID } from "@crm/db/workspace";
 import { BusinessOsService } from "../src/business-os/business-os.service";
+import { ConversionService } from "../src/currency/conversion.service";
 
 const suffix = process.env.TEST_RUN_ID ?? crypto.randomUUID();
 const marker = `business-os-${suffix}`;
@@ -51,7 +52,7 @@ const versionId = `version-${marker}`;
 const runId = `run-${marker}`;
 const actionId = `action-${marker}`;
 const decisionId = `decision-${marker}`;
-const service = new BusinessOsService(db);
+const service = new BusinessOsService(db, new ConversionService(db));
 const contextA = { userId, businessUnitId: unitAId };
 
 beforeAll(async () => {

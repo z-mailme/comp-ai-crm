@@ -13,6 +13,7 @@ import {
 } from "@crm/db";
 import { WORKSPACE_ID } from "@crm/db/workspace";
 import { BusinessOsService } from "../src/business-os/business-os.service";
+import { ConversionService } from "../src/currency/conversion.service";
 import { MarketingService } from "../src/marketing/marketing.service";
 
 const suffix = process.env.TEST_RUN_ID ?? crypto.randomUUID();
@@ -22,7 +23,7 @@ const unitAId = `unit-a-${marker}`;
 const unitBId = `unit-b-${marker}`;
 const contactAId = `contact-a-${marker}`;
 const contactBId = `contact-b-${marker}`;
-const calendarService = new BusinessOsService(db);
+const calendarService = new BusinessOsService(db, new ConversionService(db));
 let listmonk: FakeListmonkClient;
 let ads: FakeAdsClient;
 let marketingService: MarketingService;

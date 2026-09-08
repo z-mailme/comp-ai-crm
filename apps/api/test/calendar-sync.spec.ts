@@ -14,6 +14,7 @@ import { BusinessOsService } from "../src/business-os/business-os.service";
 import { CompanyDirectoryService } from "../src/companies/company-directory.service";
 import { ActivityStampService } from "../src/crm/activity-stamp.service";
 import { EnrichmentLogService } from "../src/crm/enrichment-log.service";
+import { ConversionService } from "../src/currency/conversion.service";
 import type {
 	CalendarClient,
 	EventsPage,
@@ -114,7 +115,7 @@ async function kit(
 		row,
 		service,
 		state,
-		businessOs: new BusinessOsService(db),
+		businessOs: new BusinessOsService(db, new ConversionService(db)),
 	};
 }
 

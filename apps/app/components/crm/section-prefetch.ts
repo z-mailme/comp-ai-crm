@@ -16,7 +16,15 @@ export type Section =
 	| "/companies"
 	| "/contacts"
 	| "/deals"
-	| "/settings";
+	| "/settings"
+	| "/business-os/activity"
+	| "/business-os/bookings"
+	| "/business-os/analytics"
+	| "/business-os/reports"
+	| "/business-os/finance"
+	| "/business-os/knowledge"
+	| "/business-os/observability"
+	| "/business-os/operations";
 
 export function usePrefetchSection(): (section: string) => void {
 	const trpc = useTRPC();
@@ -80,6 +88,59 @@ export function usePrefetchSection(): (section: string) => void {
 				case "/deals":
 					void queryClient.prefetchQuery(
 						trpc.deals.list.queryOptions(dealsSearchParams.defaultInput()),
+					);
+					return;
+				case "/business-os/activity":
+					void queryClient.prefetchQuery(
+						trpc.businessOs.activityFeed.queryOptions({ limit: 50 }),
+					);
+					return;
+				case "/business-os/bookings":
+					void queryClient.prefetchQuery(
+						trpc.businessOs.bookings.queryOptions({
+							when: "upcoming",
+							search: "",
+							limit: 50,
+						}),
+					);
+					return;
+				case "/business-os/analytics":
+				case "/business-os/reports":
+					void queryClient.prefetchQuery(
+						trpc.businessOs.analytics.queryOptions(),
+					);
+					return;
+				case "/business-os/finance":
+					void queryClient.prefetchQuery(
+						trpc.businessOs.finance.queryOptions(),
+					);
+					return;
+				case "/business-os/knowledge":
+					void queryClient.prefetchQuery(
+						trpc.businessOs.knowledge.queryOptions(),
+					);
+					return;
+				case "/business-os/observability":
+					void queryClient.prefetchQuery(
+						trpc.businessOs.observability.queryOptions(),
+					);
+					return;
+				case "/business-os/operations":
+					void queryClient.prefetchQuery(
+						trpc.businessOs.overview.queryOptions(),
+					);
+					void queryClient.prefetchQuery(
+						trpc.businessOs.calendar.queryOptions({}),
+					);
+					void queryClient.prefetchQuery(
+						trpc.activities.myTasks.queryOptions({ window: "all", limit: 25 }),
+					);
+					void queryClient.prefetchQuery(
+						trpc.businessOs.bookings.queryOptions({
+							when: "upcoming",
+							search: "",
+							limit: 10,
+						}),
 					);
 					return;
 				default:

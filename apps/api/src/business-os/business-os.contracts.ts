@@ -1,8 +1,10 @@
 import {
+	ActivityType,
 	AiProcessingStatus,
 	ApprovalRequestStatus,
 	AutomationExecutionStatus,
 	AutomationRuleStatus,
+	BookingStatus,
 	BusinessEventOutboxStatus,
 	BusinessEventSource,
 	BusinessTaskPriority,
@@ -11,6 +13,7 @@ import {
 	CommunicationDirection,
 	ConversationPriority,
 	ConversationStatus,
+	DealStage,
 	KnowledgeItemType,
 } from "@crm/db";
 import { z } from "zod";
@@ -378,6 +381,129 @@ export const calendarOutput = z.object({
 	),
 });
 
+export const activityFeedInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	type: z.nativeEnum(ActivityType).optional(),
+	cursor: z.string().trim().min(1).optional(),
+	limit: z.number().int().min(1).max(100).default(50),
+});
+
+export const activityFeedOutput = z.object({
+	entries: z.array(
+		z.object({
+			id: z.string(),
+			type: z.nativeEnum(ActivityType),
+			subject: z.string().nullable(),
+			body: z.string().nullable(),
+			occurredAt: z.string().nullable(),
+			dueAt: z.string().nullable(),
+			completedAt: z.string().nullable(),
+			createdAt: z.string(),
+			author: linkedRecordOutput.nullable(),
+			company: linkedRecordOutput.nullable(),
+			contact: linkedContactOutput.nullable(),
+			deal: linkedRecordOutput.nullable(),
+		}),
+	),
+	nextCursor: z.string().nullable(),
+});
+
+export const bookingsInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	when: z.enum(["upcoming", "past"]).default("upcoming"),
+	search: z.string().default(""),
+	cursor: z.string().trim().min(1).optional(),
+	limit: z.number().int().min(1).max(100).default(50),
+});
+
+export const bookingsOutput = z.object({
+	bookings: z.array(
+		z.object({
+			id: z.string(),
+			bookingKey: z.string(),
+			status: z.nativeEnum(BookingStatus),
+			eventDate: z.string(),
+			startsAt: z.string().nullable(),
+			endsAt: z.string().nullable(),
+			deal: z.object({
+				id: z.string(),
+				name: z.string(),
+				amountCents: z.number().nullable(),
+				currency: z.string(),
+			}),
+			company: linkedRecordOutput.nullable(),
+			conversationId: z.string().nullable(),
+		}),
+	),
+	nextCursor: z.string().nullable(),
+});
+
+const moneyBucketOutput = z.object({
+	count: z.number(),
+	baseValueCents: z.number(),
+});
+
+export const analyticsOutput = z.object({
+	reportingCurrency: z.string(),
+	generatedAt: z.string(),
+	pipeline: z.object({
+		stages: z.array(
+			z.object({
+				stage: z.nativeEnum(DealStage),
+				count: z.number(),
+				baseValueCents: z.number(),
+			}),
+		),
+		openCount: z.number(),
+		openBaseValueCents: z.number(),
+		unconvertedOpen: z.object({
+			count: z.number(),
+			currencies: z.array(z.string()),
+		}),
+	}),
+	outcomes90d: z.object({
+		wonCount: z.number(),
+		wonBaseValueCents: z.number(),
+		lostCount: z.number(),
+		lostBaseValueCents: z.number(),
+		winRate: z.number().nullable(),
+	}),
+	weekly: z.array(
+		z.object({
+			weekStart: z.string(),
+			dealsCreated: z.number(),
+			activities: z.number(),
+		}),
+	),
+});
+
+export const financeOutput = z.object({
+	reportingCurrency: z.string(),
+	generatedAt: z.string(),
+	openPipeline: moneyBucketOutput.extend({
+		unconverted: z.object({
+			count: z.number(),
+			currencies: z.array(z.string()),
+		}),
+	}),
+	wonAllTime: moneyBucketOutput,
+	won90d: moneyBucketOutput,
+	lost90d: moneyBucketOutput,
+	avgOpenDealCents: z.number().nullable(),
+	closingSoon: z.array(
+		z.object({
+			id: z.string(),
+			name: z.string(),
+			stage: z.nativeEnum(DealStage),
+			expectedCloseDate: z.string(),
+			amountCents: z.number().nullable(),
+			currency: z.string(),
+			baseAmountCents: z.number().nullable(),
+			companyName: z.string(),
+		}),
+	),
+});
+
 export type BusinessOsOverviewOutput = z.infer<typeof businessOsOverviewOutput>;
 export type InboxInput = z.infer<typeof inboxInput>;
 export type InboxOutput = z.infer<typeof inboxOutput>;
@@ -388,6 +514,12 @@ export type GlobalSearchOutput = z.infer<typeof globalSearchOutput>;
 export type ApprovalsOutput = z.infer<typeof approvalsOutput>;
 export type KnowledgeOutput = z.infer<typeof knowledgeOutput>;
 export type ObservabilityOutput = z.infer<typeof observabilityOutput>;
+export type ActivityFeedInput = z.infer<typeof activityFeedInput>;
+export type ActivityFeedOutput = z.infer<typeof activityFeedOutput>;
+export type BookingsInput = z.infer<typeof bookingsInput>;
+export type BookingsOutput = z.infer<typeof bookingsOutput>;
+export type AnalyticsOutput = z.infer<typeof analyticsOutput>;
+export type FinanceOutput = z.infer<typeof financeOutput>;
 export type CalendarInput = z.infer<typeof calendarInput>;
 export type CalendarOutput = z.infer<typeof calendarOutput>;
 

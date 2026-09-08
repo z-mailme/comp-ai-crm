@@ -16,6 +16,11 @@ export const AreaTrend = dynamic(() => load().then((m) => m.AreaTrend), {
 	loading,
 });
 
+export const BarTrend = dynamic(() => load().then((m) => m.BarTrend), {
+	ssr: false,
+	loading,
+});
+
 export const DonutStat = dynamic(() => load().then((m) => m.DonutStat), {
 	ssr: false,
 	loading,

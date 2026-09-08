@@ -7,23 +7,34 @@ import {
 	BusinessTaskStatus,
 	ConversationStatus,
 	type Db,
+	DealStage,
 	GoogleSyncStatus,
 	type Prisma,
 } from "@crm/db";
+import { LOSING_DEAL_STAGES, OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
 import { Injectable, NotFoundException } from "@nestjs/common";
+import { toCents } from "../crm/values";
+import { ConversionService } from "../currency/conversion.service";
 import { InjectDatabase } from "../database/database.constants";
 import {
 	type BusinessContext,
 	type BusinessContextSource,
 	resolveBusinessContext,
 } from "./business-context";
+import { BUSINESS_OS_REPORTS, DAY_MS } from "./business-os.config";
 import type {
+	ActivityFeedInput,
+	ActivityFeedOutput,
+	AnalyticsOutput,
 	ApprovalsOutput,
+	BookingsInput,
+	BookingsOutput,
 	BusinessOsOverviewOutput,
 	CalendarInput,
 	CalendarOutput,
 	ConversationDetailOutput,
 	Customer360Output,
+	FinanceOutput,
 	GlobalSearchInput,
 	GlobalSearchOutput,
 	InboxInput,
@@ -32,6 +43,7 @@ import type {
 	ObservabilityOutput,
 } from "./business-os.contracts";
 import { calendarRange } from "./calendar-range";
+import { countIntoWeeks, utcWeekStarts } from "./weekly-buckets";
 
 const RECENT_WINDOW_MS = 24 * 60 * 60 * 1000;
 
@@ -162,7 +174,10 @@ const CALENDAR_EVENT_SELECT = {
 
 @Injectable()
 export class BusinessOsService {
-	constructor(@InjectDatabase() private readonly db: Db) {}
+	constructor(
+		@InjectDatabase() private readonly db: Db,
+		private readonly conversion: ConversionService,
+	) {}
 
 	async overview(
 		source: BusinessContextSource,
@@ -915,6 +930,416 @@ export class BusinessOsService {
 				paused: countGroup(rules, AutomationRuleStatus.PAUSED),
 				archived: countGroup(rules, AutomationRuleStatus.ARCHIVED),
 			},
+		};
+	}
+
+	async activityFeed(
+		source: BusinessContextSource,
+		input: ActivityFeedInput,
+	): Promise<ActivityFeedOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const rows = await this.db.activity.findMany({
+			where: {
+				AND: [activityScope(context), input.type ? { type: input.type } : {}],
+			},
+			orderBy: [{ createdAt: "desc" }, { id: "desc" }],
+			take: input.limit + 1,
+			...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}),
+			select: {
+				id: true,
+				type: true,
+				subject: true,
+				body: true,
+				occurredAt: true,
+				dueAt: true,
+				completedAt: true,
+				createdAt: true,
+				createdBy: { select: { id: true, name: true } },
+				company: { select: { id: true, name: true } },
+				contact: {
+					select: {
+						id: true,
+						firstName: true,
+						lastName: true,
+						email: true,
+						imageUrl: true,
+					},
+				},
+				deal: { select: { id: true, name: true } },
+			},
+		});
+
+		const entries = rows.slice(0, input.limit);
+		const last = entries[entries.length - 1];
+
+		return {
+			entries: entries.map((activity) => ({
+				id: activity.id,
+				type: activity.type,
+				subject: activity.subject,
+				body: activity.body,
+				occurredAt: activity.occurredAt?.toISOString() ?? null,
+				dueAt: activity.dueAt?.toISOString() ?? null,
+				completedAt: activity.completedAt?.toISOString() ?? null,
+				createdAt: activity.createdAt.toISOString(),
+				author: activity.createdBy,
+				company: activity.company,
+				contact: activity.contact ? contactSummary(activity.contact) : null,
+				deal: activity.deal,
+			})),
+			nextCursor: rows.length > input.limit && last ? last.id : null,
+		};
+	}
+
+	async bookings(
+		source: BusinessContextSource,
+		input: BookingsInput,
+	): Promise<BookingsOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const today = new Date();
+		today.setUTCHours(0, 0, 0, 0);
+		const search = input.search.trim();
+
+		const rows = await this.db.booking.findMany({
+			where: {
+				AND: [
+					bookingScope(context),
+					input.when === "upcoming"
+						? { eventDate: { gte: today } }
+						: { eventDate: { lt: today } },
+					search
+						? {
+								OR: [
+									{ bookingKey: { contains: search, mode: "insensitive" } },
+									{ deal: { name: { contains: search, mode: "insensitive" } } },
+									{
+										deal: {
+											company: {
+												name: { contains: search, mode: "insensitive" },
+											},
+										},
+									},
+								],
+							}
+						: {},
+				],
+			},
+			orderBy: [
+				{ eventDate: input.when === "upcoming" ? "asc" : "desc" },
+				{ id: "asc" },
+			],
+			take: input.limit + 1,
+			...(input.cursor ? { cursor: { id: input.cursor }, skip: 1 } : {}),
+			select: {
+				id: true,
+				bookingKey: true,
+				status: true,
+				eventDate: true,
+				requestedStartAt: true,
+				requestedEndAt: true,
+				confirmedStartAt: true,
+				confirmedEndAt: true,
+				deal: {
+					select: {
+						id: true,
+						name: true,
+						amount: true,
+						currency: true,
+						company: { select: { id: true, name: true } },
+					},
+				},
+				communicationConversations: { take: 1, select: { id: true } },
+			},
+		});
+
+		const bookings = rows.slice(0, input.limit);
+		const last = bookings[bookings.length - 1];
+
+		return {
+			bookings: bookings.map((booking) => ({
+				id: booking.id,
+				bookingKey: booking.bookingKey,
+				status: booking.status,
+				eventDate: booking.eventDate.toISOString(),
+				startsAt:
+					(
+						booking.confirmedStartAt ?? booking.requestedStartAt
+					)?.toISOString() ?? null,
+				endsAt:
+					(booking.confirmedEndAt ?? booking.requestedEndAt)?.toISOString() ??
+					null,
+				deal: {
+					id: booking.deal.id,
+					name: booking.deal.name,
+					amountCents: toCents(booking.deal.amount),
+					currency: booking.deal.currency,
+				},
+				company: booking.deal.company,
+				conversationId: booking.communicationConversations[0]?.id ?? null,
+			})),
+			nextCursor: rows.length > input.limit && last ? last.id : null,
+		};
+	}
+
+	async analytics(source: BusinessContextSource): Promise<AnalyticsOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const base = await this.conversion.reportingCurrency();
+		const scope = dealScope(context);
+		const openWhere: Prisma.DealWhereInput = {
+			AND: [
+				scope,
+				{ archivedAt: null },
+				{ stage: { in: [...OPEN_DEAL_STAGES] } },
+			],
+		};
+		const outcomesSince = new Date(
+			Date.now() - BUSINESS_OS_REPORTS.outcomesWindowDays * DAY_MS,
+		);
+		const wonWhere: Prisma.DealWhereInput = {
+			AND: [
+				scope,
+				{ archivedAt: null },
+				{ stage: DealStage.CLOSED_WON },
+				{ closedAt: { gte: outcomesSince } },
+			],
+		};
+		const lostWhere: Prisma.DealWhereInput = {
+			AND: [
+				scope,
+				{ archivedAt: null },
+				{ stage: { in: [...LOSING_DEAL_STAGES] } },
+				{ closedAt: { gte: outcomesSince } },
+			],
+		};
+		const weekStarts = utcWeekStarts(
+			new Date(),
+			BUSINESS_OS_REPORTS.weeklyWindowWeeks,
+		);
+		const firstWeek = weekStarts[0] ?? new Date();
+
+		const [
+			stageCounts,
+			stageValues,
+			wonCount,
+			wonValue,
+			lostCount,
+			lostValue,
+			unconvertedOpen,
+			recentDeals,
+			recentActivities,
+		] = await Promise.all([
+			this.db.deal.groupBy({
+				by: ["stage"],
+				where: openWhere,
+				_count: { _all: true },
+			}),
+			this.db.deal.groupBy({
+				by: ["stage"],
+				where: { AND: [openWhere, this.conversion.countedWhere(base)] },
+				_sum: { baseAmount: true },
+			}),
+			this.db.deal.count({ where: wonWhere }),
+			this.db.deal.aggregate({
+				where: { AND: [wonWhere, this.conversion.countedWhere(base)] },
+				_sum: { baseAmount: true },
+			}),
+			this.db.deal.count({ where: lostWhere }),
+			this.db.deal.aggregate({
+				where: { AND: [lostWhere, this.conversion.countedWhere(base)] },
+				_sum: { baseAmount: true },
+			}),
+			this.conversion.unconverted(openWhere),
+			this.db.deal.findMany({
+				where: { AND: [scope, { createdAt: { gte: firstWeek } }] },
+				select: { createdAt: true },
+			}),
+			this.db.activity.findMany({
+				where: {
+					AND: [activityScope(context), { createdAt: { gte: firstWeek } }],
+				},
+				select: { createdAt: true },
+			}),
+		]);
+
+		const dealsPerWeek = countIntoWeeks(
+			recentDeals.map((deal) => deal.createdAt),
+			weekStarts,
+		);
+		const activitiesPerWeek = countIntoWeeks(
+			recentActivities.map((activity) => activity.createdAt),
+			weekStarts,
+		);
+		const stages = OPEN_DEAL_STAGES.map((stage) => ({
+			stage,
+			count: stageCounts.find((row) => row.stage === stage)?._count._all ?? 0,
+			baseValueCents:
+				toCents(
+					stageValues.find((row) => row.stage === stage)?._sum.baseAmount ??
+						null,
+				) ?? 0,
+		}));
+
+		return {
+			reportingCurrency: base,
+			generatedAt: new Date().toISOString(),
+			pipeline: {
+				stages,
+				openCount: stages.reduce((total, row) => total + row.count, 0),
+				openBaseValueCents: stages.reduce(
+					(total, row) => total + row.baseValueCents,
+					0,
+				),
+				unconvertedOpen,
+			},
+			outcomes90d: {
+				wonCount,
+				wonBaseValueCents: toCents(wonValue._sum.baseAmount) ?? 0,
+				lostCount,
+				lostBaseValueCents: toCents(lostValue._sum.baseAmount) ?? 0,
+				winRate:
+					wonCount + lostCount > 0 ? wonCount / (wonCount + lostCount) : null,
+			},
+			weekly: weekStarts.map((weekStart, index) => ({
+				weekStart: weekStart.toISOString(),
+				dealsCreated: dealsPerWeek[index] ?? 0,
+				activities: activitiesPerWeek[index] ?? 0,
+			})),
+		};
+	}
+
+	async finance(source: BusinessContextSource): Promise<FinanceOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const base = await this.conversion.reportingCurrency();
+		const scope = dealScope(context);
+		const openWhere: Prisma.DealWhereInput = {
+			AND: [
+				scope,
+				{ archivedAt: null },
+				{ stage: { in: [...OPEN_DEAL_STAGES] } },
+			],
+		};
+		const outcomesSince = new Date(
+			Date.now() - BUSINESS_OS_REPORTS.outcomesWindowDays * DAY_MS,
+		);
+		const wonWhere: Prisma.DealWhereInput = {
+			AND: [scope, { archivedAt: null }, { stage: DealStage.CLOSED_WON }],
+		};
+		const won90dWhere: Prisma.DealWhereInput = {
+			AND: [wonWhere, { closedAt: { gte: outcomesSince } }],
+		};
+		const lost90dWhere: Prisma.DealWhereInput = {
+			AND: [
+				scope,
+				{ archivedAt: null },
+				{ stage: { in: [...LOSING_DEAL_STAGES] } },
+				{ closedAt: { gte: outcomesSince } },
+			],
+		};
+		const closingHorizon = new Date(
+			Date.now() + BUSINESS_OS_REPORTS.closingSoonDays * DAY_MS,
+		);
+
+		const [
+			openCount,
+			openCountedCount,
+			openValue,
+			unconverted,
+			wonAllCount,
+			wonAllValue,
+			won90Count,
+			won90Value,
+			lost90Count,
+			lost90Value,
+			closingSoonRows,
+		] = await Promise.all([
+			this.db.deal.count({ where: openWhere }),
+			this.db.deal.count({
+				where: { AND: [openWhere, this.conversion.countedWhere(base)] },
+			}),
+			this.db.deal.aggregate({
+				where: { AND: [openWhere, this.conversion.countedWhere(base)] },
+				_sum: { baseAmount: true },
+			}),
+			this.conversion.unconverted(openWhere),
+			this.db.deal.count({ where: wonWhere }),
+			this.db.deal.aggregate({
+				where: { AND: [wonWhere, this.conversion.countedWhere(base)] },
+				_sum: { baseAmount: true },
+			}),
+			this.db.deal.count({ where: won90dWhere }),
+			this.db.deal.aggregate({
+				where: { AND: [won90dWhere, this.conversion.countedWhere(base)] },
+				_sum: { baseAmount: true },
+			}),
+			this.db.deal.count({ where: lost90dWhere }),
+			this.db.deal.aggregate({
+				where: { AND: [lost90dWhere, this.conversion.countedWhere(base)] },
+				_sum: { baseAmount: true },
+			}),
+			this.db.deal.findMany({
+				where: {
+					AND: [
+						openWhere,
+						{ expectedCloseDate: { gte: new Date(), lte: closingHorizon } },
+					],
+				},
+				orderBy: { expectedCloseDate: "asc" },
+				take: BUSINESS_OS_REPORTS.closingSoonLimit,
+				select: {
+					id: true,
+					name: true,
+					stage: true,
+					expectedCloseDate: true,
+					amount: true,
+					currency: true,
+					baseAmount: true,
+					company: { select: { name: true } },
+				},
+			}),
+		]);
+
+		const openBaseValueCents = toCents(openValue._sum.baseAmount) ?? 0;
+
+		return {
+			reportingCurrency: base,
+			generatedAt: new Date().toISOString(),
+			openPipeline: {
+				count: openCount,
+				baseValueCents: openBaseValueCents,
+				unconverted,
+			},
+			wonAllTime: {
+				count: wonAllCount,
+				baseValueCents: toCents(wonAllValue._sum.baseAmount) ?? 0,
+			},
+			won90d: {
+				count: won90Count,
+				baseValueCents: toCents(won90Value._sum.baseAmount) ?? 0,
+			},
+			lost90d: {
+				count: lost90Count,
+				baseValueCents: toCents(lost90Value._sum.baseAmount) ?? 0,
+			},
+			avgOpenDealCents:
+				openCountedCount > 0
+					? Math.round(openBaseValueCents / openCountedCount)
+					: null,
+			closingSoon: closingSoonRows.flatMap((deal) =>
+				deal.expectedCloseDate
+					? [
+							{
+								id: deal.id,
+								name: deal.name,
+								stage: deal.stage,
+								expectedCloseDate: deal.expectedCloseDate.toISOString(),
+								amountCents: toCents(deal.amount),
+								currency: deal.currency,
+								baseAmountCents: toCents(deal.baseAmount),
+								companyName: deal.company.name,
+							},
+						]
+					: [],
+			),
 		};
 	}
 

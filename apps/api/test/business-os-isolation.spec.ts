@@ -26,6 +26,7 @@ import {
 } from "@crm/db";
 import { WORKSPACE_ID } from "@crm/db/workspace";
 import { BusinessOsService } from "../src/business-os/business-os.service";
+import { ConversionService } from "../src/currency/conversion.service";
 
 const suffix = process.env.TEST_RUN_ID ?? crypto.randomUUID();
 const marker = `business-os-isolation-${suffix}`;
@@ -36,7 +37,7 @@ const singleUserId = `single-${marker}`;
 const singleUnitId = `single-unit-${marker}`;
 const singleForeignUnitId = `single-foreign-unit-${marker}`;
 const singleForeignConversationId = `single-foreign-conversation-${marker}`;
-const service = new BusinessOsService(db);
+const service = new BusinessOsService(db, new ConversionService(db));
 
 const eventProps = fixture("event-props", "Event Props", ownerUserId);
 const cascade = fixture("cascade-cleaning", "Cascade Cleaning", ownerUserId);

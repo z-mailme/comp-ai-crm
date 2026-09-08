@@ -100,15 +100,17 @@ export const BUSINESS_OS_NAVIGATION: readonly NavigationGroup[] = [
 			{
 				title: "Bookings",
 				href: "/business-os/bookings",
-				status: "COMING_SOON",
+				status: "ACTIVE",
 				match: "prefix",
+				prefetchSection: "/business-os/bookings",
 				icon: "calendar",
 			},
 			{
 				title: "Activity",
 				href: "/business-os/activity",
-				status: "COMING_SOON",
+				status: "ACTIVE",
 				match: "prefix",
+				prefetchSection: "/business-os/activity",
 				icon: "activity",
 			},
 		],
@@ -187,8 +189,9 @@ export const BUSINESS_OS_NAVIGATION: readonly NavigationGroup[] = [
 			{
 				title: "Knowledge",
 				href: "/business-os/knowledge",
-				status: "COMING_SOON",
+				status: "ACTIVE",
 				match: "prefix",
+				prefetchSection: "/business-os/knowledge",
 				icon: "notebook",
 			},
 			{
@@ -201,8 +204,9 @@ export const BUSINESS_OS_NAVIGATION: readonly NavigationGroup[] = [
 			{
 				title: "Observability",
 				href: "/business-os/observability",
-				status: "COMING_SOON",
+				status: "ACTIVE",
 				match: "prefix",
+				prefetchSection: "/business-os/observability",
 				icon: "analytics",
 			},
 		],
@@ -213,8 +217,9 @@ export const BUSINESS_OS_NAVIGATION: readonly NavigationGroup[] = [
 			{
 				title: "Operations",
 				href: "/business-os/operations",
-				status: "COMING_SOON",
+				status: "ACTIVE",
 				match: "prefix",
+				prefetchSection: "/business-os/operations",
 				icon: "tools",
 			},
 			{
@@ -253,8 +258,9 @@ export const BUSINESS_OS_NAVIGATION: readonly NavigationGroup[] = [
 			{
 				title: "Finance",
 				href: "/business-os/finance",
-				status: "COMING_SOON",
+				status: "ACTIVE",
 				match: "prefix",
+				prefetchSection: "/business-os/finance",
 				icon: "finance",
 			},
 			{
@@ -308,15 +314,17 @@ export const BUSINESS_OS_NAVIGATION: readonly NavigationGroup[] = [
 			{
 				title: "Business Analytics",
 				href: "/business-os/analytics",
-				status: "COMING_SOON",
+				status: "ACTIVE",
 				match: "prefix",
+				prefetchSection: "/business-os/analytics",
 				icon: "chart",
 			},
 			{
 				title: "Reports",
 				href: "/business-os/reports",
-				status: "COMING_SOON",
+				status: "ACTIVE",
 				match: "prefix",
+				prefetchSection: "/business-os/reports",
 				icon: "report",
 			},
 		],
@@ -420,6 +428,11 @@ export const NAVIGATION_EXCLUSIONS: readonly NavigationExclusion[] = [
 		route: "/business-os/[module]",
 		status: "INTERNAL_ONLY",
 		reason: "Named Business OS module links own user navigation.",
+	},
+	{
+		route: "/inbox/[id]",
+		status: "INTERNAL_ONLY",
+		reason: "Conversation detail opens from Inbox.",
 	},
 	{
 		route: "/companies/[companyId]",

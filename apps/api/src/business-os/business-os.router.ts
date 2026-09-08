@@ -5,7 +5,12 @@ import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
 import {
+	activityFeedInput,
+	activityFeedOutput,
+	analyticsOutput,
 	approvalsOutput,
+	bookingsInput,
+	bookingsOutput,
 	businessContextInput,
 	businessOsOverviewOutput,
 	calendarInput,
@@ -14,6 +19,7 @@ import {
 	conversationInput,
 	customer360Input,
 	customer360Output,
+	financeOutput,
 	globalSearchInput,
 	globalSearchOutput,
 	inboxInput,
@@ -138,6 +144,54 @@ export class BusinessOsRouter {
 		@Input() input: z.infer<typeof businessContextInput>,
 	) {
 		return this.businessOs.observability(sourceOf(ctx, input));
+	}
+
+	@Query({
+		input: activityFeedInput,
+		output: activityFeedOutput,
+		meta: restMeta("GET", "/business-os/activity", ["Business OS"]),
+	})
+	async activityFeed(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof activityFeedInput>,
+	) {
+		return this.businessOs.activityFeed(sourceOf(ctx, input), input);
+	}
+
+	@Query({
+		input: bookingsInput,
+		output: bookingsOutput,
+		meta: restMeta("GET", "/business-os/bookings", ["Business OS"]),
+	})
+	async bookings(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof bookingsInput>,
+	) {
+		return this.businessOs.bookings(sourceOf(ctx, input), input);
+	}
+
+	@Query({
+		input: businessContextInput,
+		output: analyticsOutput,
+		meta: restMeta("GET", "/business-os/analytics", ["Business OS"]),
+	})
+	async analytics(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof businessContextInput>,
+	) {
+		return this.businessOs.analytics(sourceOf(ctx, input));
+	}
+
+	@Query({
+		input: businessContextInput,
+		output: financeOutput,
+		meta: restMeta("GET", "/business-os/finance", ["Business OS"]),
+	})
+	async finance(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof businessContextInput>,
+	) {
+		return this.businessOs.finance(sourceOf(ctx, input));
 	}
 }
 
