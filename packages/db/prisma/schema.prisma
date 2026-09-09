@@ -765,6 +765,7 @@ model AgentVersion {
   status AgentVersionStatus @default(DRAFT)
 
   instructions             String
+  autonomyLevel            Int     @default(1)
   manifest                 Json
   modelId                  String
   modelContextWindowTokens Int    @default(1000000)

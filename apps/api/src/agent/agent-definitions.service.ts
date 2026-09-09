@@ -9,6 +9,7 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import { InjectDatabase } from "../database/database.constants";
+import { seedStarterAgents } from "./starter-agents";
 import { AgentAccessService } from "./agent-access.service";
 import { AgentTriggerService } from "./agent-trigger.service";
 import { TEAM_AGENT_STATUSES } from "./agent-visibility";
@@ -41,6 +42,11 @@ export class AgentDefinitionsService {
 		private readonly access: AgentAccessService,
 		private readonly trigger: AgentTriggerService,
 	) {}
+
+	async seedStarters(userId: string) {
+		await this.access.assertMember(userId);
+		return seedStarterAgents(this.db, userId);
+	}
 
 	async list(userId: string) {
 		await this.access.assertMember(userId);
