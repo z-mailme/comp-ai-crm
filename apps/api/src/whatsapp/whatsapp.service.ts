@@ -5,12 +5,12 @@ import {
 	type Db,
 	type Prisma,
 } from "@crm/db";
-import { Injectable, Logger } from "@nestjs/common";
 import type {
 	WhatsappWebhookMessage,
 	WhatsappWebhookPayload,
 	WhatsappWebhookStatus,
 } from "@crm/validation/whatsapp";
+import { Injectable, Logger } from "@nestjs/common";
 import { z } from "zod";
 import { InjectDatabase } from "../database/database.constants";
 
@@ -239,14 +239,21 @@ function mediaCaption(message: WhatsappWebhookMessage): string | null {
 function mediaMeta(
 	message: WhatsappWebhookMessage,
 ): Record<string, string | null> | null {
-	const media =
-		message.image ?? message.document ?? message.audio ?? message.video;
+	if (message.document) {
+		return {
+			id: message.document.id,
+			mimeType: message.document.mime_type ?? null,
+			filename: message.document.filename ?? null,
+		};
+	}
+
+	const media = message.image ?? message.audio ?? message.video;
 	if (!media) return null;
 
 	return {
 		id: media.id,
-		mimeType: "mime_type" in media ? (media.mime_type ?? null) : null,
-		filename: "filename" in media ? (media.filename ?? null) : null,
+		mimeType: media.mime_type ?? null,
+		filename: null,
 	};
 }
 

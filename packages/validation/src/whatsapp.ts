@@ -43,6 +43,8 @@ export const whatsappWebhookStatus = z.object({
 	recipient_id: z.string(),
 });
 
+export type WhatsappWebhookStatus = z.infer<typeof whatsappWebhookStatus>;
+
 export const whatsappWebhookContact = z.object({
 	profile: z.object({ name: z.string() }).optional(),
 	wa_id: z.string(),

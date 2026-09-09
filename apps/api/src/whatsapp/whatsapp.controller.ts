@@ -1,3 +1,4 @@
+import { whatsappWebhookPayload } from "@crm/validation/whatsapp";
 import {
 	BadRequestException,
 	Body,
@@ -11,7 +12,7 @@ import {
 	ServiceUnavailableException,
 } from "@nestjs/common";
 import type { Response } from "express";
-import { whatsappWebhookPayload } from "@crm/validation/whatsapp";
+import { z } from "zod";
 import { WhatsappService } from "./whatsapp.service";
 
 @Controller("webhooks/whatsapp")
@@ -42,7 +43,7 @@ export class WhatsappController {
 
 	@Post()
 	@HttpCode(200)
-	async ingest(@Body() body: unknown) {
+	async ingest(@Body() body: z.input<typeof whatsappWebhookPayload>) {
 		if (!process.env.WHATSAPP_VERIFY_TOKEN?.trim()) {
 			throw new ServiceUnavailableException(
 				"WhatsApp is not configured on this install.",
