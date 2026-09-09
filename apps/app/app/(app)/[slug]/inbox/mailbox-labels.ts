@@ -31,7 +31,7 @@ export function buildLabelTree(labels: readonly MailboxLabel[]): LabelNode[] {
 			if (!node) {
 				const isLeaf = path === label.name;
 				node = {
-					label: isLeaf ? label : virtualParent(path, segment, label),
+					label: isLeaf ? label : virtualParent(path, label),
 					segment,
 					children: [],
 				};
@@ -65,11 +65,7 @@ export function systemLabelById(
 	);
 }
 
-function virtualParent(
-	path: string,
-	segment: string,
-	source: MailboxLabel,
-): MailboxLabel {
+function virtualParent(path: string, source: MailboxLabel): MailboxLabel {
 	return {
 		...source,
 		id: `virtual-${path}`,
