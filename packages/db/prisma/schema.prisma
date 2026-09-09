@@ -2835,6 +2835,7 @@ model AppSetting {
 
   archiveRetentionDays   Int     @default(180)
   aiAutomationKillSwitch Boolean @default(false)
+  popAutoAcknowledge     Boolean @default(false)
 
   trackingSiteId           String? @unique
   trackingCrossDomain      Boolean @default(true)

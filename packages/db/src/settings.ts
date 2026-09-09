@@ -158,3 +158,45 @@ export function maskKey(key: string): string {
 	const trimmed = key.trim();
 	return trimmed.length > 4 ? `••••${trimmed.slice(-4)}` : "••••";
 }
+
+export async function readPopAutoAcknowledge(db: Db): Promise<boolean> {
+	const row = await db.appSetting.findUnique({
+		where: { id: SETTINGS_ID },
+		select: { popAutoAcknowledge: true, aiAutomationKillSwitch: true },
+	});
+
+	if (row?.aiAutomationKillSwitch) return false;
+	return row?.popAutoAcknowledge ?? false;
+}
+
+export type PopAutoAcknowledgeState = {
+	enabled: boolean;
+	killSwitch: boolean;
+};
+
+export async function readPopAutoAcknowledgeState(
+	db: Db,
+): Promise<PopAutoAcknowledgeState> {
+	const row = await db.appSetting.findUnique({
+		where: { id: SETTINGS_ID },
+		select: { popAutoAcknowledge: true, aiAutomationKillSwitch: true },
+	});
+
+	return {
+		enabled: row?.popAutoAcknowledge ?? false,
+		killSwitch: row?.aiAutomationKillSwitch ?? false,
+	};
+}
+
+export async function writePopAutoAcknowledge(
+	db: Db,
+	enabled: boolean,
+): Promise<boolean> {
+	await db.appSetting.upsert({
+		where: { id: SETTINGS_ID },
+		create: { id: SETTINGS_ID, popAutoAcknowledge: enabled },
+		update: { popAutoAcknowledge: enabled },
+	});
+
+	return enabled;
+}
