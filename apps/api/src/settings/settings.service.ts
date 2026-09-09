@@ -1,23 +1,30 @@
-import type { Db } from "@crm/db";
+import type { Db, Prisma } from "@crm/db";
 import {
 	DEFAULT_AGENT_MODEL,
 	maskKey,
 	readAgentModel,
 	readArchiveRetentionDays,
 	readContextDevKey,
+	readPopAutoAcknowledgeState,
 	writeAgentModel,
 	writeArchiveRetentionDays,
 	writeContextDevKey,
+	writePopAutoAcknowledge,
 } from "@crm/db/settings";
+import { AI_PROVIDERS, findProviderModel } from "@crm/validation/ai-providers";
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
+import { z } from "zod";
 import { ResearchKeyService } from "../agent/research-key.service";
 import { BackfillService } from "../backfill/backfill.service";
 import { InjectDatabase } from "../database/database.constants";
 import { ModelCatalogService } from "./model-catalog.service";
 import type {
 	AgentModelSettings,
+	AiProviderStatus,
 	ArchiveRetentionSettings,
+	CatalogModel,
 	ModelCatalogResult,
+	PopAutoAcknowledgeSettings,
 	ResearchKeySettings,
 } from "./settings.contracts";
 
@@ -42,7 +49,7 @@ export class SettingsService {
 			selectedId: model.isDefault ? null : model.id,
 			effectiveId: model.id,
 			defaultId: DEFAULT_AGENT_MODEL.id,
-			effective: await this.catalog.find(model.id),
+			effective: await this.findModel(model.id),
 			updatedAt: row?.updatedAt.toISOString() ?? null,
 		};
 	}
@@ -51,6 +58,28 @@ export class SettingsService {
 		if (modelId === null) {
 			await writeAgentModel(this.db, null);
 			this.logger.log({ message: "Agent model reset to the default" });
+			return this.agentModel();
+		}
+
+		const direct = findProviderModel(modelId);
+		if (direct) {
+			if (!process.env[direct.provider.envKey]?.trim()) {
+				throw new BadRequestException(
+					`${direct.provider.envKey} is not set on this install, so ${direct.model.label} cannot run directly. Add the key to the environment first.`,
+				);
+			}
+
+			await writeAgentModel(this.db, {
+				id: modelId,
+				contextWindowTokens: direct.model.contextWindowTokens,
+			});
+
+			this.logger.log({
+				message: "Agent model changed",
+				modelId,
+				provider: direct.provider.id,
+			});
+
 			return this.agentModel();
 		}
 
@@ -82,7 +111,63 @@ export class SettingsService {
 
 	async modelCatalog(): Promise<ModelCatalogResult> {
 		const models = await this.catalog.models();
-		return { models: models ?? [], available: models !== null };
+		return {
+			models: [
+				...(models ?? []).map((model) => ({
+					...model,
+					source: "gateway" as const,
+					keyConfigured: true,
+				})),
+				...directCatalogModels(),
+			],
+			available: models !== null,
+		};
+	}
+
+	async providers(): Promise<AiProviderStatus[]> {
+		const tests = await this.db.agentTask.findMany({
+			where: { kind: "provider-test" },
+			orderBy: { createdAt: "desc" },
+			take: 20,
+			select: { payload: true, outcome: true, finishedAt: true },
+		});
+
+		return AI_PROVIDERS.map((provider) => {
+			const last = tests.find(
+				(task) => providerOfPayload(task.payload) === provider.id,
+			);
+
+			return {
+				id: provider.id,
+				label: provider.label,
+				envKey: provider.envKey,
+				configured: Boolean(process.env[provider.envKey]?.trim()),
+				models: provider.models.map((model) => ({
+					id: model.id,
+					label: model.label,
+					contextWindowTokens: model.contextWindowTokens,
+					toolUse: model.toolUse,
+					reasoning: model.reasoning,
+				})),
+				lastTest: last
+					? {
+							outcome: last.outcome,
+							finishedAt: last.finishedAt?.toISOString() ?? null,
+							pending: last.finishedAt === null,
+						}
+					: null,
+			};
+		});
+	}
+
+	private async findModel(id: string): Promise<CatalogModel | null> {
+		const direct = directCatalogModels().find((model) => model.id === id);
+		if (direct) return direct;
+
+		const gateway = await this.catalog.find(id);
+		return gateway
+			? { ...gateway, source: "gateway", keyConfigured: true }
+			: null;
 	}
 
 	async researchKey(): Promise<ResearchKeySettings> {
@@ -144,4 +229,42 @@ export class SettingsService {
 
 		return { days: saved };
 	}
+
+	async popAutoAcknowledge(): Promise<PopAutoAcknowledgeSettings> {
+		return readPopAutoAcknowledgeState(this.db);
+	}
+
+	async setPopAutoAcknowledge(
+		enabled: boolean,
+	): Promise<PopAutoAcknowledgeSettings> {
+		await writePopAutoAcknowledge(this.db, enabled);
+
+		this.logger.log({
+			message: "POP auto acknowledgement changed",
+			enabled,
+		});
+
+		return readPopAutoAcknowledgeState(this.db);
+	}
 }
+
+function directCatalogModels(): CatalogModel[] {
+	return AI_PROVIDERS.flatMap((provider) =>
+		provider.models.map((model) => ({
+			id: `${provider.id}/${model.id}`,
+			name: model.label,
+			provider: `${provider.label} (direct)`,
+			contextWindowTokens: model.contextWindowTokens,
+			pricing: null,
+			source: "direct" as const,
+			keyConfigured: Boolean(process.env[provider.envKey]?.trim()),
+		})),
+	);
+}
+
+function providerOfPayload(payload: Prisma.JsonValue): string | null {
+	const parsed = providerTestPayload.safeParse(payload);
+	return parsed.success ? parsed.data.provider : null;
+}
+
+const providerTestPayload = z.object({ provider: z.string() });

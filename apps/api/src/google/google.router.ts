@@ -13,15 +13,22 @@ import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
 import { ConversationService } from "./conversation.service";
 import { GmailHistoricalImportService } from "./gmail-historical-import.service";
+import { GmailLabelSyncService } from "./gmail-label-sync.service";
+import { GmailModifyService } from "./gmail-modify.service";
 import { GmailSendService } from "./gmail-send.service";
 import {
 	calendarEventInput,
 	calendarEventOutput,
 	createHistoricalImportInput,
 	emailThreadOutput,
+	gmailLabelOutput,
 	googleConnectionStatusOutput,
 	historicalImportIdInput,
 	historicalImportJobOutput,
+	mailboxActionInput,
+	mailboxActionOutput,
+	mailboxThreadsInput,
+	mailboxThreadsOutput,
 	purgeSyncedDataOutput,
 	reindexCalendarInput,
 	reindexCalendarOutput,
@@ -35,6 +42,7 @@ import {
 } from "./google.contracts";
 import { GoogleConnectionService } from "./google-connection.service";
 import { GoogleSyncService } from "./google-sync.service";
+import { MailboxListService } from "./mailbox-list.service";
 
 @Router({ alias: "google" })
 @UseMiddlewares(AuthMiddleware)
@@ -49,7 +57,45 @@ export class GoogleRouter {
 		private readonly conversations: ConversationService,
 		@Inject(GmailSendService)
 		private readonly gmailSend: GmailSendService,
+		@Inject(GmailLabelSyncService)
+		private readonly labels: GmailLabelSyncService,
+		@Inject(MailboxListService)
+		private readonly mailboxList: MailboxListService,
+		@Inject(GmailModifyService)
+		private readonly modify: GmailModifyService,
 	) {}
+
+	@Query({
+		output: gmailLabelOutput.array(),
+		meta: restMeta("GET", "/google/gmail/labels", ["Google"]),
+	})
+	async gmailLabels(@Ctx() ctx: AuthedTrpcContext) {
+		return this.labels.listForUser(ctx.user.id);
+	}
+
+	@Query({
+		input: mailboxThreadsInput,
+		output: mailboxThreadsOutput,
+		meta: restMeta("GET", "/google/gmail/threads", ["Google"]),
+	})
+	async mailboxThreads(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof mailboxThreadsInput>,
+	) {
+		return this.mailboxList.threads(ctx.user.id, input);
+	}
+
+	@Mutation({
+		input: mailboxActionInput,
+		output: mailboxActionOutput,
+		meta: restMeta("POST", "/google/gmail/actions", ["Google"]),
+	})
+	async mailboxAction(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof mailboxActionInput>,
+	) {
+		return this.modify.act(ctx.user.id, input);
+	}
 
 	@Query({
 		output: googleConnectionStatusOutput,

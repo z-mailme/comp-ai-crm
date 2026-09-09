@@ -40,6 +40,7 @@ import {
 	agentSaveFileOutput,
 	agentUpdateInput,
 	agentUpdateOutput,
+	seedStartersOutput,
 } from "./agents.contracts";
 
 @Router({ alias: "agents" })
@@ -229,5 +230,13 @@ export class AgentsRouter {
 		@Input() input: z.infer<typeof agentCancelRunInput>,
 	) {
 		return this.runs.cancelRun(input, ctx.user.id);
+	}
+
+	@Mutation({
+		output: seedStartersOutput,
+		meta: restMeta("POST", "/agents/seed-starters", ["Agents"]),
+	})
+	async seedStarters(@Ctx() ctx: AuthedTrpcContext) {
+		return this.agents.seedStarters(ctx.user.id);
 	}
 }

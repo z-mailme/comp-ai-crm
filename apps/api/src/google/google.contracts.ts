@@ -27,6 +27,115 @@ export const threadInput = z.object({
 	threadId: z.string(),
 });
 
+export const gmailLabelOutput = z.object({
+	id: z.string(),
+	gmailLabelId: z.string(),
+	name: z.string(),
+	type: z.string(),
+	colorBackground: z.string().nullable(),
+	colorText: z.string().nullable(),
+	messagesTotal: z.number().nullable(),
+	messagesUnread: z.number().nullable(),
+	threadsTotal: z.number().nullable(),
+	threadsUnread: z.number().nullable(),
+	labelListVisibility: z.string().nullable(),
+	messageListVisibility: z.string().nullable(),
+});
+
+export const MAILBOX_VIEWS = [
+	"inbox",
+	"starred",
+	"sent",
+	"drafts",
+	"important",
+	"all",
+	"spam",
+	"trash",
+] as const;
+
+export type MailboxView = (typeof MAILBOX_VIEWS)[number];
+
+export const mailboxThreadsInput = z.object({
+	view: z.enum(MAILBOX_VIEWS).default("inbox"),
+	labelId: z.string().trim().min(1).max(200).optional(),
+	q: z.string().trim().max(200).optional(),
+	unreadOnly: z.boolean().default(false),
+	starredOnly: z.boolean().default(false),
+	cursor: z.string().trim().min(1).max(300).optional(),
+	limit: z.number().int().min(1).max(100).default(50),
+});
+
+export type MailboxThreadsInput = z.infer<typeof mailboxThreadsInput>;
+
+export const mailboxThreadOutput = z.object({
+	providerThreadId: z.string(),
+	emailThreadId: z.string(),
+	subject: z.string().nullable(),
+	snippet: z.string().nullable(),
+	fromName: z.string().nullable(),
+	fromEmail: z.string(),
+	messageCount: z.number(),
+	lastMessageAt: z.string(),
+	unread: z.boolean(),
+	starred: z.boolean(),
+	important: z.boolean(),
+	userLabelIds: z.array(z.string()),
+	match: z
+		.object({
+			status: z.string(),
+			contactName: z.string().nullable(),
+			companyName: z.string().nullable(),
+			dealName: z.string().nullable(),
+		})
+		.nullable(),
+});
+
+export const mailboxThreadsOutput = z.object({
+	rows: z.array(mailboxThreadOutput),
+	nextCursor: z.string().nullable(),
+});
+
+export const MAILBOX_ACTIONS = [
+	"markRead",
+	"markUnread",
+	"star",
+	"unstar",
+	"important",
+	"unimportant",
+	"archive",
+	"moveToInbox",
+	"spam",
+	"notSpam",
+	"trash",
+	"untrash",
+	"applyLabel",
+	"removeLabel",
+] as const;
+
+export const mailboxActionInput = z.object({
+	action: z.enum(MAILBOX_ACTIONS),
+	providerThreadIds: z.array(z.string().trim().min(1).max(200)).min(1).max(50),
+	labelId: z.string().trim().min(1).max(200).optional(),
+});
+
+export type MailboxActionInput = z.infer<typeof mailboxActionInput>;
+
+export const mailboxActionOutput = z.object({
+	status: z.enum([
+		"applied",
+		"scope-required",
+		"reconnect-required",
+		"not-connected",
+		"rate-limited",
+		"failed",
+	]),
+	reason: z.string().nullable(),
+	modified: z.number(),
+	retryAfterMs: z.number().nullable().optional(),
+});
+
+export type MailboxActionOutput = z.infer<typeof mailboxActionOutput>;
+
 export const calendarEventInput = z.object({
 	eventId: z.string(),
 });
@@ -108,6 +217,7 @@ export const historicalImportChunkOutput = z.object({
 	messagesAlreadyStored: z.number(),
 	messagesAttempted: z.number(),
 	messagesWritten: z.number(),
+	messagesRefreshed: z.number(),
 	messagesIgnored: z.number(),
 	messagesRemaining: z.number(),
 	retryAfterAt: z.string().nullable(),
@@ -129,6 +239,7 @@ export const historicalImportJobOutput = z.object({
 	processedMessages: z.number(),
 	writtenMessages: z.number(),
 	alreadyStoredMessages: z.number(),
+	refreshedMessages: z.number(),
 	ignoredMessages: z.number(),
 	remainingMessages: z.number(),
 	totalChunks: z.number(),

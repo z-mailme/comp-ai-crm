@@ -46,3 +46,30 @@ export type GmailBackfillTraceContext = {
 
 export type GmailBackfillInput = z.infer<typeof gmailBackfillInput> &
 	GmailBackfillTraceContext;
+
+export function monthRanges(
+	after: Date,
+	before: Date,
+): { after: Date; before: Date }[] {
+	const ranges: { after: Date; before: Date }[] = [];
+	let cursor = new Date(after);
+
+	while (cursor < before) {
+		const next = nextMonthBoundary(cursor);
+		const end = next < before ? next : before;
+		ranges.push({ after: new Date(cursor), before: new Date(end) });
+		cursor = end;
+	}
+
+	return ranges;
+}
+
+export function chunkSortIndex(date: Date): number {
+	return Math.floor(date.getTime() / 1000);
+}
+
+function nextMonthBoundary(date: Date): Date {
+	return new Date(
+		Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1, 0, 0, 0, 0),
+	);
+}

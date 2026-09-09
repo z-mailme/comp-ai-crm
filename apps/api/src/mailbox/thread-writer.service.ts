@@ -34,6 +34,8 @@ export type IncomingMessage = {
 	body: string;
 	sentAt: Date;
 	gmailMessageId?: string | null;
+	gmailThreadId?: string | null;
+	labelIds?: string[];
 	outlookMessageId?: string | null;
 	outlookWebLink?: string | null;
 	dealId?: string | null;
@@ -209,6 +211,8 @@ export class ThreadWriterService {
 								rfcMessageId: safe.rfcMessageId,
 								syncedByUserId: row.userId,
 								gmailMessageId: safe.gmailMessageId ?? null,
+								gmailThreadId: safe.gmailThreadId ?? null,
+								labelIds: safe.labelIds ?? [],
 								outlookMessageId: safe.outlookMessageId ?? null,
 								outlookWebLink: safe.outlookWebLink ?? null,
 								direction: outbound

@@ -30,6 +30,7 @@ model User {
   activities                  Activity[]                   @relation("ActivityAuthor")
   mailboxSyncs                MailboxSync[]
   mailboxHistoricalImportJobs MailboxHistoricalImportJob[]
+  brainAnalysisJobs           BrainAnalysisJob[]
   factDecisions               ContactFact[]                @relation("FactDecider")
   conversations               AgentConversation[]          @relation("ConversationOwner")
   fieldValues                 FieldValue[]                 @relation("FieldValueUser")
@@ -385,6 +386,7 @@ model Company {
   emailThreads               EmailThread[]
   calendarEvents             CalendarEvent[]
   fieldValues                FieldValue[]
+  businessKnowledge          BusinessKnowledge[]
   createdAt                  DateTime                   @default(now())
   updatedAt                  DateTime                   @updatedAt
 
@@ -453,6 +455,7 @@ model Contact {
   calendarEvents            CalendarEvent[]
   eventAttendance           CalendarAttendee[]
   fieldValues               FieldValue[]
+  businessKnowledge         BusinessKnowledge[]
   visitors                  TrackedVisitor[]           @relation("VisitorContact")
   submissions               FormSubmission[]           @relation("SubmissionContact")
   createdAt                 DateTime                   @default(now())
@@ -762,6 +765,7 @@ model AgentVersion {
   status AgentVersionStatus @default(DRAFT)
 
   instructions             String
+  autonomyLevel            Int     @default(1)
   manifest                 Json
   modelId                  String
   modelContextWindowTokens Int    @default(1000000)
@@ -1048,6 +1052,7 @@ model Deal {
   activities   Activity[]
   emailThreads EmailThread[]
   fieldValues  FieldValue[]
+  businessKnowledge BusinessKnowledge[]
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
@@ -1091,6 +1096,8 @@ model Booking {
   approvalRequests           ApprovalRequest[]
   businessTasks              BusinessTask[]
   conversationInsights       ConversationInsight[]
+
+  businessKnowledge BusinessKnowledge[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1387,6 +1394,9 @@ model MailboxSync {
   backfillStartedAt   DateTime?
   backfillWindowStart DateTime?
   backfillWindowEnd   DateTime?
+  lastFullReconcileAt DateTime?
+
+  gmailLabels GmailLabel[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -1396,6 +1406,33 @@ model MailboxSync {
   @@index([businessUnitId, source])
   @@index([source, initialBackfilledAt])
   @@map("mailboxSync")
+}
+
+model GmailLabel {
+  id            String      @id @default(cuid())
+  mailboxSyncId String
+  mailboxSync   MailboxSync @relation(fields: [mailboxSyncId], references: [id], onDelete: Cascade)
+
+  gmailLabelId String
+  name         String
+  type         String
+
+  colorBackground String?
+  colorText       String?
+
+  messagesTotal  Int?
+  messagesUnread Int?
+  threadsTotal   Int?
+  threadsUnread  Int?
+
+  labelListVisibility   String?
+  messageListVisibility String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([mailboxSyncId, gmailLabelId])
+  @@map("gmailLabel")
 }
 
 model MailboxHistoricalImportJob {
@@ -1412,6 +1449,7 @@ model MailboxHistoricalImportJob {
   processedMessages     Int @default(0)
   writtenMessages       Int @default(0)
   alreadyStoredMessages Int @default(0)
+  refreshedMessages     Int @default(0)
   ignoredMessages       Int @default(0)
   remainingMessages     Int @default(0)
   totalChunks           Int @default(0)
@@ -1452,6 +1490,7 @@ model MailboxHistoricalImportChunk {
   messagesAlreadyStored Int      @default(0)
   messagesAttempted     Int      @default(0)
   messagesWritten       Int      @default(0)
+  messagesRefreshed     Int      @default(0)
   messagesIgnored       Int      @default(0)
   messagesRemaining     Int      @default(0)
   ignoredMessageIds     String[] @default([])
@@ -1519,6 +1558,8 @@ model EmailMessage {
   rfcMessageId     String  @unique
   syncedByUserId   String?
   gmailMessageId   String?
+  gmailThreadId    String?
+  labelIds         String[] @default([])
   outlookMessageId String?
   outlookWebLink   String?
 
@@ -1536,6 +1577,8 @@ model EmailMessage {
   createdAt DateTime @default(now())
 
   @@index([threadId, sentAt])
+  @@index([gmailThreadId])
+  @@index([labelIds], type: Gin)
   @@map("emailMessage")
 }
 
@@ -1619,12 +1662,121 @@ enum BusinessEventSource {
   OUTLOOK
   CALENDAR
   WEBSITE
+  WHATSAPP
   AGENT
   AUTOMATION
   N8N
   SYSTEM
   OTHER
 }
+
+enum KnowledgeKind {
+  FACT
+  POLICY
+  PRICING
+  FAQ
+  PROCESS
+  SOP
+  PRODUCT_SERVICE
+  COMMUNICATION_STYLE
+  DECISION
+  CONTACT_CONTEXT
+  COMPANY_CONTEXT
+  INFERENCE
+  RECOMMENDATION
+}
+
+enum BrainAnalysisJobStatus {
+  PLANNING
+  RUNNING
+  PAUSED
+  COMPLETED
+  FAILED
+  CANCELLED
+}
+
+model BrainAnalysisJob {
+  id     String @id @default(cuid())
+  userId String
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  source String @default("gmail")
+  status BrainAnalysisJobStatus @default(PLANNING)
+
+  cursorLastMessageAt DateTime?
+  cursorThreadId      String?
+
+  totalThreads      Int @default(0)
+  processedThreads  Int @default(0)
+  knowledgeWritten  Int @default(0)
+  conflictsFound    Int @default(0)
+
+  tokensInput  Int @default(0)
+  tokensOutput Int @default(0)
+  modelUsed    String?
+  providerUsed String?
+
+  lastError String?
+
+  startedAt   DateTime?
+  completedAt DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([userId, status])
+  @@index([status])
+  @@map("brainAnalysisJob")
+}
+
+model BusinessKnowledge {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  kind    KnowledgeKind
+  subject String
+  detail  String?
+  data    Json?
+
+  sourceType BusinessEventSource
+  sourceId   String?
+  sourceAt   DateTime?
+
+  extractedAt DateTime @default(now())
+  confidence  Float    @default(0.5)
+
+  aiGenerated    Boolean   @default(true)
+  humanConfirmed Boolean   @default(false)
+  confirmedById  String?
+  confirmedAt    DateTime?
+
+  validFrom     DateTime  @default(now())
+  validUntil    DateTime?
+  supersededById String?
+  supersededBy   BusinessKnowledge? @relation("KnowledgeSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersedes     BusinessKnowledge[] @relation("KnowledgeSupersession")
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+  dealId    String?
+  deal      Deal?    @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([kind, validFrom])
+  @@index([companyId, kind])
+  @@index([contactId, kind])
+  @@index([businessUnitId, kind])
+  @@index([supersededById])
+  @@map("businessKnowledge")
+}
+
 
 enum AgentKind {
   CUSTOMER_SERVICE
@@ -1776,6 +1928,7 @@ model BusinessUnit {
   customerIdentities      CustomerIdentity[]
   conversations           Conversation[]
   businessEvents          BusinessEvent[]
+  businessKnowledge       BusinessKnowledge[]
   approvals               ApprovalRequest[]
   knowledgeItems          KnowledgeItem[]
   businessRules           BusinessRule[]
@@ -2684,6 +2837,7 @@ model AppSetting {
 
   archiveRetentionDays   Int     @default(180)
   aiAutomationKillSwitch Boolean @default(false)
+  popAutoAcknowledge     Boolean @default(false)
 
   trackingSiteId           String? @unique
   trackingCrossDomain      Boolean @default(true)

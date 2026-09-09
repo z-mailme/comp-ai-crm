@@ -1,6 +1,7 @@
 import {
 	type Db,
 	GoogleSyncStatus,
+	MailboxHistoricalImportJobStatus,
 	type MailboxSyncModel as MailboxSync,
 	Prisma as PrismaNamespace,
 } from "@crm/db";
@@ -22,11 +23,17 @@ import {
 import {
 	GmailClient,
 	type GmailMessage,
+	type GmailMessageRef,
 	type HistoryList,
 	type MessageList,
 	type Profile,
 } from "./gmail.client";
-import type { GmailBackfillInput } from "./gmail-backfill";
+import {
+	chunkSortIndex,
+	type GmailBackfillInput,
+	monthRanges,
+} from "./gmail-backfill";
+import { GmailLabelSyncService } from "./gmail-label-sync.service";
 import {
 	type GmailHeader,
 	header,
@@ -64,6 +71,7 @@ export type GmailBackfillOutcome = Omit<GmailSyncOutcome, "status"> & {
 	messagesWritten?: number;
 	messagesRemaining?: number;
 	messagesIgnored?: number;
+	messagesRefreshed?: number;
 	ignoredMessageIds?: string[];
 	retryAfterMs?: number;
 	failedMessageId?: string;
@@ -93,6 +101,7 @@ type StrictBackfillIngestOutcome = {
 	ignored: number;
 	ignoredIds: string[];
 	alreadyStored: number;
+	refreshed: number;
 	failure?: StrictBackfillFailure;
 };
 
@@ -101,6 +110,28 @@ type IncrementalIngestOutcome = {
 	remaining: number;
 	failure?: StrictBackfillFailure;
 };
+
+type LabelChange = {
+	added: Set<string>;
+	removed: Set<string>;
+	threadId: string | null;
+};
+
+const HISTORY_TYPES = [
+	"messageAdded",
+	"messageDeleted",
+	"labelAdded",
+	"labelRemoved",
+] as const;
+
+const ACTIVE_RECONCILE_STATUSES = [
+	MailboxHistoricalImportJobStatus.PLANNING,
+	MailboxHistoricalImportJobStatus.READY,
+	MailboxHistoricalImportJobStatus.RUNNING,
+	MailboxHistoricalImportJobStatus.VERIFYING,
+	MailboxHistoricalImportJobStatus.WAITING_RATE_LIMIT,
+	MailboxHistoricalImportJobStatus.WAITING_RETRY,
+] as const;
 
 type StrictBackfillFailure = {
 	status: Exclude<GmailBackfillStatus, "synced" | "skipped">;
@@ -119,6 +150,7 @@ export class GmailSyncService {
 		private readonly tokens: MailboxTokenService,
 		private readonly state: SyncStateService,
 		private readonly threads: ThreadWriterService,
+		private readonly labels: GmailLabelSyncService,
 	) {}
 
 	async sync(row: MailboxSync): Promise<GmailSyncOutcome> {
@@ -165,7 +197,18 @@ export class GmailSyncService {
 			return this.start(row, profile.data.historyId ?? null);
 		}
 
-		return this.incremental(row, token.accessToken, mailbox, row.cursor);
+		const outcome = await this.incremental(
+			row,
+			token.accessToken,
+			mailbox,
+			row.cursor,
+		);
+
+		if (outcome.status === "synced") {
+			await this.labels.sync(row, token.accessToken);
+		}
+
+		return outcome;
 	}
 
 	async backfill(input: GmailBackfillInput): Promise<GmailBackfillOutcome> {
@@ -222,15 +265,21 @@ export class GmailSyncService {
 			};
 		}
 
+		const legacy = await this.legacyMirrorIds(alreadyStored);
+
 		const ingested = await this.strictBackfillIngest(
 			row,
 			token.accessToken,
 			mailbox,
 			listed.ids,
 			alreadyStored,
+			[...legacy],
 			input.max,
 			input,
 		);
+
+		const completeSkipped =
+			alreadyStored.size - legacy.size + ingested.alreadyStored;
 
 		this.logger.log({
 			message: "Gmail historical backfill",
@@ -240,6 +289,7 @@ export class GmailSyncService {
 			messagesAttempted: ingested.attempted,
 			messagesRemaining: ingested.remaining,
 			messagesIgnored: ingested.ignored,
+			messagesRefreshed: ingested.refreshed,
 			dryRun: false,
 		});
 
@@ -250,11 +300,12 @@ export class GmailSyncService {
 				status: ingested.failure.status,
 				reason: ingested.failure.reason,
 				messagesMatched: listed.ids.length,
-				messagesAlreadyStored: alreadyStored.size + ingested.alreadyStored,
+				messagesAlreadyStored: completeSkipped,
 				messagesAttempted: ingested.attempted,
 				messagesWritten: ingested.written,
 				messagesRemaining: ingested.remaining,
 				messagesIgnored: ingested.ignored,
+				messagesRefreshed: ingested.refreshed,
 				ignoredMessageIds: ingested.ignoredIds,
 				pagesRead: listed.pagesRead,
 				resultSizeEstimate: listed.resultSizeEstimate,
@@ -268,11 +319,12 @@ export class GmailSyncService {
 			...base,
 			status: "synced",
 			messagesMatched: listed.ids.length,
-			messagesAlreadyStored: alreadyStored.size + ingested.alreadyStored,
+			messagesAlreadyStored: completeSkipped,
 			messagesAttempted: ingested.attempted,
 			messagesWritten: ingested.written,
 			messagesRemaining: ingested.remaining,
 			messagesIgnored: ingested.ignored,
+			messagesRefreshed: ingested.refreshed,
 			ignoredMessageIds: ingested.ignoredIds,
 			pagesRead: listed.pagesRead,
 			resultSizeEstimate: listed.resultSizeEstimate,
@@ -315,14 +367,29 @@ export class GmailSyncService {
 	): Promise<GmailSyncOutcome> {
 		let history = await this.gmail.listHistory(accessToken, {
 			startHistoryId,
+			historyTypes: HISTORY_TYPES,
 		});
 		let finalHistoryId = startHistoryId;
 		const ids = new Set<string>();
+		const deletedIds = new Set<string>();
+		const labelChanges = new Map<string, LabelChange>();
 
 		while (history.outcome === "ok") {
 			for (const entry of history.data.history ?? []) {
 				for (const added of entry.messagesAdded ?? []) {
 					if (added.message?.id) ids.add(added.message.id);
+				}
+
+				for (const deleted of entry.messagesDeleted ?? []) {
+					if (deleted.message?.id) deletedIds.add(deleted.message.id);
+				}
+
+				for (const change of entry.labelsAdded ?? []) {
+					mergeLabelChange(labelChanges, change, "added");
+				}
+
+				for (const change of entry.labelsRemoved ?? []) {
+					mergeLabelChange(labelChanges, change, "removed");
 				}
 			}
 
@@ -334,23 +401,22 @@ export class GmailSyncService {
 			history = await this.gmail.listHistory(accessToken, {
 				startHistoryId,
 				pageToken,
+				historyTypes: HISTORY_TYPES,
 			});
 		}
 
 		if (history.outcome === "cursor-invalid") {
-			await this.state.clearCursor(row.id, history.reason);
-
-			return {
-				source: "gmail",
-				userId: row.userId,
-				status: "synced",
-				reason: "History expired; resuming from now.",
-			};
+			return this.reconcile(row, accessToken, history.reason);
 		}
 
 		if (history.outcome !== "ok") {
 			return this.handleFailure(row, history);
 		}
+
+		for (const id of deletedIds) ids.delete(id);
+
+		const removed = await this.applyDeletions(row.userId, [...deletedIds]);
+		const relabelled = await this.applyLabelChanges(labelChanges);
 
 		const { written, remaining, failure } = await this.ingest(
 			row,
@@ -376,11 +442,13 @@ export class GmailSyncService {
 			status: GoogleSyncStatus.RUNNING,
 		});
 
-		if (written > 0 || remaining > 0) {
+		if (written > 0 || remaining > 0 || removed > 0 || relabelled > 0) {
 			this.logger.log({
 				message: "Gmail incremental sync",
 				userId: row.userId,
 				messagesWritten: written,
+				messagesRemoved: removed,
+				messagesRelabelled: relabelled,
 				remaining,
 			});
 		}
@@ -391,6 +459,190 @@ export class GmailSyncService {
 			status: "synced",
 			messagesWritten: written,
 		};
+	}
+
+	private async reconcile(
+		row: MailboxSync,
+		accessToken: string,
+		reason: string,
+	): Promise<GmailSyncOutcome> {
+		await this.state.clearCursor(row.id, reason);
+
+		const profile = await this.gmail.profile(accessToken);
+		if (profile.outcome !== "ok") {
+			return this.handleFailure(row, profile);
+		}
+
+		const jobId = await this.queueFullReconcile(row.userId);
+
+		await this.db.mailboxSync.update({
+			where: { id: row.id },
+			data: { lastFullReconcileAt: new Date() },
+		});
+
+		await this.state.settle(row.id, {
+			cursor: profile.data.historyId ?? null,
+			status: GoogleSyncStatus.RUNNING,
+		});
+
+		this.logger.log({
+			message: "Gmail history expired; full reconciliation queued",
+			userId: row.userId,
+			historicalImportJobId: jobId,
+		});
+
+		return {
+			source: "gmail",
+			userId: row.userId,
+			status: "synced",
+			reason: "History expired; full reconciliation queued.",
+		};
+	}
+
+	private async queueFullReconcile(userId: string): Promise<string> {
+		const active = await this.db.mailboxHistoricalImportJob.findFirst({
+			where: {
+				userId,
+				source: "gmail",
+				status: { in: [...ACTIVE_RECONCILE_STATUSES] },
+			},
+			select: { id: true },
+		});
+
+		if (active) return active.id;
+
+		const after = new Date(GMAIL_SYNC.reconcile.mailboxEpochMs);
+		const before = new Date();
+
+		const job = await this.db.mailboxHistoricalImportJob.create({
+			data: {
+				userId,
+				source: "gmail",
+				requestedAfter: after,
+				requestedBefore: before,
+				status: MailboxHistoricalImportJobStatus.PLANNING,
+			},
+			select: { id: true },
+		});
+
+		await this.db.mailboxHistoricalImportChunk.createMany({
+			data: monthRanges(after, before).map((range) => ({
+				jobId: job.id,
+				after: range.after,
+				before: range.before,
+				sortIndex: chunkSortIndex(range.after),
+			})),
+		});
+
+		return job.id;
+	}
+
+	private async applyDeletions(
+		userId: string,
+		ids: readonly string[],
+	): Promise<number> {
+		if (ids.length === 0) return 0;
+
+		let removed = 0;
+
+		for (const batch of chunked(ids, GMAIL_SYNC.reconcile.labelBatchSize)) {
+			const rows = await this.db.emailMessage.findMany({
+				where: { gmailMessageId: { in: batch } },
+				select: { id: true, threadId: true },
+			});
+
+			if (rows.length === 0) continue;
+
+			await this.db.emailMessage.deleteMany({
+				where: { id: { in: rows.map((message) => message.id) } },
+			});
+
+			removed += rows.length;
+
+			const threadIds = [...new Set(rows.map((message) => message.threadId))];
+			for (const threadId of threadIds) {
+				const stats = await this.db.emailMessage.aggregate({
+					where: { threadId },
+					_count: { _all: true },
+					_min: { sentAt: true },
+					_max: { sentAt: true },
+				});
+
+				const data: PrismaNamespace.EmailThreadUncheckedUpdateInput = {
+					messageCount: stats._count._all,
+				};
+				if (stats._min.sentAt) data.firstMessageAt = stats._min.sentAt;
+				if (stats._max.sentAt) data.lastMessageAt = stats._max.sentAt;
+
+				await this.db.emailThread.update({
+					where: { id: threadId },
+					data,
+				});
+			}
+		}
+
+		if (removed > 0) {
+			this.logger.log({
+				message: "Gmail deletions applied",
+				userId,
+				messagesRemoved: removed,
+			});
+		}
+
+		return removed;
+	}
+
+	private async applyLabelChanges(
+		changes: ReadonlyMap<string, LabelChange>,
+	): Promise<number> {
+		if (changes.size === 0) return 0;
+
+		let relabelled = 0;
+
+		for (const batch of chunked(
+			[...changes.keys()],
+			GMAIL_SYNC.reconcile.labelBatchSize,
+		)) {
+			const rows = await this.db.emailMessage.findMany({
+				where: { gmailMessageId: { in: batch } },
+				select: {
+					id: true,
+					gmailMessageId: true,
+					gmailThreadId: true,
+					labelIds: true,
+				},
+			});
+
+			for (const message of rows) {
+				if (!message.gmailMessageId) continue;
+
+				const change = changes.get(message.gmailMessageId);
+				if (!change) continue;
+
+				const next = new Set(message.labelIds);
+				for (const labelId of change.added) next.add(labelId);
+				for (const labelId of change.removed) next.delete(labelId);
+
+				const updated = [...next];
+				const labelsChanged = !sameMembers(message.labelIds, updated);
+				const threadMissing =
+					message.gmailThreadId === null && change.threadId !== null;
+
+				if (!labelsChanged && !threadMissing) continue;
+
+				const data: PrismaNamespace.EmailMessageUncheckedUpdateInput = {};
+				if (labelsChanged) data.labelIds = updated;
+				if (threadMissing) data.gmailThreadId = change.threadId;
+
+				await this.db.emailMessage.update({
+					where: { id: message.id },
+					data,
+				});
+				relabelled += 1;
+			}
+		}
+
+		return relabelled;
 	}
 
 	private async ingest(
@@ -458,10 +710,11 @@ export class GmailSyncService {
 		mailbox: string,
 		ids: readonly string[],
 		alreadyStored: ReadonlySet<string>,
+		refreshIds: readonly string[],
 		maxMessages: number,
 		input: GmailBackfillInput,
 	): Promise<StrictBackfillIngestOutcome> {
-		if (ids.length === 0) {
+		if (ids.length === 0 && refreshIds.length === 0) {
 			return {
 				written: 0,
 				remaining: 0,
@@ -469,11 +722,16 @@ export class GmailSyncService {
 				ignored: 0,
 				ignoredIds: [],
 				alreadyStored: 0,
+				refreshed: 0,
 			};
 		}
 
 		const pending = ids.filter((id) => !alreadyStored.has(id));
 		const batch = pending.slice(0, maxMessages);
+		const refreshBatch = refreshIds.slice(
+			0,
+			Math.max(0, maxMessages - batch.length),
+		);
 		const context: MatchContext = await this.threads.context();
 
 		let written = 0;
@@ -493,7 +751,13 @@ export class GmailSyncService {
 					ignored,
 					ignoredIds,
 					alreadyStored: storedElsewhere,
-					remaining: pending.length - written - ignored - storedElsewhere,
+					refreshed: 0,
+					remaining:
+						pending.length -
+						written -
+						ignored -
+						storedElsewhere +
+						refreshIds.length,
 					failure: backfillFailureForMessage(id, message),
 				};
 			}
@@ -520,7 +784,13 @@ export class GmailSyncService {
 					ignored,
 					ignoredIds,
 					alreadyStored: storedElsewhere,
-					remaining: pending.length - written - ignored - storedElsewhere,
+					refreshed: 0,
+					remaining:
+						pending.length -
+						written -
+						ignored -
+						storedElsewhere +
+						refreshIds.length,
 					failure: this.persistenceFailureForMessage(
 						error,
 						row,
@@ -536,14 +806,86 @@ export class GmailSyncService {
 			}
 		}
 
+		let refreshProcessed = 0;
+		let refreshed = 0;
+
+		for (const id of refreshBatch) {
+			const metadata = await this.gmail.getMessageMetadata(accessToken, id);
+
+			if (metadata.outcome !== "ok") {
+				return {
+					written,
+					attempted,
+					ignored,
+					ignoredIds,
+					alreadyStored: storedElsewhere,
+					refreshed,
+					remaining:
+						pending.length -
+						written -
+						ignored -
+						storedElsewhere +
+						(refreshIds.length - refreshProcessed),
+					failure: backfillFailureForMessage(id, metadata),
+				};
+			}
+
+			refreshProcessed += 1;
+			if (await this.refreshMirrorMetadata(id, metadata.data)) {
+				refreshed += 1;
+			}
+		}
+
 		return {
 			written,
 			attempted,
 			ignored,
 			ignoredIds,
 			alreadyStored: storedElsewhere,
-			remaining: pending.length - written - ignored - storedElsewhere,
+			refreshed,
+			remaining:
+				pending.length -
+				written -
+				ignored -
+				storedElsewhere +
+				(refreshIds.length - refreshProcessed),
 		};
+	}
+
+	private async legacyMirrorIds(
+		ids: ReadonlySet<string>,
+	): Promise<Set<string>> {
+		if (ids.size === 0) return new Set();
+
+		const legacy = await this.db.emailMessage.findMany({
+			where: {
+				gmailMessageId: { in: [...ids] },
+				gmailThreadId: null,
+			},
+			select: { gmailMessageId: true },
+		});
+
+		return new Set(
+			legacy
+				.map((existing) => existing.gmailMessageId)
+				.filter((id): id is string => id !== null),
+		);
+	}
+
+	private async refreshMirrorMetadata(
+		gmailMessageId: string,
+		metadata: GmailMessage,
+	): Promise<boolean> {
+		const threadId = metadata.threadId ?? null;
+		const labelIds = metadata.labelIds ?? [];
+		if (threadId === null && labelIds.length === 0) return false;
+
+		const updated = await this.db.emailMessage.updateMany({
+			where: { gmailMessageId, gmailThreadId: null },
+			data: { gmailThreadId: threadId, labelIds },
+		});
+
+		return updated.count > 0;
 	}
 
 	private async listBackfillMessages(
@@ -565,6 +907,8 @@ export class GmailSyncService {
 					GMAIL_SYNC.backfill.pageSize,
 					input.max - ids.size,
 				),
+				mirror: true,
+				includeSpamTrash: true,
 			});
 
 			if (page.outcome !== "ok") {
@@ -650,6 +994,8 @@ export class GmailSyncService {
 			body,
 			sentAt,
 			gmailMessageId: message.id ?? null,
+			gmailThreadId: message.threadId ?? null,
+			labelIds: message.labelIds ?? [],
 		};
 	}
 
@@ -815,6 +1161,42 @@ export class GmailSyncService {
 			failedMessageId: message.id ?? undefined,
 		};
 	}
+}
+
+function mergeLabelChange(
+	changes: Map<string, LabelChange>,
+	record: GmailMessageRef,
+	kind: "added" | "removed",
+): void {
+	const id = record.message?.id;
+	if (!id) return;
+
+	const change = changes.get(id) ?? {
+		added: new Set(),
+		removed: new Set(),
+		threadId: record.message?.threadId ?? null,
+	};
+	for (const labelId of record.labelIds ?? []) {
+		change[kind].add(labelId);
+	}
+	changes.set(id, change);
+}
+
+function chunked<T>(values: readonly T[], size: number): T[][] {
+	const batches: T[][] = [];
+	for (let index = 0; index < values.length; index += size) {
+		batches.push(values.slice(index, index + size));
+	}
+	return batches;
+}
+
+function sameMembers(
+	current: readonly string[],
+	next: readonly string[],
+): boolean {
+	if (current.length !== next.length) return false;
+	const set = new Set(current);
+	return next.every((value) => set.has(value));
 }
 
 function backfillFailureForMessage(

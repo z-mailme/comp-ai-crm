@@ -17,6 +17,7 @@ import type {
 	Profile,
 } from "../src/google/gmail.client";
 import type { GmailBackfillInput } from "../src/google/gmail-backfill";
+import type { GmailLabelSyncService } from "../src/google/gmail-label-sync.service";
 import { GmailSyncService } from "../src/google/gmail-sync.service";
 import type { SyncSource } from "../src/mailbox/mailbox.constants";
 import type { MailboxResult } from "../src/mailbox/mailbox-api.client";
@@ -55,6 +56,7 @@ class FakeGmail {
 	readonly messageFailures = new Map<string, Failure<GmailMessage>>();
 	private readonly listPages = new Map<string, MailboxResult<MessageList>>();
 	private readonly historyPages = new Map<string, HistoryList>();
+	private historyFailureResult: MailboxResult<HistoryList> | null = null;
 	private readonly profileData: Profile;
 	private profileResult: MailboxResult<Profile> | null = null;
 
@@ -75,6 +77,10 @@ class FakeGmail {
 
 	setHistoryPage(pageToken: string | undefined, page: HistoryList): void {
 		this.historyPages.set(pageToken ?? "", page);
+	}
+
+	setHistoryFailure(failure: MailboxResult<HistoryList>): void {
+		this.historyFailureResult = failure;
 	}
 
 	setProfileFailure(failure: Failure<Profile>): void {
@@ -99,6 +105,7 @@ class FakeGmail {
 		options: ListHistoryCall,
 	): Promise<MailboxResult<HistoryList>> {
 		this.historyCalls.push(options);
+		if (this.historyFailureResult) return this.historyFailureResult;
 		return ok(this.historyPages.get(options.pageToken ?? "") ?? {});
 	}
 
@@ -112,6 +119,29 @@ class FakeGmail {
 
 		const message = this.messages.get(id);
 		if (message) return ok(message);
+
+		return {
+			outcome: "failed",
+			reason: `Missing test message ${id}.`,
+			retryable: false,
+		};
+	}
+
+	readonly getMetadataIds: string[] = [];
+
+	async getMessageMetadata(
+		_accessToken: string,
+		id: string,
+	): Promise<MailboxResult<GmailMessage>> {
+		this.getMetadataIds.push(id);
+		const message = this.messages.get(id);
+		if (message) {
+			return ok({
+				id: message.id,
+				threadId: message.threadId,
+				labelIds: message.labelIds,
+			});
+		}
 
 		return {
 			outcome: "failed",
@@ -177,6 +207,11 @@ async function kit(
 		tokens,
 		state,
 		threads,
+		{
+			async sync() {
+				return 0;
+			},
+		} as unknown as GmailLabelSyncService,
 	);
 
 	return { marker, userId, mailbox, row, gmail, service };
@@ -231,6 +266,7 @@ function message(input: {
 	subject?: string;
 	body?: string;
 	references?: string;
+	labelIds?: string[];
 }): GmailMessage {
 	const sentAt = input.sentAt ?? new Date("2025-01-01T10:00:00.000Z");
 	const headers = [
@@ -248,6 +284,7 @@ function message(input: {
 	return {
 		id: input.id,
 		threadId: `thread-${input.id}`,
+		labelIds: input.labelIds ?? [],
 		internalDate: String(sentAt.getTime()),
 		payload: {
 			mimeType: "text/plain",
@@ -1004,6 +1041,11 @@ describe("GmailSyncService history pagination", () => {
 			} as unknown as MailboxTokenService,
 			new SyncStateService(db),
 			failingThreads,
+			{
+				async sync() {
+					return 0;
+				},
+			} as unknown as GmailLabelSyncService,
 		);
 
 		const failed = await service.sync(setup.row);
@@ -1081,5 +1123,231 @@ describe("GmailSyncService history pagination", () => {
 			select: { cursor: true },
 		});
 		expect(row?.cursor).toBe("history-final");
+	});
+});
+
+describe("GmailSyncService mailbox mirror", () => {
+	it("backfill lists the full mailbox with spam and trash included", async () => {
+		const setup = await kit("mirror-listing");
+
+		await setup.service.backfill(backfillInput(setup));
+
+		const call = setup.gmail.listMessageCalls[0];
+		expect(call?.mirror).toBe(true);
+		expect(call?.includeSpamTrash).toBe(true);
+	});
+
+	it("stores gmailThreadId and labelIds on ingest", async () => {
+		const setup = await kit("mirror-fields");
+		const rfc = `<mirror-fields-${suffix}@example.test>`;
+
+		setup.gmail.setListPage(undefined, {
+			messages: [{ id: "gmail-mirror-1", threadId: "thread-gmail-mirror-1" }],
+		});
+		setup.gmail.messages.set(
+			"gmail-mirror-1",
+			message({
+				id: "gmail-mirror-1",
+				rfc,
+				from: "customer@gmail.com",
+				to: setup.mailbox,
+				labelIds: ["INBOX", "UNREAD", "Label_7"],
+			}),
+		);
+
+		await setup.service.backfill(backfillInput(setup));
+
+		const row = await db.emailMessage.findUnique({
+			where: { rfcMessageId: rfc.replace(/[<>]/g, "") },
+			select: { gmailThreadId: true, labelIds: true },
+		});
+		expect(row?.gmailThreadId).toBe("thread-gmail-mirror-1");
+		expect(row?.labelIds).toEqual(["INBOX", "UNREAD", "Label_7"]);
+	});
+
+	it("applies labelAdded and labelRemoved from history", async () => {
+		const setup = await kit("mirror-labels");
+		const rfc = `<mirror-labels-${suffix}@example.test>`;
+
+		setup.gmail.setListPage(undefined, {
+			messages: [{ id: "gmail-label-1", threadId: "thread-gmail-label-1" }],
+		});
+		setup.gmail.messages.set(
+			"gmail-label-1",
+			message({
+				id: "gmail-label-1",
+				rfc,
+				from: "customer@gmail.com",
+				to: setup.mailbox,
+				labelIds: ["INBOX"],
+			}),
+		);
+		await setup.service.backfill(backfillInput(setup));
+
+		const rfcId = rfc.replace(/[<>]/g, "");
+
+		setup.gmail.setHistoryPage(undefined, {
+			history: [
+				{
+					id: "h-1",
+					labelsAdded: [
+						{
+							message: {
+								id: "gmail-label-1",
+								threadId: "thread-gmail-label-1",
+							},
+							labelIds: ["STARRED", "Label_9"],
+						},
+					],
+				},
+			],
+			historyId: "history-labels-1",
+		});
+		await setup.service.sync(setup.row);
+
+		let row = await db.emailMessage.findUnique({
+			where: { rfcMessageId: rfcId },
+			select: { labelIds: true },
+		});
+		expect(row?.labelIds).toContain("STARRED");
+		expect(row?.labelIds).toContain("Label_9");
+		expect(row?.labelIds).toContain("INBOX");
+
+		setup.gmail.setHistoryPage(undefined, {
+			history: [
+				{
+					id: "h-2",
+					labelsRemoved: [
+						{
+							message: {
+								id: "gmail-label-1",
+								threadId: "thread-gmail-label-1",
+							},
+							labelIds: ["Label_9", "INBOX"],
+						},
+					],
+				},
+			],
+			historyId: "history-labels-2",
+		});
+		await setup.service.sync(setup.row);
+
+		row = await db.emailMessage.findUnique({
+			where: { rfcMessageId: rfcId },
+			select: { labelIds: true },
+		});
+		expect(row?.labelIds).toContain("STARRED");
+		expect(row?.labelIds).not.toContain("Label_9");
+		expect(row?.labelIds).not.toContain("INBOX");
+	});
+
+	it("applies messageDeleted without deleting the thread or its activity", async () => {
+		const setup = await kit("mirror-delete");
+		const { contact } = await addContact(setup.marker, "customer@gmail.com");
+		const rfc = `<mirror-delete-${suffix}@example.test>`;
+
+		setup.gmail.setListPage(undefined, {
+			messages: [{ id: "gmail-delete-1", threadId: "thread-gmail-delete-1" }],
+		});
+		setup.gmail.messages.set(
+			"gmail-delete-1",
+			message({
+				id: "gmail-delete-1",
+				rfc,
+				from: "customer@gmail.com",
+				to: setup.mailbox,
+			}),
+		);
+		await setup.service.backfill(backfillInput(setup));
+
+		const rfcId = rfc.replace(/[<>]/g, "");
+		const before = await stored(rfcId);
+		expect(before).not.toBeNull();
+		expect(before?.thread.contactId).toBe(contact.id);
+		expect(before?.thread.activity).not.toBeNull();
+
+		setup.gmail.setHistoryPage(undefined, {
+			history: [
+				{
+					id: "h-1",
+					messagesDeleted: [
+						{
+							message: {
+								id: "gmail-delete-1",
+								threadId: "thread-gmail-delete-1",
+							},
+						},
+					],
+				},
+			],
+			historyId: "history-delete-1",
+		});
+		const outcome = await setup.service.sync(setup.row);
+
+		expect(outcome.status).toBe("synced");
+
+		const messageRow = await db.emailMessage.findUnique({
+			where: { rfcMessageId: rfcId },
+			select: { id: true },
+		});
+		expect(messageRow).toBeNull();
+
+		const thread = await db.emailThread.findFirst({
+			where: { rootMessageId: rfcId },
+			select: { messageCount: true, activity: { select: { id: true } } },
+		});
+		expect(thread).not.toBeNull();
+		expect(thread?.messageCount).toBe(0);
+		expect(thread?.activity).not.toBeNull();
+	});
+
+	it("queues a full reconciliation when the history cursor expires", async () => {
+		const setup = await kit("mirror-reconcile", { cursor: "cursor-expired" });
+		setup.gmail.setHistoryFailure({
+			outcome: "cursor-invalid",
+			reason: "HistoryId expired.",
+		});
+
+		const outcome = await setup.service.sync(setup.row);
+
+		expect(outcome.status).toBe("synced");
+		expect(outcome.reason).toContain("reconciliation");
+
+		const row = await db.mailboxSync.findUnique({
+			where: { id: setup.row.id },
+			select: { cursor: true, lastFullReconcileAt: true },
+		});
+		expect(row?.cursor).toBe("history-start");
+		expect(row?.lastFullReconcileAt).not.toBeNull();
+
+		const jobs = await db.mailboxHistoricalImportJob.findMany({
+			where: { userId: setup.userId, source: "gmail" },
+			include: { chunks: true },
+		});
+		expect(jobs).toHaveLength(1);
+		expect(jobs[0]?.status).toBe("PLANNING");
+		expect(jobs[0]?.chunks.length).toBeGreaterThan(12);
+		expect(jobs[0]?.requestedAfter.getTime()).toBe(1_080_777_600_000);
+
+		const second = await setup.service.sync(setup.row);
+		expect(second.status).toBe("synced");
+
+		const jobsAfter = await db.mailboxHistoricalImportJob.count({
+			where: { userId: setup.userId, source: "gmail" },
+		});
+		expect(jobsAfter).toBe(1);
+	});
+
+	it("requests every history type during incremental sync", async () => {
+		const setup = await kit("mirror-history-types");
+
+		await setup.service.sync(setup.row);
+
+		expect(setup.gmail.historyCalls[0]?.historyTypes).toEqual([
+			"messageAdded",
+			"messageDeleted",
+			"labelAdded",
+			"labelRemoved",
+		]);
 	});
 });

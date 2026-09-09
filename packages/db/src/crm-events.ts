@@ -37,6 +37,21 @@ export const CRM_EVENT_CATALOG = {
 		description: "An open deal moves to a closed stage",
 		recordKind: "deal",
 	},
+	"communication.received": {
+		label: "Message received",
+		description: "An email or WhatsApp message arrives from a contact",
+		recordKind: "contact",
+	},
+	"communication.sent": {
+		label: "Message sent",
+		description: "An email or WhatsApp message goes to a contact",
+		recordKind: "contact",
+	},
+	"pop.received": {
+		label: "Proof of payment received",
+		description: "A customer sends proof of payment",
+		recordKind: "contact",
+	},
 } as const satisfies Record<string, CrmEventDefinition>;
 
 export type CrmEventType = keyof typeof CRM_EVENT_CATALOG;

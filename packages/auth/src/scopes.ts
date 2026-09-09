@@ -13,6 +13,8 @@ export const IDENTITY_SCOPES = ["openid", "email", "profile"] as const;
 
 export const GMAIL_SCOPE = "https://www.googleapis.com/auth/gmail.readonly";
 export const GMAIL_SEND_SCOPE = "https://www.googleapis.com/auth/gmail.send";
+export const GMAIL_MODIFY_SCOPE =
+	"https://www.googleapis.com/auth/gmail.modify";
 export const CALENDAR_SCOPE =
 	"https://www.googleapis.com/auth/calendar.readonly";
 export const OUTLOOK_MAIL_SCOPE = "Mail.Read";

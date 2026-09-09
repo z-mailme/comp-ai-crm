@@ -1,0 +1,1 @@
+ALTER TABLE "agentVersion" ADD COLUMN "autonomyLevel" INTEGER NOT NULL DEFAULT 1;

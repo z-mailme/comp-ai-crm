@@ -14,8 +14,10 @@ import { z } from "zod";
 const t = initTRPC.create();
 const publicProcedure = t.procedure;
 import { timelineInput, timelineOutput, timelineCountsInput, timelineCountsOutput, myTasksInput, myTasksOutput, activityCreateInput, activityCreateOutput, completeInput, completeOutput } from "../activities/activities.contracts";
-import { agentListOutput, agentReviseInput, agentReviseOutput, agentIdInput, agentFilesOutput, agentSaveFileInput, agentSaveFileOutput, agentByIdOutput, agentHistoryInput, agentHistoryOutput, agentActivityOutput, agentUpdateInput, agentUpdateOutput, agentDeployInput, agentDeployOutput, agentPauseOutput, agentResumeOutput, agentArchiveOutput, agentRestoreOutput, agentRemoveOutput, agentRunNowInput, agentRunNowOutput, agentRetryRunInput, agentRetryRunOutput, agentCancelRunInput, agentCancelRunOutput } from "../agent/agents.contracts";
+import { agentListOutput, agentReviseInput, agentReviseOutput, agentIdInput, agentFilesOutput, agentSaveFileInput, agentSaveFileOutput, agentByIdOutput, agentHistoryInput, agentHistoryOutput, agentActivityOutput, agentUpdateInput, agentUpdateOutput, agentDeployInput, agentDeployOutput, agentPauseOutput, agentResumeOutput, agentArchiveOutput, agentRestoreOutput, agentRemoveOutput, agentRunNowInput, agentRunNowOutput, agentRetryRunInput, agentRetryRunOutput, agentCancelRunInput, agentCancelRunOutput, seedStartersOutput } from "../agent/agents.contracts";
 import { apiKeyListInput, apiKeyListOutput, createApiKeyInput, createApiKeyOutput, revokeApiKeyInput, revokeApiKeyOutput } from "../api-keys/api-keys.contracts";
+import { brainJobOutput, brainKnowledgeQueryInput, brainKnowledgeOutput } from "../brain/brain.contracts";
+import { briefDailyOutput, briefExceptionsOutput } from "../business-os/brief.contracts";
 import { businessContextInput, businessOsOverviewOutput, inboxInput, inboxOutput, calendarInput, calendarOutput, conversationInput, conversationDetailOutput, customer360Input, customer360Output, globalSearchInput, globalSearchOutput, approvalsOutput, knowledgeOutput, observabilityOutput, activityFeedInput, activityFeedOutput, bookingsInput, bookingsOutput, analyticsOutput, financeOutput } from "../business-os/business-os.contracts";
 import { companyListInput, companyListOutput, companyIdInput, companyDetailOutput, companyOptionsInput, companyOptionOutput, companyCreateInput, companySummaryOutput, companyUpdateArgs, companyArchiveResultOutput, companyBulkOwnerInput, companyBulkResultOutput, companyBulkInput, companyEnrichOutput, companyResearchOutput, setPrimaryContactInput, companySetPrimaryContactOutput } from "../companies/companies.contracts";
 import { contactListInput, contactListOutput, contactIdInput, contactByIdOutput, contactCreateInput, contactBasicOutput, contactUpdateArgs, contactNameOutput, contactEnrichOutput, contactBulkOwnerInput, bulkResultOutput, contactBulkCompanyInput, contactBulkInput, factDecisionInput, decideFactOutput } from "../contacts/contacts.contracts";
@@ -25,11 +27,11 @@ import { dashboardSummaryInput, dashboardSummaryOutput } from "../dashboard/dash
 import { dealListInput, dealListOutput, dealIdInput, dealDetailOutput, dealCreateInput, dealCreateOutput, dealUpdateArgs, dealMutateOutput, setStageInput, dealSetStageOutput, dealContactsInput, dealContactOptionsOutput, dealAttachContactInput, dealContactLinkOutput, dealDetachContactInput, dealContactRoleInput, dealContactRoleOutput, dealBulkOwnerInput, dealBulkResultOutput, dealBulkStageInput, dealBulkInput } from "../deals/deals.contracts";
 import { enrichmentQueueInput } from "@crm/validation/enrichment-queue";
 import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput, fieldEntityInput, fieldFiltersOutput, fieldIdInput, fieldCoverageOutput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput, fieldReorderOutput, fieldDeleteOutput, fieldBackfillOutput } from "../fields/fields.contracts";
-import { googleConnectionStatusOutput, reindexCalendarInput, reindexCalendarOutput, historicalImportJobOutput, createHistoricalImportInput, historicalImportIdInput, sendEmailInput, sendEmailOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
+import { gmailLabelOutput, mailboxThreadsInput, mailboxThreadsOutput, mailboxActionInput, mailboxActionOutput, googleConnectionStatusOutput, reindexCalendarInput, reindexCalendarOutput, historicalImportJobOutput, createHistoricalImportInput, historicalImportIdInput, sendEmailInput, sendEmailOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
 import { marketingContextInput, marketingOverviewOutput, emailMarketingOutput, adsWorkspaceOutput, listmonkConnectionInput, marketingIntegrationOutput, adsConnectionInput, marketingProviderInput, createListmonkCampaignInput, createListmonkCampaignOutput, sendListmonkTestInput, requestMarketingActionInput, approvalRequestOutput } from "../marketing/marketing.contracts";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
-import { agentModelOutput, modelCatalogOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput } from "../settings/settings.contracts";
+import { agentModelOutput, modelCatalogOutput, aiProviderStatusOutput, testProviderInput, testProviderOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput, popAutoAcknowledgeOutput, setPopAutoAcknowledgeInput } from "../settings/settings.contracts";
 import { slackStatusOutput, slackMatchesOutput, slackChannelsInput, slackChannelsOutput, slackJoinChannelInput, slackJoinChannelOutput, slackRefreshPeopleOutput, slackCreateChannelInput, slackCreateChannelOutput, slackDisconnectOutput } from "../slack/slack.contracts";
 import { ssoSignInOptionsOutput, ssoSettingsOutput, ssoProviderListInput, ssoProviderListOutput, registerSsoProviderInput, ssoProviderOutput, deleteSsoProviderInput, deleteSsoProviderOutput } from "../sso/sso.contracts";
 import { trackingSettingsOutput, trackingFlagInput, cookieLifetimeInput, addDomainInput, trackedDomainOutput, removeDomainInput, rotateSiteIdOutput, verifyInput, verifyOutput, sourcesOutput, companyActivityInput, websiteActivityOutput, contactActivityInput } from "../tracking/tracking.contracts";
@@ -126,6 +128,9 @@ const appRouter = t.router({
     cancelRun: publicProcedure
       .input(agentCancelRunInput)
       .output(agentCancelRunOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    seedStarters: publicProcedure
+      .output(seedStartersOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   apiKeys: t.router({
@@ -142,7 +147,34 @@ const appRouter = t.router({
       .output(revokeApiKeyOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
+  brain: t.router({
+    job: publicProcedure
+      .output(brainJobOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    start: publicProcedure
+      .output(brainJobOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    pause: publicProcedure
+      .output(brainJobOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    resume: publicProcedure
+      .output(brainJobOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    cancel: publicProcedure
+      .output(brainJobOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    knowledge: publicProcedure
+      .input(brainKnowledgeQueryInput)
+      .output(brainKnowledgeOutput.array())
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
   businessOs: t.router({
+    briefDaily: publicProcedure
+      .output(briefDailyOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    briefExceptions: publicProcedure
+      .output(briefExceptionsOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     overview: publicProcedure
       .input(businessContextInput)
       .output(businessOsOverviewOutput)
@@ -585,6 +617,17 @@ const appRouter = t.router({
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   google: t.router({
+    gmailLabels: publicProcedure
+      .output(gmailLabelOutput.array())
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    mailboxThreads: publicProcedure
+      .input(mailboxThreadsInput)
+      .output(mailboxThreadsOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    mailboxAction: publicProcedure
+      .input(mailboxActionInput)
+      .output(mailboxActionOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     status: publicProcedure
       .output(googleConnectionStatusOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
@@ -744,6 +787,13 @@ const appRouter = t.router({
     modelCatalog: publicProcedure
       .output(modelCatalogOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    providers: publicProcedure
+      .output(aiProviderStatusOutput.array())
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    testProvider: publicProcedure
+      .input(testProviderInput)
+      .output(testProviderOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     setAgentModel: publicProcedure
       .input(setAgentModelInput)
       .output(agentModelOutput)
@@ -761,6 +811,13 @@ const appRouter = t.router({
     setArchiveRetention: publicProcedure
       .input(setArchiveRetentionDaysInput)
       .output(archiveRetentionOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    popAutoAcknowledge: publicProcedure
+      .output(popAutoAcknowledgeOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setPopAutoAcknowledge: publicProcedure
+      .input(setPopAutoAcknowledgeInput)
+      .output(popAutoAcknowledgeOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   slack: t.router({

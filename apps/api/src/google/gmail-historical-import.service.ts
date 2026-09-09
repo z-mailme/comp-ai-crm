@@ -14,6 +14,7 @@ import {
 	NotFoundException,
 } from "@nestjs/common";
 import { InjectDatabase } from "../database/database.constants";
+import { chunkSortIndex, monthRanges } from "./gmail-backfill";
 import { GMAIL_SYNC } from "./gmail-sync.config";
 import {
 	type GmailBackfillOutcome,
@@ -52,6 +53,7 @@ type SerializedChunk = {
 	messagesAlreadyStored: number;
 	messagesAttempted: number;
 	messagesWritten: number;
+	messagesRefreshed: number;
 	messagesIgnored: number;
 	messagesRemaining: number;
 	retryAfterAt: string | null;
@@ -73,6 +75,7 @@ export type HistoricalImportJobOutput = {
 	processedMessages: number;
 	writtenMessages: number;
 	alreadyStoredMessages: number;
+	refreshedMessages: number;
 	ignoredMessages: number;
 	remainingMessages: number;
 	totalChunks: number;
@@ -153,7 +156,7 @@ export class GmailHistoricalImportService {
 						jobId: created.id,
 						after: range.after,
 						before: range.before,
-						sortIndex: sortIndex(range.after),
+						sortIndex: chunkSortIndex(range.after),
 					})),
 				});
 
@@ -444,6 +447,8 @@ export class GmailHistoricalImportService {
 
 		if (outcome.status === "synced") {
 			const written = chunk.messagesWritten + (outcome.messagesWritten ?? 0);
+			const refreshed =
+				chunk.messagesRefreshed + (outcome.messagesRefreshed ?? 0);
 			const ignoredIds = unique([
 				...chunk.ignoredMessageIds,
 				...(outcome.ignoredMessageIds ?? []),
@@ -455,7 +460,7 @@ export class GmailHistoricalImportService {
 			const remaining = outcome.messagesRemaining ?? 0;
 			const alreadyStored = Math.max(
 				0,
-				matched - written - ignoredIds.length - remaining,
+				matched - written - refreshed - ignoredIds.length - remaining,
 			);
 			const completed =
 				!outcome.truncated && remaining === 0
@@ -471,6 +476,7 @@ export class GmailHistoricalImportService {
 					messagesAttempted:
 						chunk.messagesAttempted + (outcome.messagesAttempted ?? 0),
 					messagesWritten: written,
+					messagesRefreshed: refreshed,
 					messagesIgnored: ignoredIds.length,
 					messagesRemaining: remaining,
 					ignoredMessageIds: ignoredIds,
@@ -794,7 +800,7 @@ export class GmailHistoricalImportService {
 					jobId: chunk.jobId,
 					after: range.after,
 					before: range.before,
-					sortIndex: sortIndex(range.after),
+					sortIndex: chunkSortIndex(range.after),
 					depth: chunk.depth + 1,
 				})),
 			});
@@ -972,9 +978,16 @@ export class GmailHistoricalImportService {
 			finalChunks,
 			(chunk) => chunk.messagesAlreadyStored,
 		);
+		const refreshedMessages = sum(
+			finalChunks,
+			(chunk) => chunk.messagesRefreshed,
+		);
 		const ignoredMessages = sum(finalChunks, (chunk) => chunk.messagesIgnored);
 		const processedMessages =
-			writtenMessages + alreadyStoredMessages + ignoredMessages;
+			writtenMessages +
+			alreadyStoredMessages +
+			refreshedMessages +
+			ignoredMessages;
 		const remainingMessages = Math.max(0, totalMessages - processedMessages);
 		const totalChunks = finalChunks.length;
 		const completedChunks = finalChunks.filter(
@@ -1010,6 +1023,7 @@ export class GmailHistoricalImportService {
 				processedMessages,
 				writtenMessages,
 				alreadyStoredMessages,
+				refreshedMessages,
 				ignoredMessages,
 				remainingMessages,
 				totalChunks,
@@ -1127,6 +1141,7 @@ function serializeJob(job: JobWithChunks): HistoricalImportJobOutput {
 		processedMessages: job.processedMessages,
 		writtenMessages: job.writtenMessages,
 		alreadyStoredMessages: job.alreadyStoredMessages,
+		refreshedMessages: job.refreshedMessages,
 		ignoredMessages: job.ignoredMessages,
 		remainingMessages: job.remainingMessages,
 		totalChunks: job.totalChunks,
@@ -1200,6 +1215,7 @@ function serializeChunk(
 		messagesAlreadyStored: chunk.messagesAlreadyStored,
 		messagesAttempted: chunk.messagesAttempted,
 		messagesWritten: chunk.messagesWritten,
+		messagesRefreshed: chunk.messagesRefreshed,
 		messagesIgnored: chunk.messagesIgnored,
 		messagesRemaining: chunk.messagesRemaining,
 		retryAfterAt: chunk.retryAfterAt?.toISOString() ?? null,
@@ -1222,29 +1238,6 @@ function emptyTick(jobId: string | null = null): HistoricalImportTickOutput {
 		completed: 0,
 		jobId,
 	};
-}
-
-function monthRanges(
-	after: Date,
-	before: Date,
-): { after: Date; before: Date }[] {
-	const ranges: { after: Date; before: Date }[] = [];
-	let cursor = new Date(after);
-
-	while (cursor < before) {
-		const next = nextMonthBoundary(cursor);
-		const end = next < before ? next : before;
-		ranges.push({ after: new Date(cursor), before: new Date(end) });
-		cursor = end;
-	}
-
-	return ranges;
-}
-
-function nextMonthBoundary(date: Date): Date {
-	return new Date(
-		Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1, 0, 0, 0, 0),
-	);
 }
 
 function splitRange(
@@ -1270,10 +1263,6 @@ function splitRange(
 
 function addMs(date: Date, ms: number): Date {
 	return new Date(date.getTime() + ms);
-}
-
-function sortIndex(date: Date): number {
-	return Math.floor(date.getTime() / 1000);
 }
 
 function unique(values: readonly string[]): string[] {

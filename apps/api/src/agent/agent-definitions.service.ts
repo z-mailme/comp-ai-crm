@@ -19,6 +19,7 @@ import {
 	type AgentUpdateInput,
 	agentManifest,
 } from "./agents.contracts";
+import { seedStarterAgents } from "./starter-agents";
 
 const INSTRUCTIONS_PATH = "agent/instructions.md";
 
@@ -41,6 +42,11 @@ export class AgentDefinitionsService {
 		private readonly access: AgentAccessService,
 		private readonly trigger: AgentTriggerService,
 	) {}
+
+	async seedStarters(userId: string) {
+		await this.access.assertMember(userId);
+		return seedStarterAgents(this.db, userId);
+	}
 
 	async list(userId: string) {
 		await this.access.assertMember(userId);

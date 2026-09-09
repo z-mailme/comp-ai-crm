@@ -7,24 +7,34 @@ import { CalendarSyncService } from "./calendar-sync.service";
 import { ConversationService } from "./conversation.service";
 import { GmailClient } from "./gmail.client";
 import { GmailHistoricalImportService } from "./gmail-historical-import.service";
+import { GmailLabelSyncService } from "./gmail-label-sync.service";
+import { GmailModifyService } from "./gmail-modify.service";
 import { GmailSendService } from "./gmail-send.service";
 import { GmailSyncService } from "./gmail-sync.service";
 import { GoogleRouter } from "./google.router";
 import { GoogleConnectionService } from "./google-connection.service";
 import { GoogleSyncService } from "./google-sync.service";
+import { MailboxListService } from "./mailbox-list.service";
+import { PopAcknowledgementController } from "./pop-acknowledgement.controller";
+import { PopAcknowledgementService } from "./pop-acknowledgement.service";
 
 @Module({
 	imports: [TrpcModule, MailboxModule, AgentModule],
+	controllers: [PopAcknowledgementController],
 	providers: [
 		CalendarClient,
 		CalendarSyncService,
 		GmailClient,
 		GmailHistoricalImportService,
+		GmailLabelSyncService,
+		GmailModifyService,
 		GmailSendService,
 		GmailSyncService,
 		GoogleSyncService,
 		GoogleConnectionService,
 		ConversationService,
+		MailboxListService,
+		PopAcknowledgementService,
 		GoogleRouter,
 	],
 	exports: [

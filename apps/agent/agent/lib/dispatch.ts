@@ -1,13 +1,18 @@
-import { EnrichmentStatus } from "@crm/db";
+import { EnrichmentStatus, type Prisma } from "@crm/db";
 import { fieldBackfillPayload } from "@crm/validation/field-backfill";
+import { z } from "zod";
 import { APP_AUTH, type AppAuth } from "./app-auth";
+import { aiExtractor } from "./brain-extractor";
+import { runBrainScan } from "./brain-scan";
 import { brandOutcome, runBrand } from "./brand";
 import { queueEventAgentRuns } from "./custom-agent-dispatch";
 import { settledWithin } from "./deadline";
 import { DISPATCH } from "./dispatch-config";
 import { markRunning, settle } from "./enrichment";
+import { drainMemoryBridge } from "./event-bridge";
 import { collapsing, runLimited } from "./pool";
 import { runPortrait } from "./portrait";
+import { testProviderConnection } from "./providers";
 import { runSlackChannelJoin } from "./slack-join-task";
 import { runSlackPeopleMatch } from "./slack-people";
 import { staleTaskSweep } from "./stale-tasks";
@@ -17,6 +22,7 @@ import {
 	DIRECT_KINDS,
 	type LeasedTask,
 	noteSession,
+	scheduleTask,
 } from "./tasks";
 
 export const VISIBLE_BATCH = DISPATCH.visible.batch;
@@ -128,7 +134,73 @@ async function handleDirect(task: LeasedTask): Promise<void> {
 		return;
 	}
 
+	if (task.kind === "provider-test") {
+		const providerId = providerIdOf(task.payload);
+		if (!providerId) {
+			await completeTask(task.id, "No provider was named.");
+			return;
+		}
+
+		const result = await testProviderConnection(providerId);
+		await completeTask(
+			task.id,
+			result.ok
+				? `${providerId} answered. ${result.models} models listed.`
+				: (result.reason ?? `${providerId} could not be reached.`),
+		);
+		return;
+	}
+
+	if (task.kind === "brain-scan") {
+		const outcome = await runBrainScan(task.payload, aiExtractor());
+
+		if (!outcome.finished) {
+			await scheduleTask({
+				kind: "brain-scan",
+				reason: "Continue the Business Brain mailbox analysis",
+				payload: task.payload as Prisma.InputJsonValue,
+				dueAt: new Date(),
+				priority: task.priority,
+				budget: task.budget,
+			});
+		}
+
+		await completeTask(
+			task.id,
+			outcome.reason ??
+				`Analysed ${outcome.processed} threads, wrote ${outcome.written} facts, found ${outcome.conflicts} conflicts.`,
+		);
+		return;
+	}
+
+	if (task.kind === "event-bridge") {
+		const outcome = await drainMemoryBridge();
+
+		if (outcome.processed >= DISPATCH.bridge.batchSize) {
+			await scheduleTask({
+				kind: "event-bridge",
+				reason: "Continue draining business events",
+				dueAt: new Date(),
+				priority: task.priority,
+				budget: task.budget,
+			});
+		}
+
+		await completeTask(
+			task.id,
+			`Processed ${outcome.processed} events, detected ${outcome.pops} proofs of payment, ${outcome.failed} failed.`,
+		);
+		return;
+	}
+
 	await completeTask(task.id, "The record this names is gone.");
+}
+
+const providerTestPayload = z.object({ provider: z.string() });
+
+function providerIdOf(payload: Prisma.JsonValue | null): string | null {
+	const parsed = providerTestPayload.safeParse(payload);
+	return parsed.success ? parsed.data.provider : null;
 }
 
 export async function runResearchLane(

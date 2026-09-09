@@ -19,11 +19,21 @@ export class MailboxApiClient {
 	async get<T>(
 		url: string,
 		accessToken: string,
-		params: Record<string, string | number | boolean | undefined> = {},
+		params: Record<
+			string,
+			string | number | boolean | readonly string[] | undefined
+		> = {},
 	): Promise<MailboxResult<T>> {
 		const target = new URL(url);
 		for (const [key, value] of Object.entries(params)) {
-			if (value !== undefined) target.searchParams.set(key, String(value));
+			if (value === undefined) continue;
+			if (Array.isArray(value)) {
+				for (const entry of value) {
+					target.searchParams.append(key, String(entry));
+				}
+			} else {
+				target.searchParams.set(key, String(value));
+			}
 		}
 
 		return this.request<T>(target, {
@@ -35,7 +45,10 @@ export class MailboxApiClient {
 	async post<T>(
 		url: string,
 		accessToken: string,
-		body: Record<string, string | number | boolean | null | undefined>,
+		body: Record<
+			string,
+			string | number | boolean | null | undefined | string[]
+		>,
 	): Promise<MailboxResult<T>> {
 		return this.request<T>(new URL(url), {
 			method: "POST",

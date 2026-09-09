@@ -2,52 +2,35 @@ import { Suspense } from "react";
 import {
 	PageShell,
 	PageShellContent,
-	PageShellDescription,
-	PageShellHeader,
-	PageShellHeading,
 	PageShellLoading,
-	PageShellTitle,
 } from "@/components/page-shell";
 import { requireSession } from "@/lib/session";
 import { HydrateClient } from "@/lib/trpc/hydrate";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
-import { UnifiedInbox } from "./unified-inbox";
+import { MailboxWorkspace } from "./mailbox-workspace";
 
 export default function InboxPage() {
 	return (
-		<PageShell>
-			<PageShellHeader>
-				<PageShellHeading>
-					<PageShellTitle>Unified Inbox</PageShellTitle>
-					<PageShellDescription>
-						Customer conversations across email and future channels.
-					</PageShellDescription>
-				</PageShellHeading>
-			</PageShellHeader>
-			<PageShellContent>
+		<PageShell contained className="gap-4">
+			<PageShellContent className="flex min-h-0 flex-1 flex-col">
 				<Suspense fallback={<PageShellLoading />}>
-					<InboxSummary />
+					<InboxData />
 				</Suspense>
 			</PageShellContent>
 		</PageShell>
 	);
 }
 
-async function InboxSummary() {
+async function InboxData() {
 	await requireSession();
 	const queryClient = getServerQueryClient();
 	const trpc = getServerTrpc();
 
-	await Promise.all([
-		queryClient.prefetchQuery(
-			trpc.businessOs.inbox.queryOptions({ limit: 50 }),
-		),
-		queryClient.prefetchQuery(trpc.businessOs.overview.queryOptions()),
-	]);
+	await queryClient.prefetchQuery(trpc.google.gmailLabels.queryOptions());
 
 	return (
 		<HydrateClient>
-			<UnifiedInbox />
+			<MailboxWorkspace />
 		</HydrateClient>
 	);
 }

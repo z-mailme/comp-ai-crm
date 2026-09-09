@@ -55,7 +55,7 @@ describe("the configured model", () => {
 		});
 
 		expect(await selectedModel()).toEqual({
-			model: "anthropic/claude-sonnet-5",
+			gatewayId: "anthropic/claude-sonnet-5",
 			modelContextWindowTokens: 200_000,
 		});
 	});

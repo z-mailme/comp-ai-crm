@@ -1,16 +1,22 @@
 import { Inject } from "@nestjs/common";
 import { Input, Mutation, Query, Router, UseMiddlewares } from "nestjs-trpc";
 import type { z } from "zod";
+import { AgentTriggerService } from "../agent/agent-trigger.service";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
 import {
 	agentModelOutput,
+	aiProviderStatusOutput,
 	archiveRetentionOutput,
 	modelCatalogOutput,
+	popAutoAcknowledgeOutput,
 	researchKeyOutput,
 	setAgentModelInput,
 	setArchiveRetentionDaysInput,
+	setPopAutoAcknowledgeInput,
 	setResearchKeyInput,
+	testProviderInput,
+	testProviderOutput,
 } from "./settings.contracts";
 import { SettingsService } from "./settings.service";
 
@@ -19,6 +25,7 @@ import { SettingsService } from "./settings.service";
 export class SettingsRouter {
 	constructor(
 		@Inject(SettingsService) private readonly settings: SettingsService,
+		@Inject(AgentTriggerService) private readonly agent: AgentTriggerService,
 	) {}
 
 	@Query({
@@ -35,6 +42,23 @@ export class SettingsRouter {
 	})
 	async modelCatalog() {
 		return this.settings.modelCatalog();
+	}
+
+	@Query({
+		output: aiProviderStatusOutput.array(),
+		meta: restMeta("GET", "/settings/providers", ["Settings"]),
+	})
+	async providers() {
+		return this.settings.providers();
+	}
+
+	@Mutation({
+		input: testProviderInput,
+		output: testProviderOutput,
+		meta: restMeta("POST", "/settings/providers/test", ["Settings"]),
+	})
+	async testProvider(@Input() input: z.infer<typeof testProviderInput>) {
+		return { queued: await this.agent.providerTest(input.provider) };
 	}
 
 	@Mutation({
@@ -80,5 +104,24 @@ export class SettingsRouter {
 		@Input() input: z.infer<typeof setArchiveRetentionDaysInput>,
 	) {
 		return this.settings.setArchiveRetention(input.days);
+	}
+
+	@Query({
+		output: popAutoAcknowledgeOutput,
+		meta: restMeta("GET", "/settings/pop-auto-acknowledge", ["Settings"]),
+	})
+	async popAutoAcknowledge() {
+		return this.settings.popAutoAcknowledge();
+	}
+
+	@Mutation({
+		input: setPopAutoAcknowledgeInput,
+		output: popAutoAcknowledgeOutput,
+		meta: restMeta("PATCH", "/settings/pop-auto-acknowledge", ["Settings"]),
+	})
+	async setPopAutoAcknowledge(
+		@Input() input: z.infer<typeof setPopAutoAcknowledgeInput>,
+	) {
+		return this.settings.setPopAutoAcknowledge(input.enabled);
 	}
 }

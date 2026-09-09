@@ -378,3 +378,8 @@ export const agentCancelRunOutput = z.object({
 	status: agentRunStatus,
 	cancelled: z.boolean(),
 });
+
+export const seedStartersOutput = z.object({
+	created: z.number(),
+	skipped: z.number(),
+});

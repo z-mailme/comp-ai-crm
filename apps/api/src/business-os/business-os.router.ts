@@ -4,6 +4,8 @@ import type { z } from "zod";
 import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
 import { restMeta } from "../trpc/openapi";
+import { briefDailyOutput, briefExceptionsOutput } from "./brief.contracts";
+import { BriefService } from "./brief.service";
 import {
 	activityFeedInput,
 	activityFeedOutput,
@@ -34,7 +36,24 @@ import { BusinessOsService } from "./business-os.service";
 export class BusinessOsRouter {
 	constructor(
 		@Inject(BusinessOsService) private readonly businessOs: BusinessOsService,
+		@Inject(BriefService) private readonly brief: BriefService,
 	) {}
+
+	@Query({
+		output: briefDailyOutput,
+		meta: restMeta("GET", "/business-os/brief/daily", ["Business OS"]),
+	})
+	async briefDaily() {
+		return this.brief.daily();
+	}
+
+	@Query({
+		output: briefExceptionsOutput,
+		meta: restMeta("GET", "/business-os/brief/exceptions", ["Business OS"]),
+	})
+	async briefExceptions() {
+		return this.brief.exceptions();
+	}
 
 	@Query({
 		input: businessContextInput,

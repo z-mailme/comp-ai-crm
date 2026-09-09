@@ -10,6 +10,7 @@ import {
 import { requireSession } from "@/lib/session";
 import { HydrateClient } from "@/lib/trpc/hydrate";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
+import { DailyBrief } from "./daily-brief";
 import { DashboardSummary } from "./dashboard-summary";
 import {
 	OverviewGreeting,
@@ -41,8 +42,28 @@ export default function OverviewPage({ searchParams }: PageProps<"/[slug]">) {
 				<Suspense fallback={<PageShellLoading />}>
 					<Summary searchParams={searchParams} />
 				</Suspense>
+				<Suspense fallback={null}>
+					<BriefSection />
+				</Suspense>
 			</PageShellContent>
 		</PageShell>
+	);
+}
+
+async function BriefSection() {
+	await requireSession();
+	const queryClient = getServerQueryClient();
+	const trpc = getServerTrpc();
+
+	await Promise.all([
+		queryClient.prefetchQuery(trpc.businessOs.briefDaily.queryOptions()),
+		queryClient.prefetchQuery(trpc.businessOs.briefExceptions.queryOptions()),
+	]);
+
+	return (
+		<HydrateClient>
+			<DailyBrief />
+		</HydrateClient>
 	);
 }
 

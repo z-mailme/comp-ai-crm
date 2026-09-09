@@ -9,6 +9,7 @@ import { ArchiveModule } from "./archive/archive.module";
 import { AuthModule } from "./auth/auth.module";
 import { BackfillModule } from "./backfill/backfill.module";
 import { BookingsModule } from "./bookings/bookings.module";
+import { BrainModule } from "./brain/brain.module";
 import { BusinessOsModule } from "./business-os/business-os.module";
 import { AppCacheModule } from "./cache/cache.module";
 import { CompaniesModule } from "./companies/companies.module";
@@ -39,6 +40,7 @@ import { TelemetryModule } from "./telemetry/telemetry.module";
 import { TrackingModule } from "./tracking/tracking.module";
 import { TrpcModule } from "./trpc/trpc.module";
 import { UsersModule } from "./users/users.module";
+import { WhatsappModule } from "./whatsapp/whatsapp.module";
 import { WorkspaceModule } from "./workspace/workspace.module";
 
 @Module({
@@ -74,6 +76,8 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		MailboxModule,
 		MarketingModule,
 		GoogleModule,
+		BrainModule,
+		WhatsappModule,
 		MicrosoftModule,
 		SyncModule,
 		SettingsModule,
