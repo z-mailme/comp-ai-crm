@@ -71,6 +71,7 @@ export type GmailBackfillOutcome = Omit<GmailSyncOutcome, "status"> & {
 	messagesWritten?: number;
 	messagesRemaining?: number;
 	messagesIgnored?: number;
+	messagesRefreshed?: number;
 	ignoredMessageIds?: string[];
 	retryAfterMs?: number;
 	failedMessageId?: string;
@@ -100,6 +101,7 @@ type StrictBackfillIngestOutcome = {
 	ignored: number;
 	ignoredIds: string[];
 	alreadyStored: number;
+	refreshed: number;
 	failure?: StrictBackfillFailure;
 };
 
@@ -115,7 +117,12 @@ type LabelChange = {
 	threadId: string | null;
 };
 
-const HISTORY_TYPES = "messageAdded,messageDeleted,labelAdded,labelRemoved";
+const HISTORY_TYPES = [
+	"messageAdded",
+	"messageDeleted",
+	"labelAdded",
+	"labelRemoved",
+] as const;
 
 const ACTIVE_RECONCILE_STATUSES = [
 	MailboxHistoricalImportJobStatus.PLANNING,
@@ -258,15 +265,21 @@ export class GmailSyncService {
 			};
 		}
 
+		const legacy = await this.legacyMirrorIds(alreadyStored);
+
 		const ingested = await this.strictBackfillIngest(
 			row,
 			token.accessToken,
 			mailbox,
 			listed.ids,
 			alreadyStored,
+			[...legacy],
 			input.max,
 			input,
 		);
+
+		const completeSkipped =
+			alreadyStored.size - legacy.size + ingested.alreadyStored;
 
 		this.logger.log({
 			message: "Gmail historical backfill",
@@ -276,6 +289,7 @@ export class GmailSyncService {
 			messagesAttempted: ingested.attempted,
 			messagesRemaining: ingested.remaining,
 			messagesIgnored: ingested.ignored,
+			messagesRefreshed: ingested.refreshed,
 			dryRun: false,
 		});
 
@@ -286,11 +300,12 @@ export class GmailSyncService {
 				status: ingested.failure.status,
 				reason: ingested.failure.reason,
 				messagesMatched: listed.ids.length,
-				messagesAlreadyStored: alreadyStored.size + ingested.alreadyStored,
+				messagesAlreadyStored: completeSkipped,
 				messagesAttempted: ingested.attempted,
 				messagesWritten: ingested.written,
 				messagesRemaining: ingested.remaining,
 				messagesIgnored: ingested.ignored,
+				messagesRefreshed: ingested.refreshed,
 				ignoredMessageIds: ingested.ignoredIds,
 				pagesRead: listed.pagesRead,
 				resultSizeEstimate: listed.resultSizeEstimate,
@@ -304,11 +319,12 @@ export class GmailSyncService {
 			...base,
 			status: "synced",
 			messagesMatched: listed.ids.length,
-			messagesAlreadyStored: alreadyStored.size + ingested.alreadyStored,
+			messagesAlreadyStored: completeSkipped,
 			messagesAttempted: ingested.attempted,
 			messagesWritten: ingested.written,
 			messagesRemaining: ingested.remaining,
 			messagesIgnored: ingested.ignored,
+			messagesRefreshed: ingested.refreshed,
 			ignoredMessageIds: ingested.ignoredIds,
 			pagesRead: listed.pagesRead,
 			resultSizeEstimate: listed.resultSizeEstimate,
@@ -694,10 +710,11 @@ export class GmailSyncService {
 		mailbox: string,
 		ids: readonly string[],
 		alreadyStored: ReadonlySet<string>,
+		refreshIds: readonly string[],
 		maxMessages: number,
 		input: GmailBackfillInput,
 	): Promise<StrictBackfillIngestOutcome> {
-		if (ids.length === 0) {
+		if (ids.length === 0 && refreshIds.length === 0) {
 			return {
 				written: 0,
 				remaining: 0,
@@ -705,11 +722,16 @@ export class GmailSyncService {
 				ignored: 0,
 				ignoredIds: [],
 				alreadyStored: 0,
+				refreshed: 0,
 			};
 		}
 
 		const pending = ids.filter((id) => !alreadyStored.has(id));
 		const batch = pending.slice(0, maxMessages);
+		const refreshBatch = refreshIds.slice(
+			0,
+			Math.max(0, maxMessages - batch.length),
+		);
 		const context: MatchContext = await this.threads.context();
 
 		let written = 0;
@@ -729,7 +751,13 @@ export class GmailSyncService {
 					ignored,
 					ignoredIds,
 					alreadyStored: storedElsewhere,
-					remaining: pending.length - written - ignored - storedElsewhere,
+					refreshed: 0,
+					remaining:
+						pending.length -
+						written -
+						ignored -
+						storedElsewhere +
+						refreshIds.length,
 					failure: backfillFailureForMessage(id, message),
 				};
 			}
@@ -756,7 +784,13 @@ export class GmailSyncService {
 					ignored,
 					ignoredIds,
 					alreadyStored: storedElsewhere,
-					remaining: pending.length - written - ignored - storedElsewhere,
+					refreshed: 0,
+					remaining:
+						pending.length -
+						written -
+						ignored -
+						storedElsewhere +
+						refreshIds.length,
 					failure: this.persistenceFailureForMessage(
 						error,
 						row,
@@ -772,14 +806,86 @@ export class GmailSyncService {
 			}
 		}
 
+		let refreshProcessed = 0;
+		let refreshed = 0;
+
+		for (const id of refreshBatch) {
+			const metadata = await this.gmail.getMessageMetadata(accessToken, id);
+
+			if (metadata.outcome !== "ok") {
+				return {
+					written,
+					attempted,
+					ignored,
+					ignoredIds,
+					alreadyStored: storedElsewhere,
+					refreshed,
+					remaining:
+						pending.length -
+						written -
+						ignored -
+						storedElsewhere +
+						(refreshIds.length - refreshProcessed),
+					failure: backfillFailureForMessage(id, metadata),
+				};
+			}
+
+			refreshProcessed += 1;
+			if (await this.refreshMirrorMetadata(id, metadata.data)) {
+				refreshed += 1;
+			}
+		}
+
 		return {
 			written,
 			attempted,
 			ignored,
 			ignoredIds,
 			alreadyStored: storedElsewhere,
-			remaining: pending.length - written - ignored - storedElsewhere,
+			refreshed,
+			remaining:
+				pending.length -
+				written -
+				ignored -
+				storedElsewhere +
+				(refreshIds.length - refreshProcessed),
 		};
+	}
+
+	private async legacyMirrorIds(
+		ids: ReadonlySet<string>,
+	): Promise<Set<string>> {
+		if (ids.size === 0) return new Set();
+
+		const legacy = await this.db.emailMessage.findMany({
+			where: {
+				gmailMessageId: { in: [...ids] },
+				gmailThreadId: null,
+			},
+			select: { gmailMessageId: true },
+		});
+
+		return new Set(
+			legacy
+				.map((existing) => existing.gmailMessageId)
+				.filter((id): id is string => id !== null),
+		);
+	}
+
+	private async refreshMirrorMetadata(
+		gmailMessageId: string,
+		metadata: GmailMessage,
+	): Promise<boolean> {
+		const threadId = metadata.threadId ?? null;
+		const labelIds = metadata.labelIds ?? [];
+		if (threadId === null && labelIds.length === 0) return false;
+
+		const updated = await this.db.emailMessage.updateMany({
+			where: { gmailMessageId, gmailThreadId: null },
+			data: { gmailThreadId: threadId, labelIds },
+		});
+
+		return updated.count > 0;
 	}
 
 	private async listBackfillMessages(
