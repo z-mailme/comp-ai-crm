@@ -7,7 +7,10 @@ import {
 } from "@crm/db";
 import { recordKnowledge } from "@crm/db/knowledge";
 import { SETTINGS_ID } from "@crm/db/settings";
-import { drainMemoryBridge } from "../agent/lib/event-bridge";
+import {
+	drainMemoryBridge,
+	sendAcknowledgementViaApi,
+} from "../agent/lib/event-bridge";
 import { detectPop } from "../agent/lib/pop-detect";
 
 const suffix = process.env.TEST_RUN_ID ?? "event-bridge-spec";
@@ -114,7 +117,10 @@ async function clean(): Promise<void> {
 		where: { idempotencyKey: { contains: suffix } },
 	});
 	await db.businessEvent.deleteMany({
-		where: { idempotencyKey: { startsWith: "pop:test:" } },
+		where: { idempotencyKey: { startsWith: `pop-ack-sent:${suffix}` } },
+	});
+	await db.businessEvent.deleteMany({
+		where: { contact: { email: { contains: suffix } } },
 	});
 	await db.activity.deleteMany({
 		where: { meta: { path: ["source"], equals: "pop-bridge" } },
@@ -149,6 +155,17 @@ describe("detectPop", () => {
 		expect(
 			detectPop("Quote request", "Can you quote for 120 guests in December?"),
 		).toBeNull();
+	});
+
+	it("reads an amount written at the end of a sentence", () => {
+		const found = detectPop(
+			"POP attached",
+			"Proof of payment — R8,000. Reference: INV-9",
+		);
+
+		expect(found).not.toBeNull();
+		expect(found?.amount).toBe(8000);
+		expect(found?.reference).toBe("INV-9");
 	});
 });
 
@@ -255,6 +272,16 @@ describe("safe-auto acknowledgement", () => {
 		const sent: string[] = [];
 		const fakeSend = async (eventId: string): Promise<string> => {
 			sent.push(eventId);
+			await db.businessEvent.create({
+				data: {
+					type: "pop.acknowledgement.sent",
+					source: BusinessEventSource.AGENT,
+					occurredAt: new Date(),
+					correlationId: eventId,
+					data: { idempotencyKey: `pop-ack-${eventId}` },
+					idempotencyKey: `pop-ack-sent:${suffix}:${eventId}`,
+				},
+			});
 			return "sent";
 		};
 
@@ -269,11 +296,6 @@ describe("safe-auto acknowledgement", () => {
 		const data = pop?.data as { acknowledgementApproved?: boolean };
 		expect(data.acknowledgementApproved).toBe(true);
 
-		const audit = await db.businessEvent.findFirst({
-			where: { type: "pop.acknowledgement.sent", correlationId: event.id },
-		});
-		expect(audit).toBeNull();
-
 		const confirmed = await db.businessEvent.findFirst({
 			where: { type: "PAYMENT_CONFIRMED", correlationId: event.id },
 		});
@@ -286,6 +308,79 @@ describe("safe-auto acknowledgement", () => {
 
 		await drainMemoryBridge({ send: fakeSend });
 		expect(sent).toHaveLength(1);
+
+		const audits = await db.businessEvent.count({
+			where: {
+				type: "pop.acknowledgement.sent",
+				correlationId: pop?.id ?? "",
+			},
+		});
+		expect(audits).toBe(1);
+	});
+
+	it("retries a failed send and delivers exactly once", async () => {
+		await setPolicy(true);
+
+		const { event } = await seedIncoming("retry", {
+			subject: "POP attached",
+			body: "Proof of payment — R5,600 paid today. Reference: INV-88",
+		});
+
+		let attempts = 0;
+		const fakeSend = async (eventId: string): Promise<string> => {
+			attempts += 1;
+			if (attempts === 1) {
+				throw new Error("timeout talking to the API");
+			}
+			await db.businessEvent.create({
+				data: {
+					type: "pop.acknowledgement.sent",
+					source: BusinessEventSource.AGENT,
+					occurredAt: new Date(),
+					correlationId: eventId,
+					data: { idempotencyKey: `pop-ack-${eventId}` },
+					idempotencyKey: `pop-ack-sent:${suffix}:${eventId}`,
+				},
+			});
+			return "sent";
+		};
+
+		await drainMemoryBridge({ send: fakeSend });
+		expect(attempts).toBe(1);
+
+		const afterFailure = await db.businessEventOutbox.findFirst({
+			where: { businessEventId: event.id },
+		});
+		expect(afterFailure?.status).not.toBe("SENT");
+
+		await db.businessEventOutbox.updateMany({
+			where: { businessEventId: event.id },
+			data: { status: "PENDING", nextAttemptAt: null },
+		});
+
+		await drainMemoryBridge({ send: fakeSend });
+		expect(attempts).toBe(2);
+
+		const afterRetry = await db.businessEventOutbox.findFirst({
+			where: { businessEventId: event.id },
+		});
+		expect(afterRetry?.status).toBe("SENT");
+
+		const pop = await db.businessEvent.findFirst({
+			where: { type: "POP_RECEIVED", correlationId: event.id },
+		});
+		const audits = await db.businessEvent.count({
+			where: {
+				type: "pop.acknowledgement.sent",
+				correlationId: pop?.id ?? "",
+			},
+		});
+		expect(audits).toBe(1);
+
+		const confirmed = await db.businessEvent.findFirst({
+			where: { type: "PAYMENT_CONFIRMED", correlationId: event.id },
+		});
+		expect(confirmed).toBeNull();
 	});
 
 	it("does not send when the message carries a dispute signal", async () => {
@@ -339,7 +434,7 @@ describe("safe-auto acknowledgement", () => {
 });
 
 describe("business brain to agent acknowledgement", () => {
-	it("uses recorded communication style in the suggested acknowledgement", async () => {
+	it("lets recorded style shape the wording without leaking internals", async () => {
 		await setPolicy(false);
 
 		const { event, contact } = await seedIncoming("brain", {
@@ -362,9 +457,82 @@ describe("business brain to agent acknowledgement", () => {
 			where: { type: "POP_RECEIVED", correlationId: event.id },
 		});
 		const data = pop?.data as { suggestedAcknowledgement?: string };
-		expect(data.suggestedAcknowledgement).toContain("R4,200");
-		expect(data.suggestedAcknowledgement).toContain(
-			`(Style note: formal and brief ${suffix})`,
+
+		expect(data.suggestedAcknowledgement).toBe(
+			"Thank you. We have received your proof of payment of R4,200. We will confirm once it reflects on our bank statement.",
+		);
+		expect(data.suggestedAcknowledgement).not.toContain("Style note");
+		expect(data.suggestedAcknowledgement).not.toContain(suffix);
+		expect(data.suggestedAcknowledgement).not.toContain("formal");
+	});
+});
+
+describe("sendAcknowledgementViaApi", () => {
+	async function withServer(
+		handler: () => Response,
+		run: () => Promise<void>,
+	): Promise<void> {
+		const server = Bun.serve({
+			port: 0,
+			hostname: "127.0.0.1",
+			fetch: handler,
+		});
+		const previousUrl = process.env.API_URL;
+		const previousSecret = process.env.AGENT_BRIDGE_SECRET;
+		process.env.API_URL = `http://127.0.0.1:${server.port}`;
+		process.env.AGENT_BRIDGE_SECRET = "bridge-test-secret";
+		try {
+			await run();
+		} finally {
+			server.stop(true);
+			if (previousUrl === undefined) delete process.env.API_URL;
+			else process.env.API_URL = previousUrl;
+			if (previousSecret === undefined) delete process.env.AGENT_BRIDGE_SECRET;
+			else process.env.AGENT_BRIDGE_SECRET = previousSecret;
+		}
+	}
+
+	it("accepts sent and already-sent as terminal success", async () => {
+		await withServer(
+			() => Response.json({ status: "already-sent", reason: null }),
+			async () => {
+				await expect(sendAcknowledgementViaApi("evt-1")).resolves.toBe(
+					"already-sent",
+				);
+			},
+		);
+	});
+
+	it("rejects a 200 whose body says failed", async () => {
+		await withServer(
+			() => Response.json({ status: "failed", reason: "no Gmail account" }),
+			async () => {
+				await expect(sendAcknowledgementViaApi("evt-2")).rejects.toThrow(
+					"failed",
+				);
+			},
+		);
+	});
+
+	it("rejects a 200 whose body says skipped", async () => {
+		await withServer(
+			() => Response.json({ status: "skipped", reason: "policy off" }),
+			async () => {
+				await expect(sendAcknowledgementViaApi("evt-3")).rejects.toThrow(
+					"skipped",
+				);
+			},
+		);
+	});
+
+	it("rejects a server error", async () => {
+		await withServer(
+			() => new Response("boom", { status: 500 }),
+			async () => {
+				await expect(sendAcknowledgementViaApi("evt-4")).rejects.toThrow(
+					"HTTP 500",
+				);
+			},
 		);
 	});
 });

@@ -183,23 +183,34 @@ async function processEvent(
 		(await activityAuthor(event.contactId, event.companyId));
 
 	if (authorId) {
-		await db.activity.create({
-			data: {
+		const existingNote = await db.activity.findFirst({
+			where: {
 				type: ActivityType.NOTE,
-				subject: summary,
-				body: `Payment is not confirmed until it reconciles. Evidence: ${detection.evidence}.`,
-				occurredAt: event.occurredAt,
-				contactId: event.contactId,
-				companyId: event.companyId,
-				dealId: event.dealId ?? booking?.dealId ?? null,
-				createdById: authorId,
-				meta: {
-					source: "pop-bridge",
-					paymentConfirmed: false,
-					bookingId: booking?.id ?? null,
-				},
+				meta: { path: ["sourceEventId"], equals: event.id },
 			},
+			select: { id: true },
 		});
+
+		if (!existingNote) {
+			await db.activity.create({
+				data: {
+					type: ActivityType.NOTE,
+					subject: summary,
+					body: `Payment is not confirmed until it reconciles. Evidence: ${detection.evidence}.`,
+					occurredAt: event.occurredAt,
+					contactId: event.contactId,
+					companyId: event.companyId,
+					dealId: event.dealId ?? booking?.dealId ?? null,
+					createdById: authorId,
+					meta: {
+						source: "pop-bridge",
+						sourceEventId: event.id,
+						paymentConfirmed: false,
+						bookingId: booking?.id ?? null,
+					},
+				},
+			});
+		}
 	}
 
 	await queueAgentTriggers(event, "pop.received");
@@ -280,10 +291,18 @@ async function acknowledgementFor(
 			: [];
 
 	const amountText = amount ? ` of R${amount.toLocaleString("en-ZA")}` : "";
-	const base = `Thank you — we have received your proof of payment${amountText}. We will confirm once it reflects on our bank statement.`;
 
-	const tone = style[0]?.subject;
-	return tone ? `${base}\n\n(Style note: ${tone})` : base;
+	const tone = style[0]?.subject?.toLowerCase() ?? "";
+
+	if (/formal|brief|professional/.test(tone)) {
+		return `Thank you. We have received your proof of payment${amountText}. We will confirm once it reflects on our bank statement.`;
+	}
+
+	if (/warm|friendly|casual/.test(tone)) {
+		return `Thank you — we have received your proof of payment${amountText}. We will confirm once it reflects on our bank statement. We appreciate it.`;
+	}
+
+	return `Thank you — we have received your proof of payment${amountText}. We will confirm once it reflects on our bank statement.`;
 }
 
 async function queueAgentTriggers(
@@ -374,36 +393,46 @@ async function evaluateSafeAuto(
 
 	if (!(await readPopAutoAcknowledge(db))) return;
 
+	const delivered = await db.businessEvent.findFirst({
+		where: {
+			type: "pop.acknowledgement.sent",
+			correlationId: popEvent.id,
+		},
+		select: { id: true },
+	});
+	if (delivered) return;
+
 	const current = await db.businessEvent.findUnique({
 		where: { id: popEvent.id },
 		select: { data: true },
 	});
 
 	const data = bridgeEventData.parse(current?.data ?? {});
-	if (data.acknowledgementApproved) return;
-
-	await db.businessEvent.update({
-		where: { id: popEvent.id },
-		data: {
+	if (!data.acknowledgementApproved) {
+		await db.businessEvent.update({
+			where: { id: popEvent.id },
 			data: {
-				...data,
-				acknowledgementApproved: true,
-			} as Prisma.InputJsonValue,
-		},
-	});
-
-	try {
-		await send(popEvent.id);
-	} catch (error) {
-		console.error(
-			`[event-bridge] POP acknowledgement failed for ${popEvent.id}: ${
-				error instanceof Error ? error.message : String(error)
-			}`,
-		);
+				data: {
+					...data,
+					acknowledgementApproved: true,
+				} as Prisma.InputJsonValue,
+			},
+		});
 	}
+
+	await send(popEvent.id);
 }
 
-async function sendAcknowledgementViaApi(eventId: string): Promise<string> {
+const acknowledgementResult = z
+	.object({
+		status: z.enum(["sent", "already-sent", "skipped", "failed"]),
+		reason: z.string().nullable().catch(null),
+	})
+	.catch({ status: "failed", reason: null });
+
+export async function sendAcknowledgementViaApi(
+	eventId: string,
+): Promise<string> {
 	const base = process.env.API_URL?.trim() || "http://localhost:3001";
 	const secret = process.env.AGENT_BRIDGE_SECRET?.trim();
 
@@ -427,6 +456,16 @@ async function sendAcknowledgementViaApi(eventId: string): Promise<string> {
 		throw new Error(`The API answered HTTP ${response.status}.`);
 	}
 
-	const result = (await response.json()) as { status?: string };
-	return result.status ?? "unknown";
+	const body = await response.json().catch(() => null);
+	const result = acknowledgementResult.parse(body ?? {});
+
+	if (result.status === "sent" || result.status === "already-sent") {
+		return result.status;
+	}
+
+	throw new Error(
+		`The API did not send the acknowledgement: ${result.status}${
+			result.reason ? ` — ${result.reason}` : ""
+		}.`,
+	);
 }

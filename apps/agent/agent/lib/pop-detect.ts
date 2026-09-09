@@ -1,7 +1,8 @@
 const POP_SIGNAL =
 	/(proof of payment|\bpop attached|\bpop\b|payment (?:made|sent|confirmation|received)|EFT (?:payment|reference)|deposit (?:paid|received)|paid (?:into|to) your account)/i;
 
-const AMOUNT = /(?:^|\s)R\s?(\d[\d\s,]*(?:[.,]\d{2})?|\d)(?=\s|$|[^0-9\s,.])/m;
+const AMOUNT =
+	/(?:^|\s)R\s?(\d[\d\s,]*(?:[.,]\d{2})?|\d)(?=\s|$|[^0-9\s,.]|[.,](?!\d))/m;
 
 const REFERENCE = /ref(?:erence)?[.:]?\s*([A-Za-z0-9][A-Za-z0-9/-]{3,})/i;
 
