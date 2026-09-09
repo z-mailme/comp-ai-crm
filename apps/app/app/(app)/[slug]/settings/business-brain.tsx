@@ -9,8 +9,11 @@ import {
 	CardTitle,
 } from "@crm/ui/components/card";
 import { StatusIndicator } from "@crm/ui/components/status-indicator";
+import { Switch } from "@crm/ui/components/switch";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useId } from "react";
 import { toast } from "sonner";
+import { useCrmCache } from "@/lib/trpc/cache";
 import { useTRPC } from "@/lib/trpc/client";
 
 const POLL_MS = 5_000;
@@ -18,6 +21,8 @@ const POLL_MS = 5_000;
 export function BusinessBrain() {
 	const trpc = useTRPC();
 	const queryClient = useQueryClient();
+	const cache = useCrmCache();
+	const autoAckId = useId();
 
 	const job = useQuery({
 		...trpc.brain.job.queryOptions(),
@@ -26,6 +31,18 @@ export function BusinessBrain() {
 			return status === "RUNNING" || status === "PLANNING" ? POLL_MS : false;
 		},
 	});
+
+	const autoAck = useQuery(trpc.settings.popAutoAcknowledge.queryOptions());
+
+	const setAutoAck = useMutation(
+		trpc.settings.setPopAutoAcknowledge.mutationOptions({
+			onSuccess: async () => {
+				await cache.settings();
+				toast.success("POP acknowledgement setting saved.");
+			},
+			onError: (error) => toast.error(error.message),
+		}),
+	);
 
 	async function refresh() {
 		await queryClient.invalidateQueries({
@@ -138,6 +155,29 @@ export function BusinessBrain() {
 					continues from the checkpoint. It never sends email and never changes
 					a confirmed rule.
 				</p>
+
+				{autoAck.data ? (
+					<div className="flex items-start justify-between gap-4 rounded-md border p-3">
+						<div className="flex flex-col gap-1">
+							<label htmlFor={autoAckId} className="font-medium text-sm">
+								Acknowledge proofs of payment automatically
+							</label>
+							<p className="text-muted-foreground text-xs">
+								{autoAck.data.killSwitch
+									? "The AI automation kill switch is on, so nothing sends even with this enabled."
+									: "Sends the approved thank-you reply only when the POP is strong, the sender is known, and no dispute is detected. Payment is never marked confirmed."}
+							</p>
+						</div>
+						<Switch
+							id={autoAckId}
+							checked={autoAck.data.enabled}
+							disabled={setAutoAck.isPending}
+							onCheckedChange={(checked) =>
+								setAutoAck.mutate({ enabled: checked })
+							}
+						/>
+					</div>
+				) : null}
 			</CardContent>
 		</Card>
 	);

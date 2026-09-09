@@ -49,6 +49,14 @@ export function DailyBrief() {
 						label="Bookings missing details"
 						value={data.bookingsMissingDetails}
 					/>
+					<StatCard
+						label="Acknowledgements sent"
+						value={data.acknowledgementsSent}
+					/>
+					<StatCard
+						label="Agent actions pending"
+						value={data.agentActionsPending}
+					/>
 				</StatGroup>
 
 				{rows.length > 0 ? (
