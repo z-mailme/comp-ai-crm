@@ -5,6 +5,8 @@ import {
 	CommunicationDirection,
 	db,
 } from "@crm/db";
+import { recordKnowledge } from "@crm/db/knowledge";
+import { SETTINGS_ID } from "@crm/db/settings";
 import { drainMemoryBridge } from "../agent/lib/event-bridge";
 import { detectPop } from "../agent/lib/pop-detect";
 
@@ -101,6 +103,13 @@ async function seedIncoming(
 }
 
 async function clean(): Promise<void> {
+	await db.appSetting.updateMany({
+		where: { id: SETTINGS_ID },
+		data: { popAutoAcknowledge: false },
+	});
+	await db.businessKnowledge.deleteMany({
+		where: { subject: { contains: suffix } },
+	});
 	await db.businessEvent.deleteMany({
 		where: { idempotencyKey: { contains: suffix } },
 	});
@@ -222,5 +231,140 @@ describe("drainMemoryBridge", () => {
 			where: { type: "POP_RECEIVED", correlationId: event.id },
 		});
 		expect(pops).toBe(1);
+	});
+});
+
+async function setPolicy(enabled: boolean): Promise<void> {
+	await db.appSetting.upsert({
+		where: { id: SETTINGS_ID },
+		create: { id: SETTINGS_ID, popAutoAcknowledge: enabled },
+		update: { popAutoAcknowledge: enabled },
+	});
+}
+
+describe("safe-auto acknowledgement", () => {
+	it("sends exactly once through the injected sender when the policy is on", async () => {
+		await setPolicy(true);
+
+		const { event } = await seedIncoming("auto-ack", {
+			subject: "RE: Invoice INV-2026-055",
+			body: "Proof of payment — R8,000 paid this morning. Reference: INV-2026-055",
+			withBooking: true,
+		});
+
+		const sent: string[] = [];
+		const fakeSend = async (eventId: string): Promise<string> => {
+			sent.push(eventId);
+			return "sent";
+		};
+
+		await drainMemoryBridge({ send: fakeSend });
+
+		const pop = await db.businessEvent.findFirst({
+			where: { type: "POP_RECEIVED", correlationId: event.id },
+		});
+		expect(pop).not.toBeNull();
+		expect(sent).toEqual([pop?.id]);
+
+		const data = pop?.data as { acknowledgementApproved?: boolean };
+		expect(data.acknowledgementApproved).toBe(true);
+
+		const audit = await db.businessEvent.findFirst({
+			where: { type: "pop.acknowledgement.sent", correlationId: event.id },
+		});
+		expect(audit).toBeNull();
+
+		const confirmed = await db.businessEvent.findFirst({
+			where: { type: "PAYMENT_CONFIRMED", correlationId: event.id },
+		});
+		expect(confirmed).toBeNull();
+
+		await db.businessEventOutbox.updateMany({
+			where: { businessEventId: event.id },
+			data: { status: "PENDING", nextAttemptAt: null },
+		});
+
+		await drainMemoryBridge({ send: fakeSend });
+		expect(sent).toHaveLength(1);
+	});
+
+	it("does not send when the message carries a dispute signal", async () => {
+		await setPolicy(true);
+
+		const { event } = await seedIncoming("dispute", {
+			subject: "I want a refund",
+			body: "I want a refund. Proof of payment — R8,000 paid this morning. Reference: INV-9",
+		});
+
+		const sent: string[] = [];
+		await drainMemoryBridge({
+			send: async (eventId: string) => {
+				sent.push(eventId);
+				return "sent";
+			},
+		});
+
+		const pop = await db.businessEvent.findFirst({
+			where: { type: "POP_RECEIVED", correlationId: event.id },
+		});
+		expect(pop).not.toBeNull();
+		expect(sent).toHaveLength(0);
+
+		const data = pop?.data as { acknowledgementApproved?: boolean };
+		expect(data.acknowledgementApproved ?? false).toBe(false);
+	});
+
+	it("stays a draft when the policy flag is off", async () => {
+		await setPolicy(false);
+
+		const { event } = await seedIncoming("policy-off", {
+			subject: "POP attached",
+			body: "Proof of payment — R3,400 paid in full. Reference: INV-22",
+		});
+
+		const sent: string[] = [];
+		await drainMemoryBridge({
+			send: async (eventId: string) => {
+				sent.push(eventId);
+				return "sent";
+			},
+		});
+
+		const pop = await db.businessEvent.findFirst({
+			where: { type: "POP_RECEIVED", correlationId: event.id },
+		});
+		expect(pop).not.toBeNull();
+		expect(sent).toHaveLength(0);
+	});
+});
+
+describe("business brain to agent acknowledgement", () => {
+	it("uses recorded communication style in the suggested acknowledgement", async () => {
+		await setPolicy(false);
+
+		const { event, contact } = await seedIncoming("brain", {
+			subject: "POP attached",
+			body: "Proof of payment — R4,200 paid in full. Reference: INV-77",
+		});
+
+		await recordKnowledge(db, {
+			kind: "COMMUNICATION_STYLE",
+			subject: `formal and brief ${suffix}`,
+			detail: "The client prefers short formal replies.",
+			sourceType: BusinessEventSource.CRM,
+			contactId: contact.id,
+			humanConfirmed: true,
+		});
+
+		await drainMemoryBridge({ send: async () => "skipped" });
+
+		const pop = await db.businessEvent.findFirst({
+			where: { type: "POP_RECEIVED", correlationId: event.id },
+		});
+		const data = pop?.data as { suggestedAcknowledgement?: string };
+		expect(data.suggestedAcknowledgement).toContain("R4,200");
+		expect(data.suggestedAcknowledgement).toContain(
+			`(Style note: formal and brief ${suffix})`,
+		);
 	});
 });

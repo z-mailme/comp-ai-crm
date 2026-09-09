@@ -1,9 +1,18 @@
-import { ActivityType, BusinessEventSource, db } from "@crm/db";
+import { ActivityType, BusinessEventSource, db, type Prisma } from "@crm/db";
 import { currentKnowledge } from "@crm/db/knowledge";
+import { readPopAutoAcknowledge } from "@crm/db/settings";
+import { agentEventTriggerConfig } from "@crm/validation/agent-manifest";
+import { z } from "zod";
 import { DISPATCH } from "./dispatch-config";
 import { detectPop } from "./pop-detect";
 
 const BOOKING_MATCH_WINDOW_MS = 180 * 24 * 60 * 60 * 1000;
+
+const COMMUNICATION_EVENT_TYPES = {
+	"communication.received": "communication.received",
+	"communication.sent": "communication.sent",
+	POP_RECEIVED: "pop.received",
+} as const;
 
 export type BridgeOutcome = {
 	processed: number;
@@ -11,7 +20,11 @@ export type BridgeOutcome = {
 	failed: number;
 };
 
-export async function drainMemoryBridge(): Promise<BridgeOutcome> {
+export async function drainMemoryBridge(options?: {
+	send?: AcknowledgementSender;
+}): Promise<BridgeOutcome> {
+	const send = options?.send ?? sendAcknowledgementViaApi;
+
 	const rows = await db.businessEventOutbox.findMany({
 		where: {
 			destination: "memory-bridge",
@@ -52,15 +65,16 @@ export async function drainMemoryBridge(): Promise<BridgeOutcome> {
 	let failed = 0;
 
 	for (const row of rows) {
-		await db.businessEventOutbox.update({
-			where: { id: row.id },
+		const claimed = await db.businessEventOutbox.updateMany({
+			where: { id: row.id, status: "PENDING" },
 			data: { status: "SENDING", attemptCount: { increment: 1 } },
 		});
+		if (claimed.count === 0) continue;
 
 		try {
-			const pop = await processEvent(row.businessEvent);
+			const pop = await processEvent(row.businessEvent, send);
 
-			await db.businessEventOutbox.update({
+			await db.businessEventOutbox.updateMany({
 				where: { id: row.id },
 				data: { status: "SENT", sentAt: new Date() },
 			});
@@ -78,7 +92,7 @@ export async function drainMemoryBridge(): Promise<BridgeOutcome> {
 			const exhausted =
 				(attempt?.attemptCount ?? 1) >= DISPATCH.bridge.maxAttempts;
 
-			await db.businessEventOutbox.update({
+			await db.businessEventOutbox.updateMany({
 				where: { id: row.id },
 				data: {
 					status: exhausted ? "FAILED" : "PENDING",
@@ -92,23 +106,35 @@ export async function drainMemoryBridge(): Promise<BridgeOutcome> {
 	return { processed, pops, failed };
 }
 
-async function processEvent(event: {
-	id: string;
-	type: string;
-	occurredAt: Date;
-	contactId: string | null;
-	companyId: string | null;
-	dealId: string | null;
-	conversationId: string | null;
-	messageId: string | null;
-	actorUserId: string | null;
-	message: {
-		subject: string | null;
-		body: string | null;
-		sender: unknown;
-		sentAt: Date | null;
-	} | null;
-}): Promise<boolean> {
+async function processEvent(
+	event: {
+		id: string;
+		type: string;
+		occurredAt: Date;
+		contactId: string | null;
+		companyId: string | null;
+		dealId: string | null;
+		conversationId: string | null;
+		messageId: string | null;
+		actorUserId: string | null;
+		message: {
+			subject: string | null;
+			body: string | null;
+			sender: unknown;
+			sentAt: Date | null;
+		} | null;
+	},
+	send: AcknowledgementSender,
+): Promise<boolean> {
+	const triggerType =
+		COMMUNICATION_EVENT_TYPES[
+			event.type as keyof typeof COMMUNICATION_EVENT_TYPES
+		];
+
+	if (triggerType) {
+		await queueAgentTriggers(event, triggerType);
+	}
+
 	if (event.type !== "communication.received" || !event.message) {
 		return false;
 	}
@@ -118,7 +144,7 @@ async function processEvent(event: {
 
 	const booking = await matchBooking(event.contactId, event.companyId);
 
-	await db.businessEvent.upsert({
+	const popEvent = await db.businessEvent.upsert({
 		where: { idempotencyKey: `pop:${event.id}` },
 		create: {
 			type: "POP_RECEIVED",
@@ -175,6 +201,10 @@ async function processEvent(event: {
 			},
 		});
 	}
+
+	await queueAgentTriggers(event, "pop.received");
+
+	await evaluateSafeAuto(popEvent, event, detection, send);
 
 	return true;
 }
@@ -254,4 +284,149 @@ async function acknowledgementFor(
 
 	const tone = style[0]?.subject;
 	return tone ? `${base}\n\n(Style note: ${tone})` : base;
+}
+
+async function queueAgentTriggers(
+	event: {
+		id: string;
+		occurredAt: Date;
+		contactId: string | null;
+	},
+	eventType: string,
+): Promise<number> {
+	if (!event.contactId) return 0;
+
+	const triggers = await db.agentTrigger.findMany({
+		where: {
+			enabled: true,
+			type: "EVENT",
+			agent: { status: "LIVE" },
+		},
+		select: { id: true, config: true },
+	});
+
+	const matching = triggers.filter((trigger) => {
+		const config = agentEventTriggerConfig.safeParse(trigger.config);
+		return config.success && config.data.event === eventType;
+	});
+
+	if (matching.length === 0) return 0;
+
+	const existing = await db.agentTask.findFirst({
+		where: {
+			kind: "agent-event",
+			contactId: event.contactId,
+			payload: { path: ["data", "eventId"], equals: event.id },
+		},
+		select: { id: true },
+	});
+	if (existing) return 0;
+
+	await db.agentTask.create({
+		data: {
+			kind: "agent-event",
+			reason: eventType,
+			contactId: event.contactId,
+			payload: {
+				type: eventType,
+				record: { kind: "contact", id: event.contactId },
+				occurredAt: event.occurredAt.toISOString(),
+				data: { eventId: event.id },
+			} as Prisma.InputJsonValue,
+			priority: 5,
+			budget: 1,
+			dueAt: new Date(),
+		},
+	});
+
+	return 1;
+}
+
+const DISPUTE_SIGNAL = /refund|dispute|angry|unhappy|complain|cancel/i;
+
+type AcknowledgementSender = (eventId: string) => Promise<string>;
+
+const bridgeEventData = z
+	.object({
+		acknowledgementApproved: z.boolean().catch(false),
+	})
+	.passthrough()
+	.catch({ acknowledgementApproved: false });
+
+async function evaluateSafeAuto(
+	popEvent: { id: string },
+	event: {
+		contactId: string | null;
+		message: { subject: string | null; body: string | null } | null;
+	},
+	detection: { amount: number | null; reference: string | null },
+	send: AcknowledgementSender,
+): Promise<void> {
+	const conditions = {
+		strongDetection: detection.amount !== null && detection.reference !== null,
+		senderIdentified: event.contactId !== null,
+		noDispute: !DISPUTE_SIGNAL.test(
+			`${event.message?.subject ?? ""} ${event.message?.body ?? ""}`,
+		),
+	};
+
+	if (!Object.values(conditions).every(Boolean)) return;
+
+	if (!(await readPopAutoAcknowledge(db))) return;
+
+	const current = await db.businessEvent.findUnique({
+		where: { id: popEvent.id },
+		select: { data: true },
+	});
+
+	const data = bridgeEventData.parse(current?.data ?? {});
+	if (data.acknowledgementApproved) return;
+
+	await db.businessEvent.update({
+		where: { id: popEvent.id },
+		data: {
+			data: {
+				...data,
+				acknowledgementApproved: true,
+			} as Prisma.InputJsonValue,
+		},
+	});
+
+	try {
+		await send(popEvent.id);
+	} catch (error) {
+		console.error(
+			`[event-bridge] POP acknowledgement failed for ${popEvent.id}: ${
+				error instanceof Error ? error.message : String(error)
+			}`,
+		);
+	}
+}
+
+async function sendAcknowledgementViaApi(eventId: string): Promise<string> {
+	const base = process.env.API_URL?.trim() || "http://localhost:3001";
+	const secret = process.env.AGENT_BRIDGE_SECRET?.trim();
+
+	if (!secret) {
+		throw new Error(
+			"AGENT_BRIDGE_SECRET is not set; acknowledgement stays a draft.",
+		);
+	}
+
+	const response = await fetch(`${base}/internal/gmail/pop-acknowledgement`, {
+		method: "POST",
+		headers: {
+			authorization: `Bearer ${secret}`,
+			"content-type": "application/json",
+		},
+		body: JSON.stringify({ eventId }),
+		signal: AbortSignal.timeout(30_000),
+	});
+
+	if (!response.ok) {
+		throw new Error(`The API answered HTTP ${response.status}.`);
+	}
+
+	const result = (await response.json()) as { status?: string };
+	return result.status ?? "unknown";
 }
