@@ -5,9 +5,11 @@ import {
 	readAgentModel,
 	readArchiveRetentionDays,
 	readContextDevKey,
+	readPopAutoAcknowledgeState,
 	writeAgentModel,
 	writeArchiveRetentionDays,
 	writeContextDevKey,
+	writePopAutoAcknowledge,
 } from "@crm/db/settings";
 import { AI_PROVIDERS, findProviderModel } from "@crm/validation/ai-providers";
 import { BadRequestException, Injectable, Logger } from "@nestjs/common";
@@ -22,6 +24,7 @@ import type {
 	ArchiveRetentionSettings,
 	CatalogModel,
 	ModelCatalogResult,
+	PopAutoAcknowledgeSettings,
 	ResearchKeySettings,
 } from "./settings.contracts";
 
@@ -225,6 +228,23 @@ export class SettingsService {
 		});
 
 		return { days: saved };
+	}
+
+	async popAutoAcknowledge(): Promise<PopAutoAcknowledgeSettings> {
+		return readPopAutoAcknowledgeState(this.db);
+	}
+
+	async setPopAutoAcknowledge(
+		enabled: boolean,
+	): Promise<PopAutoAcknowledgeSettings> {
+		await writePopAutoAcknowledge(this.db, enabled);
+
+		this.logger.log({
+			message: "POP auto acknowledgement changed",
+			enabled,
+		});
+
+		return readPopAutoAcknowledgeState(this.db);
 	}
 }
 

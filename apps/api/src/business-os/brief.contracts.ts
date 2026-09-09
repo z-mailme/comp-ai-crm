@@ -9,6 +9,8 @@ export const briefDailyOutput = z.object({
 	popReceived: z.number(),
 	bookingsMissingDetails: z.number(),
 	unreadMessages: z.number(),
+	acknowledgementsSent: z.number(),
+	agentActionsPending: z.number(),
 });
 
 export type BriefDailyOutput = z.infer<typeof briefDailyOutput>;

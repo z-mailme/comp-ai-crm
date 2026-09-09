@@ -15,9 +15,12 @@ import { GoogleRouter } from "./google.router";
 import { GoogleConnectionService } from "./google-connection.service";
 import { GoogleSyncService } from "./google-sync.service";
 import { MailboxListService } from "./mailbox-list.service";
+import { PopAcknowledgementController } from "./pop-acknowledgement.controller";
+import { PopAcknowledgementService } from "./pop-acknowledgement.service";
 
 @Module({
 	imports: [TrpcModule, MailboxModule, AgentModule],
+	controllers: [PopAcknowledgementController],
 	providers: [
 		CalendarClient,
 		CalendarSyncService,
@@ -31,6 +34,7 @@ import { MailboxListService } from "./mailbox-list.service";
 		GoogleConnectionService,
 		ConversationService,
 		MailboxListService,
+		PopAcknowledgementService,
 		GoogleRouter,
 	],
 	exports: [

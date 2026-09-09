@@ -83,6 +83,23 @@ export const archiveRetentionOutput = z.object({
 
 export type ArchiveRetentionSettings = z.infer<typeof archiveRetentionOutput>;
 
+export const popAutoAcknowledgeOutput = z.object({
+	enabled: z.boolean(),
+	killSwitch: z.boolean(),
+});
+
+export type PopAutoAcknowledgeSettings = z.infer<
+	typeof popAutoAcknowledgeOutput
+>;
+
+export const setPopAutoAcknowledgeInput = z.object({
+	enabled: z.boolean(),
+});
+
+export type SetPopAutoAcknowledgeInput = z.infer<
+	typeof setPopAutoAcknowledgeInput
+>;
+
 export const setAgentModelInput = z.object({
 	modelId: z.string().trim().min(1).max(200).nullable(),
 });

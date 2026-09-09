@@ -35,6 +35,8 @@ export class BriefService {
 			popReceived,
 			bookingsMissingDetails,
 			unreadMessages,
+			acknowledgementsSent,
+			agentActionsPending,
 		] = await Promise.all([
 			this.db.calendarEvent.count({
 				where: {
@@ -81,6 +83,15 @@ export class BriefService {
 			this.db.conversation.aggregate({
 				_sum: { unreadCount: true },
 			}),
+			this.db.businessEvent.count({
+				where: {
+					type: "pop.acknowledgement.sent",
+					occurredAt: { gte: yesterday },
+				},
+			}),
+			this.db.approvalRequest.count({
+				where: { status: "PENDING" },
+			}),
 		]);
 
 		return {
@@ -92,6 +103,8 @@ export class BriefService {
 			popReceived,
 			bookingsMissingDetails,
 			unreadMessages: unreadMessages._sum.unreadCount ?? 0,
+			acknowledgementsSent,
+			agentActionsPending,
 		};
 	}
 

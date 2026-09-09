@@ -9,9 +9,11 @@ import {
 	aiProviderStatusOutput,
 	archiveRetentionOutput,
 	modelCatalogOutput,
+	popAutoAcknowledgeOutput,
 	researchKeyOutput,
 	setAgentModelInput,
 	setArchiveRetentionDaysInput,
+	setPopAutoAcknowledgeInput,
 	setResearchKeyInput,
 	testProviderInput,
 	testProviderOutput,
@@ -102,5 +104,24 @@ export class SettingsRouter {
 		@Input() input: z.infer<typeof setArchiveRetentionDaysInput>,
 	) {
 		return this.settings.setArchiveRetention(input.days);
+	}
+
+	@Query({
+		output: popAutoAcknowledgeOutput,
+		meta: restMeta("GET", "/settings/pop-auto-acknowledge", ["Settings"]),
+	})
+	async popAutoAcknowledge() {
+		return this.settings.popAutoAcknowledge();
+	}
+
+	@Mutation({
+		input: setPopAutoAcknowledgeInput,
+		output: popAutoAcknowledgeOutput,
+		meta: restMeta("PATCH", "/settings/pop-auto-acknowledge", ["Settings"]),
+	})
+	async setPopAutoAcknowledge(
+		@Input() input: z.infer<typeof setPopAutoAcknowledgeInput>,
+	) {
+		return this.settings.setPopAutoAcknowledge(input.enabled);
 	}
 }
