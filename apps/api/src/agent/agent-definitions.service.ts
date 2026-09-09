@@ -9,7 +9,6 @@ import {
 } from "@nestjs/common";
 import { z } from "zod";
 import { InjectDatabase } from "../database/database.constants";
-import { seedStarterAgents } from "./starter-agents";
 import { AgentAccessService } from "./agent-access.service";
 import { AgentTriggerService } from "./agent-trigger.service";
 import { TEAM_AGENT_STATUSES } from "./agent-visibility";
@@ -20,6 +19,7 @@ import {
 	type AgentUpdateInput,
 	agentManifest,
 } from "./agents.contracts";
+import { seedStarterAgents } from "./starter-agents";
 
 const INSTRUCTIONS_PATH = "agent/instructions.md";
 

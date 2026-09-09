@@ -1,7 +1,6 @@
-import type { Db } from "@crm/db";
+import type { Db, Prisma } from "@crm/db";
 import { DEFAULT_AGENT_MODEL } from "@crm/db/settings";
 import { parseAgentManifest } from "@crm/validation/agent-manifest";
-import type { Prisma } from "@crm/db";
 
 export const AUTONOMY = {
 	OBSERVE: 0,

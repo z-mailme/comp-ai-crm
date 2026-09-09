@@ -1,7 +1,7 @@
 import { afterAll, describe, expect, it } from "bun:test";
 import { db } from "@crm/db";
 import { parseAgentManifest } from "@crm/validation/agent-manifest";
-import { seedStarterAgents, STARTER_AGENTS } from "../src/agent/starter-agents";
+import { STARTER_AGENTS, seedStarterAgents } from "../src/agent/starter-agents";
 
 const suffix = process.env.TEST_RUN_ID ?? "starter-agents-spec";
 
