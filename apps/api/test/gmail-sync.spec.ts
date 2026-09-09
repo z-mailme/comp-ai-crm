@@ -126,6 +126,29 @@ class FakeGmail {
 			retryable: false,
 		};
 	}
+
+	readonly getMetadataIds: string[] = [];
+
+	async getMessageMetadata(
+		_accessToken: string,
+		id: string,
+	): Promise<MailboxResult<GmailMessage>> {
+		this.getMetadataIds.push(id);
+		const message = this.messages.get(id);
+		if (message) {
+			return ok({
+				id: message.id,
+				threadId: message.threadId,
+				labelIds: message.labelIds,
+			});
+		}
+
+		return {
+			outcome: "failed",
+			reason: `Missing test message ${id}.`,
+			retryable: false,
+		};
+	}
 }
 
 type Kit = {
@@ -1320,8 +1343,11 @@ describe("GmailSyncService mailbox mirror", () => {
 
 		await setup.service.sync(setup.row);
 
-		expect(setup.gmail.historyCalls[0]?.historyTypes).toBe(
-			"messageAdded,messageDeleted,labelAdded,labelRemoved",
-		);
+		expect(setup.gmail.historyCalls[0]?.historyTypes).toEqual([
+			"messageAdded",
+			"messageDeleted",
+			"labelAdded",
+			"labelRemoved",
+		]);
 	});
 });

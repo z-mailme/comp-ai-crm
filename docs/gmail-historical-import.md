@@ -91,7 +91,7 @@ Cancel preserves imported email.
 
 The live Gmail history cursor is not read or updated by historical import.
 
-The strict backfill path skips Gmail ids that already exist.
+The strict backfill path skips Gmail ids that already exist with complete mirror metadata.
 
 The mailbox writer enforces RFC message id uniqueness.
 
@@ -129,9 +129,29 @@ Do not reset the imported counters.
 
 Resume clears failed chunk state and requeues the same chunk.
 
-Strict backfill skips Gmail ids that already exist.
+Strict backfill skips Gmail ids that already exist with complete mirror metadata.
 
 The same chunk continues without duplicate email messages, threads, activities, conversations, or BusinessEvents.
+
+## Mirror Metadata Refresh
+
+A stored Gmail row with `gmailThreadId` null predates the Gmail mirror columns.
+
+One migration added `gmailThreadId` and `labelIds` together, so the null thread id marks exactly those rows.
+
+Strict backfill fetches Gmail metadata for them instead of skipping them.
+
+The refresh updates only `gmailThreadId` and `labelIds` on the existing row.
+
+It never inserts a duplicate `EmailMessage`.
+
+It never touches CRM links, activities, or message content.
+
+Unread, starred, and important state derive from `labelIds` at read time.
+
+The backfill outcome counts written, refreshed, and already stored messages separately.
+
+Chunks track `messagesRefreshed` and jobs track `refreshedMessages`.
 
 ## Post-Deploy Checks
 

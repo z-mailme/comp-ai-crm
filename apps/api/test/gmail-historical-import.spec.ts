@@ -685,6 +685,42 @@ describe("GmailHistoricalImportService worker", () => {
 		expect(updated?.messagesRemaining).toBe(0);
 	});
 
+	it("counts refreshed legacy metadata separately from written and skipped", async () => {
+		const setup = await kit("refreshed-counts");
+		const now = new Date("2025-01-01T00:00:00.000Z");
+		const { job } = await runningLeaf(setup, {
+			leaseExpiresAt: null,
+			messagesMatched: 4,
+			messagesRemaining: 4,
+			now,
+		});
+
+		setup.gmail.push({
+			status: "synced",
+			messagesMatched: 4,
+			messagesWritten: 1,
+			messagesRefreshed: 2,
+			messagesAttempted: 1,
+			messagesRemaining: 0,
+		});
+		const tick = await setup.service.tick(now);
+		const [updated] = await chunks(job.id);
+
+		expect(tick.processed).toBe(1);
+		expect(updated?.status).toBe(MailboxHistoricalImportChunkStatus.COMPLETED);
+		expect(updated?.messagesWritten).toBe(1);
+		expect(updated?.messagesRefreshed).toBe(2);
+		expect(updated?.messagesAlreadyStored).toBe(1);
+		expect(updated?.messagesRemaining).toBe(0);
+
+		const output = await setup.service.byId(setup.userId, job.id);
+		expect(output.writtenMessages).toBe(1);
+		expect(output.refreshedMessages).toBe(2);
+		expect(output.alreadyStoredMessages).toBe(1);
+		expect(output.processedMessages).toBe(4);
+		expect(output.remainingMessages).toBe(0);
+	});
+
 	it("reclaims a running chunk after its job lease expires", async () => {
 		const setup = await kit("running-expired-lease");
 		const now = new Date("2025-01-01T00:05:00.000Z");

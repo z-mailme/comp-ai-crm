@@ -97,4 +97,55 @@ describe("MailboxApiClient", () => {
 		expect(result.outcome).toBe("failed");
 		if (result.outcome === "failed") expect(result.retryable).toBe(true);
 	});
+
+	it("repeats an array query parameter instead of joining it", async () => {
+		let requested: string | null = null;
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requested = String(input);
+			return new Response(JSON.stringify({ ok: true }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+
+		await client.get("https://example.test/history", "token", {
+			startHistoryId: "123",
+			historyTypes: [
+				"messageAdded",
+				"messageDeleted",
+				"labelAdded",
+				"labelRemoved",
+			],
+		});
+
+		const url = new URL(requested ?? "");
+		expect(url.searchParams.getAll("historyTypes")).toEqual([
+			"messageAdded",
+			"messageDeleted",
+			"labelAdded",
+			"labelRemoved",
+		]);
+		expect(url.searchParams.get("startHistoryId")).toBe("123");
+		expect(requested).not.toContain("messageAdded%2C");
+	});
+
+	it("keeps scalar query parameters singular", async () => {
+		let requested: string | null = null;
+		globalThis.fetch = (async (input: string | URL | Request) => {
+			requested = String(input);
+			return new Response(JSON.stringify({ ok: true }), {
+				status: 200,
+				headers: { "content-type": "application/json" },
+			});
+		}) as unknown as typeof fetch;
+
+		await client.get("https://example.test/messages", "token", {
+			maxResults: 100,
+			includeSpamTrash: true,
+		});
+
+		const url = new URL(requested ?? "");
+		expect(url.searchParams.getAll("maxResults")).toEqual(["100"]);
+		expect(url.searchParams.get("includeSpamTrash")).toBe("true");
+	});
 });

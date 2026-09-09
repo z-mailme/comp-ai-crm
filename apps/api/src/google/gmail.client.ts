@@ -110,12 +110,12 @@ export class GmailClient {
 		options: {
 			startHistoryId: string;
 			pageToken?: string;
-			historyTypes?: string;
+			historyTypes?: readonly string[];
 		},
 	): Promise<MailboxResult<HistoryList>> {
 		return this.api.get<HistoryList>(`${BASE}/history`, accessToken, {
 			startHistoryId: options.startHistoryId,
-			historyTypes: options.historyTypes ?? "messageAdded",
+			historyTypes: options.historyTypes ?? ["messageAdded"],
 			maxResults: GMAIL_SYNC.incremental.historyPageSize,
 			pageToken: options.pageToken,
 		});
@@ -150,6 +150,15 @@ export class GmailClient {
 	): Promise<MailboxResult<GmailMessage>> {
 		return this.api.get<GmailMessage>(`${BASE}/messages/${id}`, accessToken, {
 			format: "full",
+		});
+	}
+
+	async getMessageMetadata(
+		accessToken: string,
+		id: string,
+	): Promise<MailboxResult<GmailMessage>> {
+		return this.api.get<GmailMessage>(`${BASE}/messages/${id}`, accessToken, {
+			format: "metadata",
 		});
 	}
 
