@@ -1,6 +1,9 @@
 import { z } from "zod";
 
-export const availabilityResourceTypes = ["360_PHOTO_BOOTH"] as const;
+export const availabilityResourceTypes = [
+	"360_PHOTO_BOOTH",
+	"OPERATOR",
+] as const;
 export const bookingStatuses = [
 	"PROVISIONAL",
 	"HELD",

@@ -56,6 +56,7 @@ model User {
   conversationSubmissions            AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
   conversationFeedback               AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
   slackMemberMatch                   SlackMemberMatch?
+  createdExpenses                    Expense[]                     @relation("ExpenseCreator")
 
   members     Member[]
   invitations Invitation[]
@@ -227,6 +228,7 @@ enum BookingStatus {
 
 enum BookingResourceType {
   PHOTO_BOOTH_360 @map("360_PHOTO_BOOTH")
+  OPERATOR
 }
 
 enum ActivityType {
@@ -1049,6 +1051,7 @@ model Deal {
 
   contacts     DealContact[]
   bookings     Booking[]
+  expenses     Expense[]
   activities   Activity[]
   emailThreads EmailThread[]
   fieldValues  FieldValue[]
@@ -1090,6 +1093,7 @@ model Booking {
   source RecordSource @default(MANUAL)
 
   resources                  BookingResource[]
+  expenses                   Expense[]
   emailThreads               EmailThread[]
   communicationConversations Conversation[]
   businessEvents             BusinessEvent[]
@@ -1133,6 +1137,63 @@ model BookingResourceCapacity {
   updatedAt DateTime @updatedAt
 
   @@map("bookingResourceCapacity")
+}
+
+enum ExpenseCategory {
+  OPERATOR_LABOUR
+  TRAVEL
+  SUPPLIES
+  EQUIPMENT
+  PRINTING
+  OTHER
+}
+
+enum ExpenseSource {
+  MANUAL
+  CALCULATED
+}
+
+enum ExpenseStatus {
+  RECORDED
+  NEEDS_REVIEW
+  CANCELLED
+}
+
+model Expense {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+
+  dealId String?
+  deal   Deal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  category ExpenseCategory
+  source   ExpenseSource  @default(MANUAL)
+  status   ExpenseStatus  @default(RECORDED)
+
+  amountCents Int
+  currency    String @default("ZAR")
+
+  incurredAt DateTime @db.Date
+  note       String?
+  evidence   Json?
+
+  calculationKey String? @unique
+
+  createdById String?
+  createdBy   User?   @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, incurredAt])
+  @@index([bookingId])
+  @@index([dealId])
+  @@map("expense")
 }
 
 enum RateSource {
@@ -1936,6 +1997,7 @@ model BusinessUnit {
   businessTasks           BusinessTask[]
   automationRules         AutomationRule[]
   agentSafetyPolicies     AgentSafetyPolicy[]
+  expenses                Expense[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

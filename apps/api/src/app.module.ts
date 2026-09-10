@@ -24,6 +24,7 @@ import { DatabaseModule } from "./database/database.module";
 import { DealsModule } from "./deals/deals.module";
 import { EnrichmentModule } from "./enrichment/enrichment.module";
 import { FieldsModule } from "./fields/fields.module";
+import { FinanceModule } from "./finance/finance.module";
 import { GoogleModule } from "./google/google.module";
 import { HealthModule } from "./health/health.module";
 import { LoggingModule } from "./logging/logging.module";
@@ -74,6 +75,7 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		AnalyticsModule,
 		EnrichmentModule,
 		DashboardModule,
+		FinanceModule,
 		SearchModule,
 		MailboxModule,
 		MarketingModule,

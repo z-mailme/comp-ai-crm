@@ -1606,7 +1606,7 @@ type DirectBusinessUnitScope = {
 	OR?: { businessUnitId: string | null }[];
 };
 
-function directBusinessUnitScope(
+export function directBusinessUnitScope(
 	context: BusinessContext,
 ): DirectBusinessUnitScope {
 	if (context.includeUnscoped) {
@@ -1809,7 +1809,9 @@ function calendarEventScope(
 	};
 }
 
-function bookingScope(context: BusinessContext): Prisma.BookingWhereInput {
+export function bookingScope(
+	context: BusinessContext,
+): Prisma.BookingWhereInput {
 	if (context.includeUnscoped) return {};
 
 	return {

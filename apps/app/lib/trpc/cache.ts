@@ -33,6 +33,7 @@ export type CrmCache = {
 	conversationRemoved(id: string): Promise<void>;
 	conversation(id?: string, options?: Options): Promise<void>;
 	calendar(options?: Options): Promise<void>;
+	finance(options?: Options): Promise<void>;
 	googleAnalytics(options?: Options): Promise<void>;
 	activity(options?: Options): Promise<void>;
 	google(options?: Options): Promise<void>;
@@ -249,6 +250,13 @@ export function useCrmCache(): CrmCache {
 
 		calendar: (options) =>
 			run([trpc.businessOs.calendar.queryKey()], [], options),
+
+		finance: (options) =>
+			run(
+				[trpc.finance.week.queryKey()],
+				[trpc.businessOs.finance.queryKey()],
+				options,
+			),
 
 		googleAnalytics: (options) =>
 			run(
