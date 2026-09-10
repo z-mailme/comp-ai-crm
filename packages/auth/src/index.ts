@@ -30,6 +30,7 @@ export {
 	workspaceRoleOf,
 } from "./organization";
 export {
+	ANALYTICS_SCOPE,
 	CALENDAR_SCOPE,
 	GMAIL_MODIFY_SCOPE,
 	GMAIL_SCOPE,

@@ -2840,6 +2840,9 @@ model AppSetting {
   aiAutomationKillSwitch Boolean @default(false)
   popAutoAcknowledge     Boolean @default(false)
 
+  gaPropertyId   String?
+  gaPropertyName String?
+
   trackingSiteId           String? @unique
   trackingCrossDomain      Boolean @default(true)
   trackingLimitToDomains   Boolean @default(true)

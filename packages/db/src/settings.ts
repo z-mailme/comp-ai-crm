@@ -121,6 +121,40 @@ export async function writeRatesRefreshedAt(
 	});
 }
 
+export type GaPropertySetting = {
+	id: string;
+	name: string | null;
+};
+
+export async function readGaProperty(
+	db: Db,
+): Promise<GaPropertySetting | null> {
+	const row = await db.appSetting.findUnique({
+		where: { id: SETTINGS_ID },
+		select: { gaPropertyId: true, gaPropertyName: true },
+	});
+
+	if (!row?.gaPropertyId) return null;
+
+	return { id: row.gaPropertyId, name: row.gaPropertyName };
+}
+
+export async function writeGaProperty(
+	db: Db,
+	property: GaPropertySetting | null,
+): Promise<void> {
+	const fields = {
+		gaPropertyId: property?.id ?? null,
+		gaPropertyName: property?.name ?? null,
+	};
+
+	await db.appSetting.upsert({
+		where: { id: SETTINGS_ID },
+		create: { id: SETTINGS_ID, ...fields },
+		update: fields,
+	});
+}
+
 export const DEFAULT_ARCHIVE_RETENTION_DAYS = 180;
 
 export const MIN_ARCHIVE_RETENTION_DAYS = 1;

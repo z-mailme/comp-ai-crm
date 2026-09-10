@@ -15,6 +15,7 @@ const t = initTRPC.create();
 const publicProcedure = t.procedure;
 import { timelineInput, timelineOutput, timelineCountsInput, timelineCountsOutput, myTasksInput, myTasksOutput, activityCreateInput, activityCreateOutput, completeInput, completeOutput } from "../activities/activities.contracts";
 import { agentListOutput, agentReviseInput, agentReviseOutput, agentIdInput, agentFilesOutput, agentSaveFileInput, agentSaveFileOutput, agentByIdOutput, agentHistoryInput, agentHistoryOutput, agentActivityOutput, agentUpdateInput, agentUpdateOutput, agentDeployInput, agentDeployOutput, agentPauseOutput, agentResumeOutput, agentArchiveOutput, agentRestoreOutput, agentRemoveOutput, agentRunNowInput, agentRunNowOutput, agentRetryRunInput, agentRetryRunOutput, agentCancelRunInput, agentCancelRunOutput, seedStartersOutput } from "../agent/agents.contracts";
+import { gaStatusOutput, gaPropertiesOutput, setGaPropertyInput, gaWindowInput, gaReportOutput } from "../analytics/analytics.contracts";
 import { apiKeyListInput, apiKeyListOutput, createApiKeyInput, createApiKeyOutput, revokeApiKeyInput, revokeApiKeyOutput } from "../api-keys/api-keys.contracts";
 import { brainJobOutput, brainKnowledgeQueryInput, brainKnowledgeOutput } from "../brain/brain.contracts";
 import { briefDailyOutput, briefExceptionsOutput } from "../business-os/brief.contracts";
@@ -132,6 +133,22 @@ const appRouter = t.router({
     seedStarters: publicProcedure
       .output(seedStartersOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  googleAnalytics: t.router({
+    status: publicProcedure
+      .output(gaStatusOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    properties: publicProcedure
+      .output(gaPropertiesOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setProperty: publicProcedure
+      .input(setGaPropertyInput)
+      .output(gaStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    report: publicProcedure
+      .input(gaWindowInput)
+      .output(gaReportOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   apiKeys: t.router({
     list: publicProcedure

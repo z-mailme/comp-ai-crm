@@ -17,6 +17,8 @@ export const GMAIL_MODIFY_SCOPE =
 	"https://www.googleapis.com/auth/gmail.modify";
 export const CALENDAR_SCOPE =
 	"https://www.googleapis.com/auth/calendar.readonly";
+export const ANALYTICS_SCOPE =
+	"https://www.googleapis.com/auth/analytics.readonly";
 export const OUTLOOK_MAIL_SCOPE = "Mail.Read";
 
 export const SYNC_SCOPES = [GMAIL_SCOPE, CALENDAR_SCOPE] as const;

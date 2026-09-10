@@ -6,10 +6,7 @@ export type EventChipProps = {
 	style?: CSSProperties;
 };
 
-const EVENT_COLOR_CHIPS: Record<
-	CalendarEventColorId,
-	{ background: string; foreground: string }
-> = {
+const EVENT_COLOR_CHIPS = {
 	tomato: { background: "#D93025", foreground: "#FFFFFF" },
 	flamingo: { background: "#E67C73", foreground: "#202124" },
 	tangerine: { background: "#F4511E", foreground: "#202124" },
@@ -21,7 +18,10 @@ const EVENT_COLOR_CHIPS: Record<
 	lavender: { background: "#7986CB", foreground: "#202124" },
 	grape: { background: "#8E24AA", foreground: "#FFFFFF" },
 	graphite: { background: "#616161", foreground: "#FFFFFF" },
-};
+} satisfies Record<
+	CalendarEventColorId,
+	{ background: string; foreground: string }
+>;
 
 export function colorChipProps(
 	colorOverride: CalendarEventColorId | null,

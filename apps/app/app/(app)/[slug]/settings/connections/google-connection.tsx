@@ -47,6 +47,7 @@ import { LocalRelativeTime } from "@/components/local-date-time";
 import { isSyncing, SYNC_POLL_MS } from "@/lib/sync-status";
 import { useCrmCache } from "@/lib/trpc/cache";
 import { useTRPC } from "@/lib/trpc/client";
+import { GoogleAnalyticsConnection } from "./google-analytics-connection";
 
 const SOURCES = {
 	calendar: {
@@ -235,7 +236,19 @@ function ConnectGoogle({
 	);
 }
 
-export function GoogleConnection({
+export function GoogleConnection(props: {
+	slug: string;
+	connectError?: string;
+}) {
+	return (
+		<div className="flex flex-col gap-6">
+			<GoogleMailboxConnection {...props} />
+			<GoogleAnalyticsConnection slug={props.slug} />
+		</div>
+	);
+}
+
+function GoogleMailboxConnection({
 	slug,
 	connectError,
 }: {
