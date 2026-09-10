@@ -23,7 +23,7 @@ export default function CalendarPage({
 	searchParams,
 }: PageProps<"/[slug]/calendar">) {
 	return (
-		<PageShell>
+		<PageShell contained fullWidth>
 			<PageShellHeader>
 				<PageShellHeading>
 					<PageShellTitle>Calendar</PageShellTitle>
@@ -32,7 +32,7 @@ export default function CalendarPage({
 					</PageShellDescription>
 				</PageShellHeading>
 			</PageShellHeader>
-			<PageShellContent>
+			<PageShellContent className="min-h-0">
 				<Suspense fallback={<PageShellLoading />}>
 					<CalendarData searchParams={searchParams} />
 				</Suspense>

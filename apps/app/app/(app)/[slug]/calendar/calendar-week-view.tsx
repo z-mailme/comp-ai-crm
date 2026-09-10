@@ -38,7 +38,7 @@ export function CalendarTimeGrid({
 	const columns = `3.5rem repeat(${days.length}, minmax(0, 1fr))`;
 
 	return (
-		<div className="flex min-w-0 flex-col rounded-lg border bg-card">
+		<div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-lg border bg-card">
 			<div className="grid border-b" style={{ gridTemplateColumns: columns }}>
 				<div />
 				{days.map((day) => (
@@ -81,7 +81,7 @@ export function CalendarTimeGrid({
 				))}
 			</div>
 
-			<div className="max-h-[calc(100vh-20rem)] min-h-[480px] overflow-y-auto">
+			<div className="min-h-0 flex-1 overflow-y-auto">
 				<div
 					className="grid"
 					style={{

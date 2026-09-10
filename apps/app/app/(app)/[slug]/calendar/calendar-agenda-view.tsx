@@ -41,7 +41,7 @@ export function CalendarSchedule({
 	}
 
 	return (
-		<div className="flex flex-col gap-4">
+		<div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
 			{nonEmpty.map((day) => (
 				<section key={day} className="rounded-lg border bg-card">
 					<h2

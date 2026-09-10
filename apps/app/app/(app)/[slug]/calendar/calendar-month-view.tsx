@@ -32,7 +32,7 @@ export function CalendarMonthGrid({
 	const monthIndex = dayFromKey(month).getMonth();
 
 	return (
-		<div className="flex min-w-0 flex-col rounded-lg border bg-card">
+		<div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto rounded-lg border bg-card">
 			<div className="grid grid-cols-7 border-b">
 				{(weeks[0] ?? []).map((day) => (
 					<div

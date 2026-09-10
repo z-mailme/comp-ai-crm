@@ -119,8 +119,8 @@ export function CalendarWorkspace() {
 	const monthDaysCount = daysInMonth(input.date);
 
 	return (
-		<div className="flex flex-col gap-4">
-			<div className="flex flex-col gap-3 rounded-lg border bg-card p-3 lg:flex-row lg:items-center lg:justify-between">
+		<div className="flex min-h-0 flex-1 flex-col gap-4">
+			<div className="flex shrink-0 flex-col gap-3 rounded-lg border bg-card p-3 lg:flex-row lg:items-center lg:justify-between">
 				<div className="flex flex-wrap items-center gap-2">
 					<Button asChild variant="outline" size="icon" aria-label="Previous">
 						<Link href={hrefFor(stepDate(input, -1))}>
@@ -197,8 +197,8 @@ export function CalendarWorkspace() {
 				</div>
 			) : null}
 
-			<div className="flex min-w-0 gap-4">
-				<div className="hidden md:block">
+			<div className="flex min-h-0 min-w-0 flex-1 gap-4">
+				<div className="hidden min-h-0 overflow-y-auto md:block">
 					<CalendarSidebar
 						month={input.date}
 						selectedDay={input.date}
@@ -214,10 +214,10 @@ export function CalendarWorkspace() {
 					/>
 				</div>
 
-				<div className="min-w-0 flex-1">
+				<div className="flex min-h-0 min-w-0 flex-1 flex-col">
 					{input.view === "month" ? (
 						<>
-							<div className="hidden md:block">
+							<div className="hidden min-h-0 flex-1 flex-col md:flex">
 								<CalendarMonthGrid
 									month={input.date}
 									events={events}
@@ -227,7 +227,7 @@ export function CalendarWorkspace() {
 									hrefForDay={hrefForDay}
 								/>
 							</div>
-							<div className="md:hidden">
+							<div className="flex min-h-0 flex-1 flex-col md:hidden">
 								<CalendarSchedule
 									fromDay={monthStartKey(input.date)}
 									dayCount={monthDaysCount}
@@ -242,7 +242,7 @@ export function CalendarWorkspace() {
 
 					{input.view === "week" ? (
 						<>
-							<div className="hidden md:block">
+							<div className="hidden min-h-0 flex-1 flex-col md:flex">
 								<CalendarTimeGrid
 									days={weekDays}
 									events={events}
@@ -252,7 +252,7 @@ export function CalendarWorkspace() {
 									hrefForDay={hrefForDay}
 								/>
 							</div>
-							<div className="md:hidden">
+							<div className="flex min-h-0 flex-1 flex-col md:hidden">
 								<CalendarSchedule
 									fromDay={weekDays[0] ?? input.date}
 									dayCount={7}

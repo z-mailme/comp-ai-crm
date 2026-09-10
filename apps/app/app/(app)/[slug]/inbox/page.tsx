@@ -11,7 +11,7 @@ import { MailboxWorkspace } from "./mailbox-workspace";
 
 export default function InboxPage() {
 	return (
-		<PageShell contained className="gap-4">
+		<PageShell contained fullWidth className="gap-4">
 			<PageShellContent className="flex min-h-0 flex-1 flex-col">
 				<Suspense fallback={<PageShellLoading />}>
 					<InboxData />
