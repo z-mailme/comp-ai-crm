@@ -2775,6 +2775,7 @@ model CalendarEvent {
 
   syncedByUserId String?
   googleEventId  String?
+  colorOverride  String?
 
   attendees CalendarAttendee[]
   activity  Activity?

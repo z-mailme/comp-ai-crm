@@ -32,6 +32,7 @@ export type CrmCache = {
 	removedMany(records: RemovedRecords): Promise<void>;
 	conversationRemoved(id: string): Promise<void>;
 	conversation(id?: string, options?: Options): Promise<void>;
+	calendar(options?: Options): Promise<void>;
 	activity(options?: Options): Promise<void>;
 	google(options?: Options): Promise<void>;
 	microsoft(options?: Options): Promise<void>;
@@ -244,6 +245,9 @@ export function useCrmCache(): CrmCache {
 				[...activityKeys()],
 				options,
 			),
+
+		calendar: (options) =>
+			run([trpc.businessOs.calendar.queryKey()], [], options),
 
 		activity: (options) =>
 			run(

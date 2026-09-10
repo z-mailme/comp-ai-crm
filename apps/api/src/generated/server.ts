@@ -18,7 +18,7 @@ import { agentListOutput, agentReviseInput, agentReviseOutput, agentIdInput, age
 import { apiKeyListInput, apiKeyListOutput, createApiKeyInput, createApiKeyOutput, revokeApiKeyInput, revokeApiKeyOutput } from "../api-keys/api-keys.contracts";
 import { brainJobOutput, brainKnowledgeQueryInput, brainKnowledgeOutput } from "../brain/brain.contracts";
 import { briefDailyOutput, briefExceptionsOutput } from "../business-os/brief.contracts";
-import { businessContextInput, businessOsOverviewOutput, inboxInput, inboxOutput, calendarInput, calendarOutput, conversationInput, conversationDetailOutput, customer360Input, customer360Output, globalSearchInput, globalSearchOutput, approvalsOutput, knowledgeOutput, observabilityOutput, activityFeedInput, activityFeedOutput, bookingsInput, bookingsOutput, analyticsOutput, financeOutput } from "../business-os/business-os.contracts";
+import { businessContextInput, businessOsOverviewOutput, inboxInput, inboxOutput, calendarInput, calendarOutput, setEventColorInput, setEventColorOutput, conversationInput, conversationDetailOutput, customer360Input, customer360Output, globalSearchInput, globalSearchOutput, approvalsOutput, knowledgeOutput, observabilityOutput, activityFeedInput, activityFeedOutput, bookingsInput, bookingsOutput, analyticsOutput, financeOutput } from "../business-os/business-os.contracts";
 import { companyListInput, companyListOutput, companyIdInput, companyDetailOutput, companyOptionsInput, companyOptionOutput, companyCreateInput, companySummaryOutput, companyUpdateArgs, companyArchiveResultOutput, companyBulkOwnerInput, companyBulkResultOutput, companyBulkInput, companyEnrichOutput, companyResearchOutput, setPrimaryContactInput, companySetPrimaryContactOutput } from "../companies/companies.contracts";
 import { contactListInput, contactListOutput, contactIdInput, contactByIdOutput, contactCreateInput, contactBasicOutput, contactUpdateArgs, contactNameOutput, contactEnrichOutput, contactBulkOwnerInput, bulkResultOutput, contactBulkCompanyInput, contactBulkInput, factDecisionInput, decideFactOutput } from "../contacts/contacts.contracts";
 import { conversationListInput, conversationListOutput, builderListOutput, builderResourceSearchInput, builderResourcesOutput, conversationIdInput, builderConversationDetailOutput, conversationEventsInput, conversationEventsOutput, conversationSaveInput, conversationIdOutput, builderConversationCreateInput, builderConversationSubmitInput, builderQuestionResponseInput, builderResponseRatingInput, builderResponseRatingOutput, conversationShareStatusOutput, conversationShareTokenOutput, sharedConversationInput, sharedConversationOutput } from "../conversations/conversations.contracts";
@@ -187,6 +187,10 @@ const appRouter = t.router({
       .input(calendarInput)
       .output(calendarOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setEventColor: publicProcedure
+      .input(setEventColorInput)
+      .output(setEventColorOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     conversation: publicProcedure
       .input(conversationInput)
       .output(conversationDetailOutput)

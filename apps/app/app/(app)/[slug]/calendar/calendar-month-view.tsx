@@ -2,6 +2,7 @@
 
 import { cn } from "@crm/ui/lib/utils";
 import Link from "next/link";
+import type { EventChipProps } from "./calendar-event-colors";
 import {
 	dayFromKey,
 	dayNumber,
@@ -17,14 +18,14 @@ export function CalendarMonthGrid({
 	month,
 	events,
 	todayKey,
-	toneClass,
+	chipProps,
 	onSelectEvent,
 	hrefForDay,
 }: {
 	month: string;
 	events: CalendarEvent[];
 	todayKey: string;
-	toneClass: (calendar: string) => string;
+	chipProps: (event: CalendarEvent) => EventChipProps;
 	onSelectEvent: (event: CalendarEvent) => void;
 	hrefForDay: (dayKey: string) => string;
 }) {
@@ -76,20 +77,24 @@ export function CalendarMonthGrid({
 								>
 									{dayNumber(day)}
 								</Link>
-								{visible.map((event) => (
-									<button
-										key={event.id}
-										type="button"
-										onClick={() => onSelectEvent(event)}
-										className={cn(
-											"truncate rounded-sm border px-1 py-0.5 text-left text-xs",
-											toneClass(event.sourceCalendar),
-										)}
-										title={event.title ?? "Untitled event"}
-									>
-										{event.title ?? "Untitled event"}
-									</button>
-								))}
+								{visible.map((event) => {
+									const chip = chipProps(event);
+									return (
+										<button
+											key={event.id}
+											type="button"
+											onClick={() => onSelectEvent(event)}
+											className={cn(
+												"truncate rounded-sm border px-1 py-0.5 text-left text-xs",
+												chip.className,
+											)}
+											style={chip.style}
+											title={event.title ?? "Untitled event"}
+										>
+											{event.title ?? "Untitled event"}
+										</button>
+									);
+								})}
 								{hidden > 0 ? (
 									<Link
 										href={hrefForDay(day)}

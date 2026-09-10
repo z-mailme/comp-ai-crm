@@ -10,6 +10,7 @@
 		"./agent-manifest": "./src/agent-manifest.ts",
 		"./ai-providers": "./src/ai-providers.ts",
 		"./builder-question": "./src/builder-question.ts",
+		"./calendar-event-colors": "./src/calendar-event-colors.ts",
 		"./enrichment-queue": "./src/enrichment-queue.ts",
 		"./eve-stream": "./src/eve-stream.ts",
 		"./eve-tool": "./src/eve-tool.ts",

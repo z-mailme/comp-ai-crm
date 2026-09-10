@@ -17,6 +17,7 @@ import {
 	KnowledgeItemType,
 	type Prisma,
 } from "@crm/db";
+import { calendarEventColorId } from "@crm/validation/calendar-event-colors";
 import { z } from "zod";
 
 export const businessOsLimitInput = z.object({
@@ -400,6 +401,7 @@ export const calendarOutput = z.object({
 			organizerEmail: z.string().nullable(),
 			recurringEventId: z.string().nullable(),
 			googleEventId: z.string().nullable(),
+			colorOverride: calendarEventColorId.nullable(),
 			sourceCalendar: z.string(),
 			attendees: z.array(
 				z.object({
@@ -418,6 +420,16 @@ export const calendarOutput = z.object({
 			conversation: linkedRecordOutput.nullable(),
 		}),
 	),
+});
+
+export const setEventColorInput = z.object({
+	eventId: z.string().trim().min(1),
+	color: calendarEventColorId.nullable(),
+});
+
+export const setEventColorOutput = z.object({
+	id: z.string(),
+	colorOverride: calendarEventColorId.nullable(),
 });
 
 export const activityFeedInput = z.object({
@@ -561,6 +573,8 @@ export type AnalyticsOutput = z.infer<typeof analyticsOutput>;
 export type FinanceOutput = z.infer<typeof financeOutput>;
 export type CalendarInput = z.infer<typeof calendarInput>;
 export type CalendarOutput = z.infer<typeof calendarOutput>;
+export type SetEventColorInput = z.infer<typeof setEventColorInput>;
+export type SetEventColorOutput = z.infer<typeof setEventColorOutput>;
 
 export const OUTBOX_STATUSES = Object.values(BusinessEventOutboxStatus);
 export const AUTOMATION_EXECUTION_STATUSES = Object.values(

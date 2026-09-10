@@ -8,14 +8,16 @@ import { Icon } from "@crm/ui/components/icon";
 import { Input } from "@crm/ui/components/input";
 import { Spinner } from "@crm/ui/components/spinner";
 import { cn } from "@crm/ui/lib/utils";
-import { useQuery } from "@tanstack/react-query";
+import { useMutation, useQuery } from "@tanstack/react-query";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useMemo, useState } from "react";
+import { useCrmCache } from "@/lib/trpc/cache";
 import { useTRPC } from "@/lib/trpc/client";
 import type { RouterOutputs } from "@/lib/trpc/types";
 import { useWorkspaceUrl } from "@/lib/use-workspace-url";
 import { CalendarSchedule } from "./calendar-agenda-view";
+import { colorChipProps, type EventChipProps } from "./calendar-event-colors";
 import { CalendarEventDialog } from "./calendar-event-dialog";
 import {
 	addDaysToKey,
@@ -73,6 +75,19 @@ export function CalendarWorkspace() {
 	);
 	const [hiddenCalendars, toggleCalendar] = useHiddenCalendars();
 	const todayKey = useTodayKey();
+	const cache = useCrmCache();
+	const setColor = useMutation(
+		trpc.businessOs.setEventColor.mutationOptions({
+			onSuccess: (result) => {
+				setSelectedEvent((current) =>
+					current && current.id === result.id
+						? { ...current, colorOverride: result.colorOverride }
+						: current,
+				);
+				void cache.calendar();
+			},
+		}),
+	);
 
 	if (calendar.isPending || !calendar.data) {
 		return (
@@ -101,6 +116,10 @@ export function CalendarWorkspace() {
 	};
 	const toneClass = (name: string): string =>
 		CHIP_TONES[toneIndex(name)] ?? "border-border bg-muted text-foreground";
+	const chipProps = (event: CalendarEvent): EventChipProps =>
+		colorChipProps(event.colorOverride) ?? {
+			className: toneClass(event.sourceCalendar),
+		};
 	const dotClass = (name: string): string =>
 		DOT_TONES[toneIndex(name)] ?? "bg-border";
 
@@ -222,7 +241,7 @@ export function CalendarWorkspace() {
 									month={input.date}
 									events={events}
 									todayKey={todayKey}
-									toneClass={toneClass}
+									chipProps={chipProps}
 									onSelectEvent={setSelectedEvent}
 									hrefForDay={hrefForDay}
 								/>
@@ -233,7 +252,7 @@ export function CalendarWorkspace() {
 									dayCount={monthDaysCount}
 									events={events}
 									todayKey={todayKey}
-									toneClass={toneClass}
+									chipProps={chipProps}
 									onSelectEvent={setSelectedEvent}
 								/>
 							</div>
@@ -247,7 +266,7 @@ export function CalendarWorkspace() {
 									days={weekDays}
 									events={events}
 									todayKey={todayKey}
-									toneClass={toneClass}
+									chipProps={chipProps}
 									onSelectEvent={setSelectedEvent}
 									hrefForDay={hrefForDay}
 								/>
@@ -258,7 +277,7 @@ export function CalendarWorkspace() {
 									dayCount={7}
 									events={events}
 									todayKey={todayKey}
-									toneClass={toneClass}
+									chipProps={chipProps}
 									onSelectEvent={setSelectedEvent}
 								/>
 							</div>
@@ -270,7 +289,7 @@ export function CalendarWorkspace() {
 							days={[input.date]}
 							events={events}
 							todayKey={todayKey}
-							toneClass={toneClass}
+							chipProps={chipProps}
 							onSelectEvent={setSelectedEvent}
 							hrefForDay={hrefForDay}
 						/>
@@ -282,7 +301,7 @@ export function CalendarWorkspace() {
 							dayCount={AGENDA_DAY_COUNT}
 							events={events}
 							todayKey={todayKey}
-							toneClass={toneClass}
+							chipProps={chipProps}
 							onSelectEvent={setSelectedEvent}
 						/>
 					) : null}
@@ -292,6 +311,12 @@ export function CalendarWorkspace() {
 			<CalendarEventDialog
 				event={selectedEvent}
 				onClose={() => setSelectedEvent(null)}
+				colorPending={setColor.isPending}
+				onSelectColor={(color) => {
+					if (selectedEvent) {
+						setColor.mutate({ eventId: selectedEvent.id, color });
+					}
+				}}
 			/>
 		</div>
 	);
