@@ -217,7 +217,7 @@ export function CalendarWorkspace() {
 			) : null}
 
 			<div className="flex min-h-0 min-w-0 flex-1 gap-4">
-				<div className="hidden min-h-0 overflow-y-auto md:block">
+				<div className="hidden min-h-0 overflow-y-auto lg:block">
 					<CalendarSidebar
 						month={input.date}
 						selectedDay={input.date}

@@ -23,6 +23,7 @@ function PageShell({
 					data-slot="page-shell"
 					className={cn(
 						"flex w-full min-w-0 flex-1 flex-col gap-6",
+						contained && "min-h-0",
 						fullWidth ? null : "mx-auto max-w-7xl",
 						className,
 					)}
