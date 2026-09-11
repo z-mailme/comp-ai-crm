@@ -213,7 +213,9 @@ export function mapGoogleAdGroups(
 	return groups;
 }
 
-export function mapGoogleSearchTerms(chunks: GoogleSearchChunks): AdsSearchTerm[] {
+export function mapGoogleSearchTerms(
+	chunks: GoogleSearchChunks,
+): AdsSearchTerm[] {
 	return googleRows(chunks, googleSearchTermRow).map((row) => ({
 		term: row.searchTermView.searchTerm ?? "Unknown term",
 		campaignId: String(row.campaign.id ?? ""),
@@ -245,7 +247,9 @@ export function mapMetaCampaigns(rows: MetaEntityInput[]): AdsCampaign[] {
 		}));
 }
 
-export function mapMetaAdSets(rows: MetaEntityInput[]): Map<string, AdsChild[]> {
+export function mapMetaAdSets(
+	rows: MetaEntityInput[],
+): Map<string, AdsChild[]> {
 	const groups = new Map<string, AdsChild[]>();
 	for (const entity of z.array(metaEntity).parse(rows)) {
 		if (!entity.campaign_id) continue;
@@ -491,11 +495,12 @@ function mapMetaMetrics(insight: MetaInsightRow | undefined): AdsMetricValues {
 	const conversionValue =
 		actionValue(insight?.action_values, "purchase") ??
 		actionValue(insight?.action_values, "omni_purchase");
+	const ctr = numberOf(insight?.ctr);
 	return {
 		spendMicros: spend,
 		impressions: numberOf(insight?.impressions),
 		clicks: numberOf(insight?.clicks),
-		ctr: numberOf(insight?.ctr),
+		ctr: ctr === null ? null : ctr / 100,
 		cpcMicros: currencyToMicros(insight?.cpc),
 		conversions,
 		conversionValue,

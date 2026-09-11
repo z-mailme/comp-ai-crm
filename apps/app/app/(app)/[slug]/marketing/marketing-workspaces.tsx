@@ -247,6 +247,7 @@ export function AdsMarketingWorkspace({ provider }: { provider: AdsProvider }) {
 									childLabel={
 										provider === "GOOGLE_ADS" ? "Ad groups" : "Ad sets"
 									}
+									provider={provider}
 									onPause={() =>
 										approval.mutate({
 											provider,
@@ -622,14 +623,72 @@ function AdsPerformance({
 	);
 }
 
+type AdsEntityMetrics = {
+	spendMicros: number | null;
+	impressions: number | null;
+	clicks: number | null;
+	ctr: number | null;
+	cpcMicros: number | null;
+	conversions: number | null;
+	conversionValue: number | null;
+	cpaMicros: number | null;
+	roas: number | null;
+	reach: number | null;
+	cpmMicros: number | null;
+	costPerResultMicros: number | null;
+};
+
+function entityMetrics(
+	entity: AdsEntityMetrics,
+	provider: AdsProvider,
+): {
+	label: string;
+	value: number | null;
+	suffix?: string;
+	percent?: boolean;
+}[] {
+	if (provider === "META_ADS") {
+		return [
+			{ label: "Spend", value: entity.spendMicros, suffix: "micros" },
+			{ label: "Reach", value: entity.reach },
+			{ label: "Impressions", value: entity.impressions },
+			{ label: "Clicks", value: entity.clicks },
+			{ label: "CTR", value: entity.ctr, percent: true },
+			{ label: "CPC", value: entity.cpcMicros, suffix: "micros" },
+			{ label: "CPM", value: entity.cpmMicros, suffix: "micros" },
+			{ label: "Leads", value: entity.conversions },
+			{
+				label: "Cost / result",
+				value: entity.costPerResultMicros,
+				suffix: "micros",
+			},
+			{ label: "Conv. value", value: entity.conversionValue },
+			{ label: "ROAS", value: entity.roas },
+		];
+	}
+	return [
+		{ label: "Spend", value: entity.spendMicros, suffix: "micros" },
+		{ label: "Impressions", value: entity.impressions },
+		{ label: "Clicks", value: entity.clicks },
+		{ label: "CTR", value: entity.ctr, percent: true },
+		{ label: "CPC", value: entity.cpcMicros, suffix: "micros" },
+		{ label: "Conversions", value: entity.conversions },
+		{ label: "Cost / conv.", value: entity.cpaMicros, suffix: "micros" },
+		{ label: "Conv. value", value: entity.conversionValue },
+		{ label: "ROAS", value: entity.roas },
+	];
+}
+
 function AdsCampaignRow({
 	campaign,
 	childLabel,
+	provider,
 	onPause,
 	disabled,
 }: {
 	campaign: AdsCampaign;
 	childLabel: string;
+	provider: AdsProvider;
 	onPause: () => void;
 	disabled: boolean;
 }) {
@@ -644,16 +703,16 @@ function AdsCampaignRow({
 							<Badge variant="secondary">{campaign.type}</Badge>
 						) : null}
 					</div>
-					<div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
-						<Metric
-							label="Spend"
-							value={campaign.spendMicros}
-							suffix="micros"
-						/>
-						<Metric label="Impressions" value={campaign.impressions} />
-						<Metric label="Clicks" value={campaign.clicks} />
-						<Metric label="Leads" value={campaign.conversions} />
-						<Metric label="ROAS" value={campaign.roas} />
+					<div className="mt-3 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 lg:grid-cols-5">
+						{entityMetrics(campaign, provider).map((metric) => (
+							<Metric
+								key={metric.label}
+								label={metric.label}
+								value={metric.value}
+								suffix={metric.suffix}
+								percent={metric.percent}
+							/>
+						))}
 					</div>
 				</div>
 				<Button variant="outline" onClick={onPause} disabled={disabled}>
@@ -669,20 +728,16 @@ function AdsCampaignRow({
 								<p className="truncate font-medium text-sm">{child.name}</p>
 								<Badge variant="outline">{child.status}</Badge>
 							</div>
-							<div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-5">
-								<Metric
-									label="Spend"
-									value={child.spendMicros}
-									suffix="micros"
-								/>
-								<Metric label="Impressions" value={child.impressions} />
-								<Metric label="Clicks" value={child.clicks} />
-								<Metric label="Leads" value={child.conversions} />
-								<Metric
-									label="Cost / result"
-									value={child.costPerResultMicros}
-									suffix="micros"
-								/>
+							<div className="mt-2 grid grid-cols-2 gap-2 text-xs sm:grid-cols-3 lg:grid-cols-5">
+								{entityMetrics(child, provider).map((metric) => (
+									<Metric
+										key={metric.label}
+										label={metric.label}
+										value={metric.value}
+										suffix={metric.suffix}
+										percent={metric.percent}
+									/>
+								))}
 							</div>
 							{child.children.length > 0 ? (
 								<div className="mt-2 flex flex-col gap-2 border-l pl-4">
@@ -703,6 +758,16 @@ function AdsCampaignRow({
 												{ad.reach === null
 													? "—"
 													: `${formatNumber(ad.reach)} reach`}
+											</span>
+											<span className="text-muted-foreground text-xs tabular-nums">
+												{ad.clicks === null
+													? "—"
+													: `${formatNumber(ad.clicks)} clicks`}
+											</span>
+											<span className="text-muted-foreground text-xs tabular-nums">
+												{ad.costPerResultMicros === null
+													? "—"
+													: `${formatNumber(ad.costPerResultMicros)} micros / result`}
 											</span>
 										</div>
 									))}
@@ -765,10 +830,12 @@ export function Metric({
 	label,
 	value,
 	suffix,
+	percent,
 }: {
 	label: string;
 	value: number | null;
 	suffix?: string;
+	percent?: boolean;
 }) {
 	return (
 		<div className="rounded-md bg-muted px-2.5 py-2">
@@ -776,7 +843,9 @@ export function Metric({
 			<p className="mt-1 font-medium tabular-nums">
 				{value === null
 					? "—"
-					: `${formatNumber(value)}${suffix ? ` ${suffix}` : ""}`}
+					: percent
+						? `${(value * 100).toFixed(1)}%`
+						: `${formatNumber(value)}${suffix ? ` ${suffix}` : ""}`}
 			</p>
 		</div>
 	);

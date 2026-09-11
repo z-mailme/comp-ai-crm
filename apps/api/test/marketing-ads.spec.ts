@@ -351,6 +351,7 @@ describe("meta ads mappers", () => {
 		expect(campaign?.budgetMicros).toBe(2_500_000_000);
 		expect(campaign?.spendMicros).toBe(412_500_000);
 		expect(campaign?.reach).toBe(21_000);
+		expect(campaign?.ctr).toBeCloseTo(0.02, 5);
 		expect(campaign?.cpmMicros).toBe(13_520_000);
 		expect(campaign?.conversions).toBe(14);
 		expect(campaign?.costPerResultMicros).toBe(29_460_000);
