@@ -1,6 +1,7 @@
 "use client";
 
 import { cn } from "@crm/ui/lib/utils";
+import type { EventChipProps } from "./calendar-event-colors";
 import {
 	addDaysToKey,
 	eventIntersectsDay,
@@ -15,14 +16,14 @@ export function CalendarSchedule({
 	dayCount,
 	events,
 	todayKey,
-	toneClass,
+	chipProps,
 	onSelectEvent,
 }: {
 	fromDay: string;
 	dayCount: number;
 	events: CalendarEvent[];
 	todayKey: string;
-	toneClass: (calendar: string) => string;
+	chipProps: (event: CalendarEvent) => EventChipProps;
 	onSelectEvent: (event: CalendarEvent) => void;
 }) {
 	const days = Array.from({ length: dayCount }, (_, index) =>
@@ -41,7 +42,7 @@ export function CalendarSchedule({
 	}
 
 	return (
-		<div className="flex flex-col gap-4">
+		<div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto">
 			{nonEmpty.map((day) => (
 				<section key={day} className="rounded-lg border bg-card">
 					<h2
@@ -75,8 +76,9 @@ export function CalendarSchedule({
 										<span
 											className={cn(
 												"h-2.5 w-2.5 shrink-0 rounded-sm border",
-												toneClass(event.sourceCalendar),
+												chipProps(event).className,
 											)}
+											style={chipProps(event).style}
 										/>
 										<span className="truncate text-sm">
 											{event.title ?? "Untitled event"}

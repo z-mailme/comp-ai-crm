@@ -71,12 +71,26 @@ export class MailboxTokenService {
 		userId: string,
 		source: SyncSource,
 	): Promise<TokenResult> {
-		const providerId = PROVIDER_FOR_SOURCE[source];
+		return this.accessTokenForScope(
+			userId,
+			PROVIDER_FOR_SOURCE[source],
+			SCOPE_FOR_SOURCE[source],
+			source,
+		);
+	}
 
-		if (!(await this.isConnected(userId, source))) {
+	async accessTokenForScope(
+		userId: string,
+		providerId: MailboxProviderId,
+		scope: string,
+		labelText?: string,
+	): Promise<TokenResult> {
+		const granted = await this.grantedScopes(userId, providerId);
+
+		if (!granted.has(scope)) {
 			return {
 				outcome: "not-connected",
-				reason: `The ${source} scope has not been granted.`,
+				reason: `The ${labelText ?? scope} scope has not been granted.`,
 			};
 		}
 
@@ -98,7 +112,7 @@ export class MailboxTokenService {
 				message: "Mailbox token refresh failed",
 				userId,
 				providerId,
-				source,
+				scope,
 				reason: error instanceof Error ? error.message : String(error),
 			});
 

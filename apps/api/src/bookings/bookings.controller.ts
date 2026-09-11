@@ -65,7 +65,7 @@ export class BookingsController {
 				"quantityRequested",
 			],
 			properties: {
-				resourceType: { type: "string", enum: ["360_PHOTO_BOOTH"] },
+				resourceType: { type: "string", enum: ["360_PHOTO_BOOTH", "OPERATOR"] },
 				eventDate: { type: "string", example: "2026-09-23" },
 				startAt: {
 					type: "string",
@@ -112,7 +112,10 @@ export class BookingsController {
 					type: "object",
 					required: ["resourceType", "quantity"],
 					properties: {
-						resourceType: { type: "string", enum: ["360_PHOTO_BOOTH"] },
+						resourceType: {
+							type: "string",
+							enum: ["360_PHOTO_BOOTH", "OPERATOR"],
+						},
 						quantity: { type: "integer", example: 1 },
 					},
 				},

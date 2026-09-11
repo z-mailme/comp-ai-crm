@@ -4,6 +4,7 @@ import { ConfigModule } from "@nestjs/config";
 import { AuthModule as BetterAuthModule } from "@thallesp/nestjs-better-auth";
 import { ActivitiesModule } from "./activities/activities.module";
 import { AgentModule } from "./agent/agent.module";
+import { AnalyticsModule } from "./analytics/analytics.module";
 import { ApiKeysModule } from "./api-keys/api-keys.module";
 import { ArchiveModule } from "./archive/archive.module";
 import { AuthModule } from "./auth/auth.module";
@@ -23,6 +24,7 @@ import { DatabaseModule } from "./database/database.module";
 import { DealsModule } from "./deals/deals.module";
 import { EnrichmentModule } from "./enrichment/enrichment.module";
 import { FieldsModule } from "./fields/fields.module";
+import { FinanceModule } from "./finance/finance.module";
 import { GoogleModule } from "./google/google.module";
 import { HealthModule } from "./health/health.module";
 import { LoggingModule } from "./logging/logging.module";
@@ -70,8 +72,10 @@ import { WorkspaceModule } from "./workspace/workspace.module";
 		FieldsModule,
 		ActivitiesModule,
 		AgentModule,
+		AnalyticsModule,
 		EnrichmentModule,
 		DashboardModule,
+		FinanceModule,
 		SearchModule,
 		MailboxModule,
 		MarketingModule,

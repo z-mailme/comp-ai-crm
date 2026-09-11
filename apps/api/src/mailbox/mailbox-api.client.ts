@@ -12,6 +12,11 @@ const DEFAULT_TIMEOUT_MS = 20_000;
 const MIN_BACKOFF_MS = 30_000;
 const MAX_BACKOFF_MS = 15 * 60_000;
 
+type SimplePostBody = Record<
+	string,
+	string | number | boolean | null | undefined | string[]
+>;
+
 @Injectable()
 export class MailboxApiClient {
 	private readonly logger = new Logger(MailboxApiClient.name);
@@ -42,13 +47,10 @@ export class MailboxApiClient {
 		});
 	}
 
-	async post<T>(
+	async post<T, B extends object = SimplePostBody>(
 		url: string,
 		accessToken: string,
-		body: Record<
-			string,
-			string | number | boolean | null | undefined | string[]
-		>,
+		body: B,
 	): Promise<MailboxResult<T>> {
 		return this.request<T>(new URL(url), {
 			method: "POST",

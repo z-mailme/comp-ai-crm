@@ -44,6 +44,9 @@ async function AnalyticsData() {
 	const trpc = getServerTrpc();
 
 	await queryClient.prefetchQuery(trpc.businessOs.analytics.queryOptions());
+	await queryClient.prefetchQuery(
+		trpc.googleAnalytics.report.queryOptions({ days: 28 }),
+	);
 
 	return (
 		<HydrateClient>

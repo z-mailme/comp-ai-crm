@@ -86,6 +86,42 @@ const recentActivityOutput = z.object({
 	meta: activityMeta,
 });
 
+export const OVERVIEW_DASHBOARD = "overview";
+
+export const DASHBOARD_WIDGET_IDS = [
+	"sales-dashboard",
+	"deals-in-progress",
+	"overdue-tasks",
+	"recent-activity",
+	"website-analytics",
+	"week-finance",
+	"upcoming-events",
+	"inbox-unread",
+	"pending-approvals",
+] as const;
+
+export type DashboardWidgetId = (typeof DASHBOARD_WIDGET_IDS)[number];
+
+export const dashboardWidgetSize = z.enum(["half", "full"]);
+
+export const dashboardLayoutItem = z.object({
+	id: z.enum(DASHBOARD_WIDGET_IDS),
+	size: dashboardWidgetSize,
+});
+
+export const dashboardLayout = z.array(dashboardLayoutItem).max(24);
+
+export type DashboardLayoutItem = z.infer<typeof dashboardLayoutItem>;
+
+export const dashboardLayoutOutput = z.object({
+	dashboard: z.literal("overview"),
+	layout: dashboardLayout.nullable(),
+});
+
+export const saveDashboardLayoutInput = z.object({
+	layout: dashboardLayout.nullable(),
+});
+
 export const dashboardSummaryOutput = z.object({
 	scope: z.enum(DASHBOARD_SCOPES),
 	reportingCurrency: z.string(),

@@ -15,18 +15,20 @@ const t = initTRPC.create();
 const publicProcedure = t.procedure;
 import { timelineInput, timelineOutput, timelineCountsInput, timelineCountsOutput, myTasksInput, myTasksOutput, activityCreateInput, activityCreateOutput, completeInput, completeOutput } from "../activities/activities.contracts";
 import { agentListOutput, agentReviseInput, agentReviseOutput, agentIdInput, agentFilesOutput, agentSaveFileInput, agentSaveFileOutput, agentByIdOutput, agentHistoryInput, agentHistoryOutput, agentActivityOutput, agentUpdateInput, agentUpdateOutput, agentDeployInput, agentDeployOutput, agentPauseOutput, agentResumeOutput, agentArchiveOutput, agentRestoreOutput, agentRemoveOutput, agentRunNowInput, agentRunNowOutput, agentRetryRunInput, agentRetryRunOutput, agentCancelRunInput, agentCancelRunOutput, seedStartersOutput } from "../agent/agents.contracts";
+import { gaStatusOutput, gaPropertiesOutput, setGaPropertyInput, gaWindowInput, gaReportOutput } from "../analytics/analytics.contracts";
 import { apiKeyListInput, apiKeyListOutput, createApiKeyInput, createApiKeyOutput, revokeApiKeyInput, revokeApiKeyOutput } from "../api-keys/api-keys.contracts";
 import { brainJobOutput, brainKnowledgeQueryInput, brainKnowledgeOutput } from "../brain/brain.contracts";
 import { briefDailyOutput, briefExceptionsOutput } from "../business-os/brief.contracts";
-import { businessContextInput, businessOsOverviewOutput, inboxInput, inboxOutput, calendarInput, calendarOutput, conversationInput, conversationDetailOutput, customer360Input, customer360Output, globalSearchInput, globalSearchOutput, approvalsOutput, knowledgeOutput, observabilityOutput, activityFeedInput, activityFeedOutput, bookingsInput, bookingsOutput, analyticsOutput, financeOutput } from "../business-os/business-os.contracts";
+import { businessContextInput, businessOsOverviewOutput, inboxInput, inboxOutput, calendarInput, calendarOutput, setEventColorInput, setEventColorOutput, conversationInput, conversationDetailOutput, customer360Input, customer360Output, globalSearchInput, globalSearchOutput, approvalsOutput, knowledgeOutput, observabilityOutput, activityFeedInput, activityFeedOutput, bookingsInput, bookingsOutput, analyticsOutput, financeOutput } from "../business-os/business-os.contracts";
 import { companyListInput, companyListOutput, companyIdInput, companyDetailOutput, companyOptionsInput, companyOptionOutput, companyCreateInput, companySummaryOutput, companyUpdateArgs, companyArchiveResultOutput, companyBulkOwnerInput, companyBulkResultOutput, companyBulkInput, companyEnrichOutput, companyResearchOutput, setPrimaryContactInput, companySetPrimaryContactOutput } from "../companies/companies.contracts";
 import { contactListInput, contactListOutput, contactIdInput, contactByIdOutput, contactCreateInput, contactBasicOutput, contactUpdateArgs, contactNameOutput, contactEnrichOutput, contactBulkOwnerInput, bulkResultOutput, contactBulkCompanyInput, contactBulkInput, factDecisionInput, decideFactOutput } from "../contacts/contacts.contracts";
 import { conversationListInput, conversationListOutput, builderListOutput, builderResourceSearchInput, builderResourcesOutput, conversationIdInput, builderConversationDetailOutput, conversationEventsInput, conversationEventsOutput, conversationSaveInput, conversationIdOutput, builderConversationCreateInput, builderConversationSubmitInput, builderQuestionResponseInput, builderResponseRatingInput, builderResponseRatingOutput, conversationShareStatusOutput, conversationShareTokenOutput, sharedConversationInput, sharedConversationOutput } from "../conversations/conversations.contracts";
 import { currencySettingsOutput, setReportingCurrencyInput, setManualRateInput, removeManualRateInput } from "../currency/currency.contracts";
-import { dashboardSummaryInput, dashboardSummaryOutput } from "../dashboard/dashboard.contracts";
+import { dashboardLayoutOutput, saveDashboardLayoutInput, dashboardSummaryInput, dashboardSummaryOutput } from "../dashboard/dashboard.contracts";
 import { dealListInput, dealListOutput, dealIdInput, dealDetailOutput, dealCreateInput, dealCreateOutput, dealUpdateArgs, dealMutateOutput, setStageInput, dealSetStageOutput, dealContactsInput, dealContactOptionsOutput, dealAttachContactInput, dealContactLinkOutput, dealDetachContactInput, dealContactRoleInput, dealContactRoleOutput, dealBulkOwnerInput, dealBulkResultOutput, dealBulkStageInput, dealBulkInput } from "../deals/deals.contracts";
 import { enrichmentQueueInput } from "@crm/validation/enrichment-queue";
 import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput, fieldEntityInput, fieldFiltersOutput, fieldIdInput, fieldCoverageOutput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput, fieldReorderOutput, fieldDeleteOutput, fieldBackfillOutput } from "../fields/fields.contracts";
+import { financeWeekInput, financeWeekOutput, addExpenseInput, expenseMutationOutput, cancelExpenseInput } from "../finance/finance.contracts";
 import { gmailLabelOutput, mailboxThreadsInput, mailboxThreadsOutput, mailboxActionInput, mailboxActionOutput, googleConnectionStatusOutput, reindexCalendarInput, reindexCalendarOutput, historicalImportJobOutput, createHistoricalImportInput, historicalImportIdInput, sendEmailInput, sendEmailOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
 import { marketingContextInput, marketingOverviewOutput, emailMarketingOutput, adsWorkspaceOutput, listmonkConnectionInput, marketingIntegrationOutput, adsConnectionInput, marketingProviderInput, createListmonkCampaignInput, createListmonkCampaignOutput, sendListmonkTestInput, requestMarketingActionInput, approvalRequestOutput } from "../marketing/marketing.contracts";
@@ -133,6 +135,22 @@ const appRouter = t.router({
       .output(seedStartersOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
+  googleAnalytics: t.router({
+    status: publicProcedure
+      .output(gaStatusOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    properties: publicProcedure
+      .output(gaPropertiesOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setProperty: publicProcedure
+      .input(setGaPropertyInput)
+      .output(gaStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    report: publicProcedure
+      .input(gaWindowInput)
+      .output(gaReportOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
   apiKeys: t.router({
     list: publicProcedure
       .input(apiKeyListInput)
@@ -187,6 +205,10 @@ const appRouter = t.router({
       .input(calendarInput)
       .output(calendarOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    setEventColor: publicProcedure
+      .input(setEventColorInput)
+      .output(setEventColorOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     conversation: publicProcedure
       .input(conversationInput)
       .output(conversationDetailOutput)
@@ -442,6 +464,13 @@ const appRouter = t.router({
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   dashboard: t.router({
+    layout: publicProcedure
+      .output(dashboardLayoutOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    saveLayout: publicProcedure
+      .input(saveDashboardLayoutInput)
+      .output(dashboardLayoutOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     summary: publicProcedure
       .input(dashboardSummaryInput)
       .output(dashboardSummaryOutput)
@@ -614,6 +643,20 @@ const appRouter = t.router({
     backfill: publicProcedure
       .input(fieldIdInput)
       .output(fieldBackfillOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  finance: t.router({
+    week: publicProcedure
+      .input(financeWeekInput)
+      .output(financeWeekOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    addExpense: publicProcedure
+      .input(addExpenseInput)
+      .output(expenseMutationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    cancelExpense: publicProcedure
+      .input(cancelExpenseInput)
+      .output(expenseMutationOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   google: t.router({

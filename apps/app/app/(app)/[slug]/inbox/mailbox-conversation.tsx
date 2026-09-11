@@ -97,7 +97,7 @@ export function MailboxConversation({
 								</span>
 							</div>
 							{message.body ? (
-								<p className="whitespace-pre-wrap break-words text-sm">
+								<p className="max-w-prose whitespace-pre-wrap break-words text-sm">
 									{message.body}
 								</p>
 							) : (

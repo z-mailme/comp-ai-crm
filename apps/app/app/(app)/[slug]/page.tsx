@@ -11,7 +11,6 @@ import { requireSession } from "@/lib/session";
 import { HydrateClient } from "@/lib/trpc/hydrate";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
 import { DailyBrief } from "./daily-brief";
-import { DashboardSummary } from "./dashboard-summary";
 import {
 	OverviewGreeting,
 	OverviewGreetingFallback,
@@ -21,6 +20,7 @@ import {
 	OverviewScopeToggleFallback,
 } from "./overview-scope";
 import { loadOverviewSearchParams } from "./overview-search-params";
+import { OverviewDashboard } from "./overview-widgets/overview-dashboard";
 
 export default function OverviewPage({ searchParams }: PageProps<"/[slug]">) {
 	return (
@@ -76,13 +76,17 @@ async function Summary({
 	]);
 
 	const queryClient = getServerQueryClient();
-	await queryClient.prefetchQuery(
-		getServerTrpc().dashboard.summary.queryOptions({ scope }),
-	);
+	const serverTrpc = getServerTrpc();
+	await Promise.all([
+		queryClient.prefetchQuery(
+			serverTrpc.dashboard.summary.queryOptions({ scope }),
+		),
+		queryClient.prefetchQuery(serverTrpc.dashboard.layout.queryOptions()),
+	]);
 
 	return (
 		<HydrateClient>
-			<DashboardSummary />
+			<OverviewDashboard />
 		</HydrateClient>
 	);
 }

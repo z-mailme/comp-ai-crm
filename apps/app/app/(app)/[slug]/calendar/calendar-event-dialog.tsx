@@ -7,17 +7,27 @@ import {
 	DialogHeader,
 	DialogTitle,
 } from "@crm/ui/components/dialog";
+import { cn } from "@crm/ui/lib/utils";
+import {
+	CALENDAR_EVENT_COLORS,
+	type CalendarEventColorId,
+} from "@crm/validation/calendar-event-colors";
 import Link from "next/link";
 import { LocalDateTimeRange } from "@/components/local-date-time";
 import { useWorkspaceUrl } from "@/lib/use-workspace-url";
+import { colorSwatchStyle } from "./calendar-event-colors";
 import type { CalendarEvent } from "./calendar-workspace";
 
 export function CalendarEventDialog({
 	event,
 	onClose,
+	colorPending = false,
+	onSelectColor,
 }: {
 	event: CalendarEvent | null;
 	onClose: () => void;
+	colorPending?: boolean;
+	onSelectColor?: (color: CalendarEventColorId | null) => void;
 }) {
 	const workspaceUrl = useWorkspaceUrl();
 
@@ -159,6 +169,45 @@ export function CalendarEventDialog({
 										))}
 									</div>
 								)}
+							</div>
+							<div className="grid gap-2">
+								<span className="font-medium">Colour</span>
+								<div className="flex flex-wrap items-center gap-1.5">
+									<button
+										type="button"
+										disabled={colorPending || !onSelectColor}
+										onClick={() => onSelectColor?.(null)}
+										aria-pressed={event.colorOverride === null}
+										className={cn(
+											"rounded-md border px-2 py-1 text-xs hover:bg-muted",
+											event.colorOverride === null &&
+												"border-primary font-medium",
+										)}
+									>
+										Calendar default
+									</button>
+									{CALENDAR_EVENT_COLORS.map((color) => (
+										<button
+											key={color.id}
+											type="button"
+											disabled={colorPending || !onSelectColor}
+											onClick={() => onSelectColor?.(color.id)}
+											aria-label={`Colour ${color.label}`}
+											aria-pressed={event.colorOverride === color.id}
+											title={color.label}
+											className={cn(
+												"h-6 w-6 rounded-md border",
+												event.colorOverride === color.id
+													? "border-foreground ring-1 ring-ring"
+													: "border-transparent",
+											)}
+											style={colorSwatchStyle(color.id)}
+										/>
+									))}
+								</div>
+								<span className="text-muted-foreground text-xs">
+									Stored in Comp AI only — Google Calendar is not modified.
+								</span>
 							</div>
 							<p className="text-muted-foreground text-xs">
 								Read-only — the connected Google account has calendar read

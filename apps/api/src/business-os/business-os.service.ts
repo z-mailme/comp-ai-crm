@@ -12,6 +12,10 @@ import {
 	type Prisma,
 } from "@crm/db";
 import { LOSING_DEAL_STAGES, OPEN_DEAL_STAGES } from "@crm/db/deal-stage";
+import {
+	type CalendarEventColorId,
+	calendarEventColorId,
+} from "@crm/validation/calendar-event-colors";
 import { Injectable, NotFoundException } from "@nestjs/common";
 import { toCents } from "../crm/values";
 import { ConversionService } from "../currency/conversion.service";
@@ -41,6 +45,8 @@ import type {
 	InboxOutput,
 	KnowledgeOutput,
 	ObservabilityOutput,
+	SetEventColorInput,
+	SetEventColorOutput,
 } from "./business-os.contracts";
 import {
 	parseMessageRecipients,
@@ -136,6 +142,7 @@ const CALENDAR_EVENT_SELECT = {
 	organizerEmail: true,
 	recurringEventId: true,
 	googleEventId: true,
+	colorOverride: true,
 	attendees: {
 		orderBy: CALENDAR_ATTENDEE_ORDER,
 		select: {
@@ -484,6 +491,7 @@ export class BusinessOsService {
 					organizerEmail: event.organizerEmail,
 					recurringEventId: event.recurringEventId,
 					googleEventId: event.googleEventId,
+					colorOverride: parseColorOverride(event.colorOverride),
 					sourceCalendar: "Primary Google Calendar",
 					attendees: event.attendees.map((attendee) => ({
 						id: attendee.id,
@@ -509,6 +517,30 @@ export class BusinessOsService {
 						: null,
 				};
 			}),
+		};
+	}
+
+	async setEventColor(
+		source: BusinessContextSource,
+		input: SetEventColorInput,
+	): Promise<SetEventColorOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const scoped = await this.db.calendarEvent.findFirst({
+			where: { AND: [{ id: input.eventId }, calendarEventScope(context)] },
+			select: { id: true },
+		});
+
+		if (!scoped) throw new NotFoundException("Calendar event not found.");
+
+		const event = await this.db.calendarEvent.update({
+			where: { id: scoped.id },
+			data: { colorOverride: input.color },
+			select: { id: true, colorOverride: true },
+		});
+
+		return {
+			id: event.id,
+			colorOverride: parseColorOverride(event.colorOverride),
 		};
 	}
 
@@ -1574,7 +1606,7 @@ type DirectBusinessUnitScope = {
 	OR?: { businessUnitId: string | null }[];
 };
 
-function directBusinessUnitScope(
+export function directBusinessUnitScope(
 	context: BusinessContext,
 ): DirectBusinessUnitScope {
 	if (context.includeUnscoped) {
@@ -1740,6 +1772,12 @@ function businessEventOutboxScope(
 	return { businessEvent: businessEventScope(context) };
 }
 
+function parseColorOverride(value: string | null): CalendarEventColorId | null {
+	if (!value) return null;
+	const parsed = calendarEventColorId.safeParse(value);
+	return parsed.success ? parsed.data : null;
+}
+
 function calendarEventScope(
 	context: BusinessContext,
 ): Prisma.CalendarEventWhereInput {
@@ -1771,7 +1809,9 @@ function calendarEventScope(
 	};
 }
 
-function bookingScope(context: BusinessContext): Prisma.BookingWhereInput {
+export function bookingScope(
+	context: BusinessContext,
+): Prisma.BookingWhereInput {
 	if (context.includeUnscoped) return {};
 
 	return {

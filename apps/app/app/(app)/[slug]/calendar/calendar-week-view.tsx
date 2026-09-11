@@ -3,6 +3,7 @@
 import { cn } from "@crm/ui/lib/utils";
 import Link from "next/link";
 import { useSeconds } from "@/lib/use-seconds";
+import { colorChipProps, type EventChipProps } from "./calendar-event-colors";
 import {
 	allDayEventsForDay,
 	dayNumber,
@@ -24,21 +25,21 @@ export function CalendarTimeGrid({
 	days,
 	events,
 	todayKey,
-	toneClass,
+	chipProps,
 	onSelectEvent,
 	hrefForDay,
 }: {
 	days: string[];
 	events: CalendarEvent[];
 	todayKey: string;
-	toneClass: (calendar: string) => string;
+	chipProps: (event: CalendarEvent) => EventChipProps;
 	onSelectEvent: (event: CalendarEvent) => void;
 	hrefForDay: (dayKey: string) => string;
 }) {
 	const columns = `3.5rem repeat(${days.length}, minmax(0, 1fr))`;
 
 	return (
-		<div className="flex min-w-0 flex-col rounded-lg border bg-card">
+		<div className="flex min-h-0 min-w-0 flex-1 flex-col rounded-lg border bg-card">
 			<div className="grid border-b" style={{ gridTemplateColumns: columns }}>
 				<div />
 				{days.map((day) => (
@@ -74,14 +75,14 @@ export function CalendarTimeGrid({
 					<AllDayCell
 						key={day}
 						events={allDayEventsForDay(events, day)}
-						toneClass={toneClass}
+						chipProps={chipProps}
 						onSelectEvent={onSelectEvent}
 						href={hrefForDay(day)}
 					/>
 				))}
 			</div>
 
-			<div className="max-h-[calc(100vh-20rem)] min-h-[480px] overflow-y-auto">
+			<div className="min-h-0 flex-1 overflow-y-auto">
 				<div
 					className="grid"
 					style={{
@@ -96,7 +97,7 @@ export function CalendarTimeGrid({
 							day={day}
 							events={events}
 							isToday={day === todayKey}
-							toneClass={toneClass}
+							chipProps={chipProps}
 							onSelectEvent={onSelectEvent}
 						/>
 					))}
@@ -126,13 +127,13 @@ function DayColumn({
 	day,
 	events,
 	isToday,
-	toneClass,
+	chipProps,
 	onSelectEvent,
 }: {
 	day: string;
 	events: CalendarEvent[];
 	isToday: boolean;
-	toneClass: (calendar: string) => string;
+	chipProps: (event: CalendarEvent) => EventChipProps;
 	onSelectEvent: (event: CalendarEvent) => void;
 }) {
 	const positioned = layoutTimedEvents(events, day);
@@ -151,7 +152,7 @@ function DayColumn({
 				<TimedEventChip
 					key={entry.event.id}
 					entry={entry}
-					toneClass={toneClass}
+					chipProps={chipProps}
 					onSelectEvent={onSelectEvent}
 				/>
 			))}
@@ -161,11 +162,11 @@ function DayColumn({
 
 function TimedEventChip({
 	entry,
-	toneClass,
+	chipProps,
 	onSelectEvent,
 }: {
 	entry: PositionedEvent<CalendarEvent>;
-	toneClass: (calendar: string) => string;
+	chipProps: (event: CalendarEvent) => EventChipProps;
 	onSelectEvent: (event: CalendarEvent) => void;
 }) {
 	const top = (entry.startMinutes / 60) * HOUR_PX;
@@ -176,6 +177,7 @@ function TimedEventChip({
 	const width = 100 / entry.columns;
 	const left = entry.column * width;
 	const tall = height >= 34;
+	const chip = chipProps(entry.event);
 
 	return (
 		<button
@@ -183,13 +185,14 @@ function TimedEventChip({
 			onClick={() => onSelectEvent(entry.event)}
 			className={cn(
 				"absolute overflow-hidden rounded-sm border px-1 py-0.5 text-left text-xs leading-tight",
-				toneClass(entry.event.sourceCalendar),
+				chip.className,
 			)}
 			style={{
 				top,
 				height,
 				left: `${left}%`,
 				width: `calc(${width}% - 2px)`,
+				...chip.style,
 			}}
 			title={entry.event.title ?? "Untitled event"}
 		>
@@ -209,12 +212,12 @@ function TimedEventChip({
 
 function AllDayCell({
 	events,
-	toneClass,
+	chipProps,
 	onSelectEvent,
 	href,
 }: {
 	events: CalendarEvent[];
-	toneClass: (calendar: string) => string;
+	chipProps: (event: CalendarEvent) => EventChipProps;
 	onSelectEvent: (event: CalendarEvent) => void;
 	href: string;
 }) {
@@ -223,20 +226,24 @@ function AllDayCell({
 
 	return (
 		<div className="flex min-h-7 flex-col gap-0.5 border-l px-1 py-1">
-			{visible.map((event) => (
-				<button
-					key={event.id}
-					type="button"
-					onClick={() => onSelectEvent(event)}
-					className={cn(
-						"truncate rounded-sm border px-1 py-0.5 text-left text-xs",
-						toneClass(event.sourceCalendar),
-					)}
-					title={event.title ?? "Untitled event"}
-				>
-					{event.title ?? "Untitled event"}
-				</button>
-			))}
+			{visible.map((event) => {
+				const chip = chipProps(event);
+				return (
+					<button
+						key={event.id}
+						type="button"
+						onClick={() => onSelectEvent(event)}
+						className={cn(
+							"truncate rounded-sm border px-1 py-0.5 text-left text-xs",
+							chip.className,
+						)}
+						style={chip.style}
+						title={event.title ?? "Untitled event"}
+					>
+						{event.title ?? "Untitled event"}
+					</button>
+				);
+			})}
 			{hidden > 0 ? (
 				<Link
 					href={href}

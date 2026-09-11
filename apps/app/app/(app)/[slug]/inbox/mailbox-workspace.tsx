@@ -74,7 +74,7 @@ export function MailboxWorkspace() {
 
 			<div
 				className={cn(
-					"min-w-0 flex-1 flex-col md:flex",
+					"min-w-0 flex-1 flex-col md:flex xl:w-[clamp(380px,30vw,480px)] xl:flex-none",
 					conversationOpen ? "hidden" : "flex",
 				)}
 			>

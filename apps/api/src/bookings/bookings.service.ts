@@ -24,6 +24,7 @@ import type {
 
 const RESOURCE_TYPES = {
 	"360_PHOTO_BOOTH": BookingResourceType.PHOTO_BOOTH_360,
+	OPERATOR: BookingResourceType.OPERATOR,
 } as const satisfies Record<
 	| AvailabilityInput["resourceType"]
 	| BookingUpsertInput["resource"]["resourceType"],
@@ -32,6 +33,7 @@ const RESOURCE_TYPES = {
 
 const EXTERNAL_RESOURCE_TYPES = {
 	[BookingResourceType.PHOTO_BOOTH_360]: "360_PHOTO_BOOTH",
+	[BookingResourceType.OPERATOR]: "OPERATOR",
 } as const satisfies Record<
 	BookingResourceType,
 	BookingOutput["resources"][number]["resourceType"]

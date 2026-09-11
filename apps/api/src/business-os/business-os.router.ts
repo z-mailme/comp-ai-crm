@@ -1,5 +1,12 @@
 import { Inject } from "@nestjs/common";
-import { Ctx, Input, Query, Router, UseMiddlewares } from "nestjs-trpc";
+import {
+	Ctx,
+	Input,
+	Mutation,
+	Query,
+	Router,
+	UseMiddlewares,
+} from "nestjs-trpc";
 import type { z } from "zod";
 import type { AuthedTrpcContext } from "../trpc/context.types";
 import { AuthMiddleware } from "../trpc/middlewares/auth.middleware";
@@ -28,6 +35,8 @@ import {
 	inboxOutput,
 	knowledgeOutput,
 	observabilityOutput,
+	setEventColorInput,
+	setEventColorOutput,
 } from "./business-os.contracts";
 import { BusinessOsService } from "./business-os.service";
 
@@ -89,6 +98,20 @@ export class BusinessOsRouter {
 		@Input() input: z.infer<typeof calendarInput>,
 	) {
 		return this.businessOs.calendar(sourceOf(ctx, input), input);
+	}
+
+	@Mutation({
+		input: setEventColorInput,
+		output: setEventColorOutput,
+		meta: restMeta("POST", "/business-os/calendar/event-color", [
+			"Business OS",
+		]),
+	})
+	async setEventColor(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof setEventColorInput>,
+	) {
+		return this.businessOs.setEventColor(sourceOf(ctx), input);
 	}
 
 	@Query({
