@@ -57,6 +57,7 @@ model User {
   conversationFeedback               AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
   slackMemberMatch                   SlackMemberMatch?
   createdExpenses                    Expense[]                     @relation("ExpenseCreator")
+  dashboardLayouts                   UserDashboardLayout[]
 
   members     Member[]
   invitations Invitation[]
@@ -67,6 +68,20 @@ model User {
 
   @@unique([email])
   @@map("user")
+}
+
+model UserDashboardLayout {
+  id        String @id @default(cuid())
+  userId    String
+  user      User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  dashboard String
+  layout    Json
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userId, dashboard])
+  @@map("userDashboardLayout")
 }
 
 model SlackMemberMatch {

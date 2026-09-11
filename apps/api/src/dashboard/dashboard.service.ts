@@ -5,7 +5,12 @@ import { Injectable } from "@nestjs/common";
 import { toCents } from "../crm/values";
 import { ConversionService } from "../currency/conversion.service";
 import { InjectDatabase } from "../database/database.constants";
-import type { DashboardSummaryInput } from "./dashboard.contracts";
+import {
+	type DashboardLayoutItem,
+	type DashboardSummaryInput,
+	dashboardLayout,
+	OVERVIEW_DASHBOARD,
+} from "./dashboard.contracts";
 
 const OWNER_SELECT = {
 	id: true,
@@ -36,6 +41,52 @@ export class DashboardService {
 		@InjectDatabase() private readonly db: Db,
 		private readonly conversion: ConversionService,
 	) {}
+
+	async layout(actingUserId: string) {
+		const row = await this.db.userDashboardLayout.findUnique({
+			where: {
+				userId_dashboard: {
+					userId: actingUserId,
+					dashboard: OVERVIEW_DASHBOARD,
+				},
+			},
+			select: { layout: true },
+		});
+
+		if (!row) return { dashboard: OVERVIEW_DASHBOARD, layout: null };
+
+		const parsed = dashboardLayout.safeParse(row.layout);
+		return {
+			dashboard: OVERVIEW_DASHBOARD,
+			layout: parsed.success ? parsed.data : null,
+		};
+	}
+
+	async saveLayout(actingUserId: string, layout: DashboardLayoutItem[] | null) {
+		if (layout === null) {
+			await this.db.userDashboardLayout.deleteMany({
+				where: { userId: actingUserId, dashboard: OVERVIEW_DASHBOARD },
+			});
+			return { dashboard: OVERVIEW_DASHBOARD, layout: null };
+		}
+
+		await this.db.userDashboardLayout.upsert({
+			where: {
+				userId_dashboard: {
+					userId: actingUserId,
+					dashboard: OVERVIEW_DASHBOARD,
+				},
+			},
+			create: {
+				userId: actingUserId,
+				dashboard: OVERVIEW_DASHBOARD,
+				layout,
+			},
+			update: { layout },
+		});
+
+		return { dashboard: OVERVIEW_DASHBOARD, layout };
+	}
 
 	async summary(actingUserId: string, input: DashboardSummaryInput) {
 		const mine = input.scope === "me";
