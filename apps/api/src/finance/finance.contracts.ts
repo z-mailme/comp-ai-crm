@@ -1,4 +1,3 @@
-import { isCurrencyCode, normalizeCurrency } from "@crm/db/currency";
 import {
 	BookingStatus,
 	ExpenseCategory,
@@ -7,6 +6,7 @@ import {
 	PaymentStatus,
 	type Prisma,
 } from "@crm/db";
+import { isCurrencyCode, normalizeCurrency } from "@crm/db/currency";
 import { z } from "zod";
 import { FINANCE } from "./finance-config";
 
