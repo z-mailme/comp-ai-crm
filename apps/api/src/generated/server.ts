@@ -33,6 +33,7 @@ import { gmailLabelOutput, mailboxThreadsInput, mailboxThreadsOutput, mailboxAct
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
 import { listCampaignsInput, campaignListOutput, campaignByIdInput, campaignDetailOutput, createCampaignInput, campaignOutput, updateCampaignInput, sourceBreakdownOutput } from "../marketing/campaigns.contracts";
 import { listContentInput, contentListOutput, contentByIdInput, contentDetailOutput, createContentInput, contentOutput, updateContentInput, decideContentInput, scheduleContentInput, aiAssistInput } from "../marketing/content.contracts";
+import { emailTemplateContextInput, emailTemplateListOutput, createEmailTemplateInput, emailTemplateOutput, updateEmailTemplateInput, archiveEmailTemplateInput, emailTemplateByIdInput, emailTemplateRenderOutput, composeEmailCampaignInput, emailCampaignOutput, emailScheduleRequestInput, emailScheduleOutput, emailScheduleDecideInput, emailCreateListInput, emailListOutput, emailSyncListInput, emailSyncOutput, emailSubscribersInput, emailSubscribersOutput } from "../marketing/email.contracts";
 import { marketingContextInput, marketingOverviewOutput, emailMarketingOutput, adsWorkspaceOutput, listmonkConnectionInput, marketingIntegrationOutput, adsConnectionInput, marketingProviderInput, createListmonkCampaignInput, createListmonkCampaignOutput, sendListmonkTestInput, requestMarketingActionInput, approvalRequestOutput } from "../marketing/marketing.contracts";
 import { listMediaInput, mediaListOutput, attachMediaInput, detachMediaInput, archiveMediaInput, mediaAssetOutput } from "../marketing/media.contracts";
 import { listAccountsInput, accountListOutput, registerAccountInput, accountOutput, accountByIdInput, listPostsInput, postListOutput, createPostInput, postOutput, postByIdInput, decidePostInput, schedulePostInput, socialCalendarInput, socialCalendarOutput, socialInboxOutput } from "../marketing/social.contracts";
@@ -808,6 +809,52 @@ const appRouter = t.router({
       .input(aiAssistInput)
       .output(z.object({ queued: z.boolean() }))
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  marketingEmail: t.router({
+    templates: publicProcedure
+      .input(emailTemplateContextInput)
+      .output(emailTemplateListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    createTemplate: publicProcedure
+      .input(createEmailTemplateInput)
+      .output(emailTemplateOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    updateTemplate: publicProcedure
+      .input(updateEmailTemplateInput)
+      .output(emailTemplateOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    archiveTemplate: publicProcedure
+      .input(archiveEmailTemplateInput)
+      .output(emailTemplateOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    renderTemplate: publicProcedure
+      .input(emailTemplateByIdInput)
+      .output(emailTemplateRenderOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    composeCampaign: publicProcedure
+      .input(composeEmailCampaignInput)
+      .output(emailCampaignOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    requestSchedule: publicProcedure
+      .input(emailScheduleRequestInput)
+      .output(emailScheduleOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    decideSchedule: publicProcedure
+      .input(emailScheduleDecideInput)
+      .output(emailScheduleOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    createList: publicProcedure
+      .input(emailCreateListInput)
+      .output(emailListOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    syncList: publicProcedure
+      .input(emailSyncListInput)
+      .output(emailSyncOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    subscribers: publicProcedure
+      .input(emailSubscribersInput)
+      .output(emailSubscribersOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   marketing: t.router({
     overview: publicProcedure

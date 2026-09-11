@@ -18,3 +18,8 @@ export const MARKETING_MEDIA = {
 export const MARKETING_CONTENT_LIMITS = {
 	listLimit: 200,
 } as const;
+
+export const MARKETING_EMAIL = {
+	subscriberPageSize: 50,
+	syncContactLimit: 500,
+} as const;

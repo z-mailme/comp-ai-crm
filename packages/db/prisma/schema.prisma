@@ -61,6 +61,7 @@ model User {
   createdSocialAccounts              SocialAccount[]               @relation("SocialAccountCreator")
   createdSocialPosts                 SocialPost[]                  @relation("SocialPostCreator")
   approvedSocialPosts                SocialPost[]                  @relation("SocialPostApprover")
+  createdMarketingEmailTemplates     MarketingEmailTemplate[]      @relation("MarketingEmailTemplateCreator")
   conversationShares                 AgentConversationShare[]      @relation("ConversationShareCreator")
   conversationSubmissions            AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
   conversationFeedback               AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
@@ -2015,6 +2016,7 @@ model BusinessUnit {
   marketingCampaigns      MarketingCampaign[]
   marketingContents       MarketingContent[]
   marketingMediaAssets    MarketingMediaAsset[]
+  marketingEmailTemplates MarketingEmailTemplate[]
   socialAccounts          SocialAccount[]
   socialPosts             SocialPost[]
   socialInteractions      SocialInteraction[]
@@ -2941,6 +2943,29 @@ model MarketingContentMedia {
   @@id([contentId, assetId])
   @@index([assetId])
   @@map("marketingContentMedia")
+}
+
+model MarketingEmailTemplate {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  previewText String?
+  blocks      Json
+
+  status String @default("draft")
+
+  createdById String?
+  createdBy   User?   @relation("MarketingEmailTemplateCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status])
+  @@map("marketingEmailTemplate")
 }
 
 enum MarketingIntegrationStatus {

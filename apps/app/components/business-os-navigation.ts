@@ -161,7 +161,7 @@ export const BUSINESS_OS_NAVIGATION: readonly NavigationGroup[] = [
 			{
 				title: "Email",
 				href: "/marketing/email",
-				status: "NOT_CONFIGURED",
+				status: "ACTIVE",
 				match: "prefix",
 				prefetchSection: "/marketing/email",
 				icon: "email",

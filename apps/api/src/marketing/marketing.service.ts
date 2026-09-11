@@ -15,6 +15,7 @@ import {
 } from "../business-os/business-context";
 import { InjectDatabase } from "../database/database.constants";
 import { type AdsCampaign, AdsClient } from "./ads.client";
+import { MarketingEmailService } from "./email.service";
 import { ListmonkClient, type ListmonkConfig } from "./listmonk.client";
 import type {
 	AdsConnectionInput,
@@ -65,6 +66,7 @@ export class MarketingService {
 		@InjectDatabase() private readonly db: Db,
 		private readonly listmonk: ListmonkClient,
 		private readonly ads: AdsClient,
+		private readonly emailService: MarketingEmailService,
 	) {}
 
 	async overview(
@@ -105,8 +107,15 @@ export class MarketingService {
 			context.businessUnitId,
 			MarketingProvider.LISTMONK,
 		);
+		const pendingSchedules = await this.emailService.pendingSchedules(
+			context.businessUnitId,
+		);
 		if (!integration)
-			return emptyEmail(notConfigured(MarketingProvider.LISTMONK));
+			return emptyEmail(
+				notConfigured(MarketingProvider.LISTMONK),
+				null,
+				pendingSchedules,
+			);
 
 		const summary = summarizeIntegration(integration);
 
@@ -148,6 +157,7 @@ export class MarketingService {
 					type: template.type ?? null,
 				})),
 				subscribers: { total: data.subscriberTotal },
+				pendingSchedules,
 				metrics: emailMetrics(campaigns),
 				error: null,
 			};
@@ -157,6 +167,7 @@ export class MarketingService {
 			return emptyEmail(
 				{ ...summary, status: MarketingIntegrationStatus.NEEDS_ATTENTION },
 				message,
+				pendingSchedules,
 			);
 		}
 	}
@@ -567,6 +578,7 @@ function notConfigured(
 function emptyEmail(
 	integration: MarketingIntegrationOutput,
 	error: string | null = null,
+	pendingSchedules: EmailMarketingOutput["pendingSchedules"] = [],
 ): EmailMarketingOutput {
 	return {
 		integration,
@@ -574,6 +586,7 @@ function emptyEmail(
 		lists: [],
 		templates: [],
 		subscribers: { total: null },
+		pendingSchedules,
 		metrics: [
 			{ label: "Sent", value: null, unit: "messages", measured: false },
 			{ label: "Opens", value: null, unit: "events", measured: false },

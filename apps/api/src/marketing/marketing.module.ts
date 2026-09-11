@@ -7,6 +7,8 @@ import { MarketingCampaignsRouter } from "./campaigns.router";
 import { MarketingCampaignsService } from "./campaigns.service";
 import { MarketingContentRouter } from "./content.router";
 import { MarketingContentService } from "./content.service";
+import { MarketingEmailRouter } from "./email.router";
+import { MarketingEmailService } from "./email.service";
 import { ListmonkClient } from "./listmonk.client";
 import { MarketingRouter } from "./marketing.router";
 import { MarketingService } from "./marketing.service";
@@ -26,6 +28,8 @@ import { MarketingSocialService } from "./social.service";
 		MarketingCampaignsRouter,
 		MarketingContentService,
 		MarketingContentRouter,
+		MarketingEmailService,
+		MarketingEmailRouter,
 		MarketingMediaService,
 		MarketingMediaRouter,
 		MarketingSocialService,

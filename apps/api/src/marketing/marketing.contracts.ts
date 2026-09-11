@@ -168,6 +168,15 @@ const adsCampaignOutput = z.object({
 	),
 });
 
+export const emailPendingScheduleOutput = z.object({
+	id: z.string(),
+	summary: z.string(),
+	campaignId: z.number(),
+	campaignName: z.string().nullable(),
+	sendAt: z.string(),
+	createdAt: z.string(),
+});
+
 export const emailMarketingOutput = z.object({
 	integration: marketingIntegrationOutput,
 	campaigns: z.array(listmonkCampaignOutput),
@@ -176,6 +185,7 @@ export const emailMarketingOutput = z.object({
 	subscribers: z.object({
 		total: z.number().nullable(),
 	}),
+	pendingSchedules: z.array(emailPendingScheduleOutput),
 	metrics: z.array(metricOutput),
 	error: z.string().nullable(),
 });

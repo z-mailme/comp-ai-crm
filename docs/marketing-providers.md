@@ -56,14 +56,28 @@ Recorded requirements, to confirm against the live docs:
 
 ## Listmonk
 
+Verified against the official docs at https://listmonk.app/docs/apis/ on
+2026-09-11 (campaigns, subscribers, lists):
+
 - Self-hosted; REST API under `/api`.
 - Auth: HTTP basic (username/password) or token; both are supported by the
   client and stored server-side only.
-- Used endpoints: `GET /api/campaigns`, `GET /api/lists`,
-  `GET /api/templates`, `GET /api/subscribers` (totals),
-  `POST /api/campaigns`, `POST /api/campaigns/{id}/test`.
+- Used endpoints: `GET /api/campaigns?no_body=true`, `GET /api/lists`,
+  `GET /api/templates`, `GET /api/subscribers` (totals and per-list pages),
+  `POST /api/campaigns` (JSON: `name`, `subject`, `lists`, `from_email`,
+  `send_at`, `tags`, `body`, `content_type`),
+  `PUT /api/campaigns/{id}` (sets `send_at`),
+  `PUT /api/campaigns/{id}/status` (`scheduled` from `draft` only),
+  `POST /api/campaigns/{id}/test`, `POST /api/lists` (`type`, `optin`),
+  `POST /api/subscribers` (`preconfirm_subscriptions` used because consent is
+  recorded in the CRM).
+- Scheduling a campaign means setting `send_at` and then moving the campaign
+  from `draft` to `scheduled`; both calls run only after a Comp AI approval
+  request is approved.
 - Listmonk owns bulk sending, bounce handling and the unsubscribe page. Comp AI
   never re-adds an address Listmonk has unsubscribed.
+- Block-based templates live in Comp AI (`MarketingEmailTemplate`) and render
+  to HTML server-side; the unsubscribe block renders `{{ UnsubscribeURL }}`.
 
 ## Canva
 

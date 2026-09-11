@@ -14,6 +14,7 @@ import {
 import { WORKSPACE_ID } from "@crm/db/workspace";
 import { BusinessOsService } from "../src/business-os/business-os.service";
 import { ConversionService } from "../src/currency/conversion.service";
+import { MarketingEmailService } from "../src/marketing/email.service";
 import { MarketingService } from "../src/marketing/marketing.service";
 
 const suffix = process.env.TEST_RUN_ID ?? crypto.randomUUID();
@@ -31,7 +32,12 @@ let marketingService: MarketingService;
 beforeAll(async () => {
 	listmonk = new FakeListmonkClient();
 	ads = new FakeAdsClient();
-	marketingService = new MarketingService(db, listmonk as never, ads as never);
+	marketingService = new MarketingService(
+		db,
+		listmonk as never,
+		ads as never,
+		new MarketingEmailService(db, listmonk as never),
+	);
 	await clean();
 	await seedWorkspace();
 });
