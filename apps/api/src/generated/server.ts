@@ -31,6 +31,7 @@ import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput
 import { financeWeekInput, financeWeekOutput, addExpenseInput, expenseMutationOutput, cancelExpenseInput } from "../finance/finance.contracts";
 import { gmailLabelOutput, mailboxThreadsInput, mailboxThreadsOutput, mailboxActionInput, mailboxActionOutput, googleConnectionStatusOutput, reindexCalendarInput, reindexCalendarOutput, historicalImportJobOutput, createHistoricalImportInput, historicalImportIdInput, sendEmailInput, sendEmailOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
+import { listCampaignsInput, campaignListOutput, campaignByIdInput, campaignDetailOutput, createCampaignInput, campaignOutput, updateCampaignInput, sourceBreakdownOutput } from "../marketing/campaigns.contracts";
 import { marketingContextInput, marketingOverviewOutput, emailMarketingOutput, adsWorkspaceOutput, listmonkConnectionInput, marketingIntegrationOutput, adsConnectionInput, marketingProviderInput, createListmonkCampaignInput, createListmonkCampaignOutput, sendListmonkTestInput, requestMarketingActionInput, approvalRequestOutput } from "../marketing/marketing.contracts";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
 import { agentModelOutput, modelCatalogOutput, aiProviderStatusOutput, testProviderInput, testProviderOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput, popAutoAcknowledgeOutput, setPopAutoAcknowledgeInput } from "../settings/settings.contracts";
@@ -728,6 +729,36 @@ const appRouter = t.router({
     event: publicProcedure
       .input(calendarEventInput)
       .output(calendarEventOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  marketingCampaigns: t.router({
+    list: publicProcedure
+      .input(listCampaignsInput)
+      .output(campaignListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    detail: publicProcedure
+      .input(campaignByIdInput)
+      .output(campaignDetailOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    create: publicProcedure
+      .input(createCampaignInput)
+      .output(campaignOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    update: publicProcedure
+      .input(updateCampaignInput)
+      .output(campaignOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    archive: publicProcedure
+      .input(z.object({ id: z.string().trim().min(1) }))
+      .output(campaignOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    sources: publicProcedure
+      .input(z.object({
+			businessUnitId: z.string().trim().min(1).optional(),
+			from: z.string().datetime({ offset: true }).optional(),
+			to: z.string().datetime({ offset: true }).optional(),
+		}))
+      .output(sourceBreakdownOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   marketing: t.router({

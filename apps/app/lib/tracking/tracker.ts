@@ -63,7 +63,10 @@ function touch(){
  var c=param(q,"utm_campaign");if(c)t.campaign=c;
  var tm=param(q,"utm_term");if(tm)t.term=tm;
  var ct=param(q,"utm_content");if(ct)t.content=ct;
- var gc=param(q,"gclid");if(gc&&!s){t.source="Google";t.medium="cpc"}
+ var gc=param(q,"gclid");if(gc){t.gclid=gc;if(!s){t.source="Google";t.medium="cpc"}}
+ var gb=param(q,"gbraid");if(gb)t.gbraid=gb;
+ var wb=param(q,"wbraid");if(wb)t.wbraid=wb;
+ var fb=param(q,"fbclid");if(fb){t.fbclid=fb;if(!s){t.source="Facebook";t.medium="cpc"}}
  var r=d.referrer;
  if(r){try{if(new URL(r).hostname.toLowerCase()!==host())t.referrer=r.slice(0,300)}catch(e){}}
  return t}

@@ -52,6 +52,8 @@ model User {
   createdAutomationRules             AutomationRule[]              @relation("AutomationRuleCreator")
   createdMarketingIntegrations       MarketingIntegration[]        @relation("MarketingIntegrationCreator")
   createdMarketingAudiences          MarketingAudience[]           @relation("MarketingAudienceCreator")
+  ownedMarketingCampaigns            MarketingCampaign[]           @relation("MarketingCampaignOwner")
+  createdMarketingCampaigns          MarketingCampaign[]           @relation("MarketingCampaignCreator")
   conversationShares                 AgentConversationShare[]      @relation("ConversationShareCreator")
   conversationSubmissions            AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
   conversationFeedback               AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
@@ -463,6 +465,11 @@ model Contact {
 
   source RecordSource @default(MANUAL)
 
+  emailMarketingAllowed  Boolean   @default(false)
+  marketingConsentSource String?
+  consentDate            DateTime?
+  unsubscribeDate        DateTime?
+
   lastActivityAt DateTime?
   archivedAt     DateTime?
 
@@ -782,7 +789,7 @@ model AgentVersion {
   status AgentVersionStatus @default(DRAFT)
 
   instructions             String
-  autonomyLevel            Int     @default(1)
+  autonomyLevel            Int    @default(1)
   manifest                 Json
   modelId                  String
   modelContextWindowTokens Int    @default(1000000)
@@ -1064,15 +1071,15 @@ model Deal {
   lastActivityAt DateTime?
   archivedAt     DateTime?
 
-  contacts     DealContact[]
-  bookings     Booking[]
-  expenses     Expense[]
-  activities   Activity[]
-  emailThreads EmailThread[]
-  fieldValues  FieldValue[]
+  contacts          DealContact[]
+  bookings          Booking[]
+  expenses          Expense[]
+  activities        Activity[]
+  emailThreads      EmailThread[]
+  fieldValues       FieldValue[]
   businessKnowledge BusinessKnowledge[]
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
 
   @@index([companyId])
   @@index([ownerId])
@@ -1184,11 +1191,11 @@ model Expense {
   booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   dealId String?
-  deal   Deal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
 
   category ExpenseCategory
-  source   ExpenseSource  @default(MANUAL)
-  status   ExpenseStatus  @default(RECORDED)
+  source   ExpenseSource   @default(MANUAL)
+  status   ExpenseStatus   @default(RECORDED)
 
   amountCents Int
   currency    String @default("ZAR")
@@ -1631,7 +1638,7 @@ model EmailMessage {
   threadId String
   thread   EmailThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
-  rfcMessageId     String  @unique
+  rfcMessageId     String   @unique
   syncedByUserId   String?
   gmailMessageId   String?
   gmailThreadId    String?
@@ -1776,19 +1783,19 @@ model BrainAnalysisJob {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  source String @default("gmail")
+  source String                 @default("gmail")
   status BrainAnalysisJobStatus @default(PLANNING)
 
   cursorLastMessageAt DateTime?
   cursorThreadId      String?
 
-  totalThreads      Int @default(0)
-  processedThreads  Int @default(0)
-  knowledgeWritten  Int @default(0)
-  conflictsFound    Int @default(0)
+  totalThreads     Int @default(0)
+  processedThreads Int @default(0)
+  knowledgeWritten Int @default(0)
+  conflictsFound   Int @default(0)
 
-  tokensInput  Int @default(0)
-  tokensOutput Int @default(0)
+  tokensInput  Int     @default(0)
+  tokensOutput Int     @default(0)
   modelUsed    String?
   providerUsed String?
 
@@ -1796,8 +1803,8 @@ model BrainAnalysisJob {
 
   startedAt   DateTime?
   completedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([userId, status])
   @@index([status])
@@ -1827,10 +1834,10 @@ model BusinessKnowledge {
   confirmedById  String?
   confirmedAt    DateTime?
 
-  validFrom     DateTime  @default(now())
-  validUntil    DateTime?
+  validFrom      DateTime            @default(now())
+  validUntil     DateTime?
   supersededById String?
-  supersededBy   BusinessKnowledge? @relation("KnowledgeSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersededBy   BusinessKnowledge?  @relation("KnowledgeSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
   supersedes     BusinessKnowledge[] @relation("KnowledgeSupersession")
 
   companyId String?
@@ -1852,7 +1859,6 @@ model BusinessKnowledge {
   @@index([supersededById])
   @@map("businessKnowledge")
 }
-
 
 enum AgentKind {
   CUSTOMER_SERVICE
@@ -1999,6 +2005,7 @@ model BusinessUnit {
   marketingIntegrations   MarketingIntegration[]
   marketingAudiences      MarketingAudience[]
   marketingCreativeAssets MarketingCreativeAsset[]
+  marketingCampaigns      MarketingCampaign[]
   calendarEvents          CalendarEvent[]
   mailboxSyncs            MailboxSync[]
   customerIdentities      CustomerIdentity[]
@@ -2746,6 +2753,52 @@ enum MarketingProvider {
   META_ADS
 }
 
+enum MarketingCampaignStatus {
+  DRAFT
+  PLANNED
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+model MarketingCampaign {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  name           String
+  objective      String?
+  status         MarketingCampaignStatus @default(DRAFT)
+  startDate      DateTime?
+  endDate        DateTime?
+  budget         Decimal?                @db.Decimal(14, 2)
+  currency       String                  @default("USD")
+  targetAudience String?
+  channels       Json                    @default("[]")
+  notes          String?
+
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+
+  ownerId String?
+  owner   User?   @relation("MarketingCampaignOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  createdById String?
+  createdBy   User?   @relation("MarketingCampaignCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status])
+  @@index([businessUnitId, utmCampaign])
+  @@map("marketingCampaign")
+}
+
 enum MarketingIntegrationStatus {
   CONNECTED
   NOT_CONFIGURED
@@ -2966,6 +3019,10 @@ model TrackedVisitor {
   firstContent  String?
   firstReferrer String?
   firstLanding  String?
+  firstGclid    String?
+  firstGbraid   String?
+  firstWbraid   String?
+  firstFbclid   String?
   firstTouchAt  DateTime?
 
   lastSource   String?
@@ -2975,6 +3032,10 @@ model TrackedVisitor {
   lastContent  String?
   lastReferrer String?
   lastLanding  String?
+  lastGclid    String?
+  lastGbraid   String?
+  lastWbraid   String?
+  lastFbclid   String?
   lastTouchAt  DateTime?
 
   firstSeen DateTime @default(now())

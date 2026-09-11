@@ -20,6 +20,10 @@ export interface RawTouch {
 	content?: string;
 	referrer?: string;
 	landing?: string;
+	gclid?: string;
+	gbraid?: string;
+	wbraid?: string;
+	fbclid?: string;
 	at?: number;
 }
 
@@ -31,6 +35,10 @@ export interface Touch {
 	content: string | null;
 	referrer: string | null;
 	landing: string | null;
+	gclid: string | null;
+	gbraid: string | null;
+	wbraid: string | null;
+	fbclid: string | null;
 	at: Date;
 }
 
@@ -100,6 +108,12 @@ export function classifyTouch(raw: RawTouch, at: Date = new Date()): Touch {
 	const content = clean(raw.content);
 	const referrer = clean(raw.referrer);
 	const landing = clean(raw.landing);
+	const clickIds = {
+		gclid: clean(raw.gclid),
+		gbraid: clean(raw.gbraid),
+		wbraid: clean(raw.wbraid),
+		fbclid: clean(raw.fbclid),
+	};
 
 	const utmSource = clean(raw.source);
 	const utmMedium = clean(raw.medium)?.toLowerCase();
@@ -112,6 +126,7 @@ export function classifyTouch(raw: RawTouch, at: Date = new Date()): Touch {
 			term,
 			content,
 			referrer,
+			...clickIds,
 			landing,
 			at: valid(when) ? when : at,
 		};
@@ -127,6 +142,7 @@ export function classifyTouch(raw: RawTouch, at: Date = new Date()): Touch {
 			term,
 			content,
 			referrer: null,
+			...clickIds,
 			landing,
 			at: valid(when) ? when : at,
 		};
@@ -151,6 +167,7 @@ export function classifyTouch(raw: RawTouch, at: Date = new Date()): Touch {
 		term,
 		content,
 		referrer,
+		...clickIds,
 		landing,
 		at: valid(when) ? when : at,
 	};
