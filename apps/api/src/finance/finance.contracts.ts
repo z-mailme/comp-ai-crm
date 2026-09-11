@@ -5,7 +5,8 @@ import {
 	ExpenseSource,
 	ExpenseStatus,
 	PaymentStatus,
-} from "@crm/db/enums";
+	type Prisma,
+} from "@crm/db";
 import { z } from "zod";
 import { FINANCE } from "./finance-config";
 
@@ -37,7 +38,9 @@ export const expenseEvidence = z.object({
 
 export type ExpenseEvidence = z.infer<typeof expenseEvidence>;
 
-export function parseExpenseEvidence(value: unknown): ExpenseEvidence | null {
+export function parseExpenseEvidence(
+	value: Prisma.JsonValue | null,
+): ExpenseEvidence | null {
 	const parsed = expenseEvidence.safeParse(value);
 	return parsed.success ? parsed.data : null;
 }

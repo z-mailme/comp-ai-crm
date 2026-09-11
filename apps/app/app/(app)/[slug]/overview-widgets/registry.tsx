@@ -28,7 +28,7 @@ export type WidgetCategory =
 	| "OPERATIONS"
 	| "AI";
 
-export const WIDGET_CATEGORY_LABELS: Record<WidgetCategory, string> = {
+export const WIDGET_CATEGORY_LABELS = {
 	BUSINESS: "Business",
 	SALES: "Sales",
 	COMMUNICATION: "Communication",
@@ -36,7 +36,7 @@ export const WIDGET_CATEGORY_LABELS: Record<WidgetCategory, string> = {
 	MARKETING: "Marketing",
 	OPERATIONS: "Operations",
 	AI: "AI",
-};
+} satisfies Record<WidgetCategory, string>;
 
 export type WidgetDefinition = {
 	id: WidgetId;

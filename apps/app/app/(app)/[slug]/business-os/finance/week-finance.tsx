@@ -65,12 +65,12 @@ const EXPENSE_CATEGORIES: { value: ExpenseCategory; label: string }[] = [
 	{ value: "OTHER", label: "Other" },
 ];
 
-const ISSUE_LABELS: Record<WeekRow["issues"][number], string> = {
+const ISSUE_LABELS = {
 	PRICE_NEEDED: "Price needed",
 	OPERATOR_COUNT_NEEDED: "Operator count needed",
 	DURATION_NEEDED: "Times needed",
 	REVENUE_UNCONVERTED: "No exchange rate",
-};
+} satisfies Record<WeekRow["issues"][number], string>;
 
 const EVENT_COLUMNS: SimpleTableColumn[] = [
 	{ id: "date", header: "Date", width: "w-28" },
