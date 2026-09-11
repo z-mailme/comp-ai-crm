@@ -31,6 +31,7 @@ import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput
 import { financeWeekInput, financeWeekOutput, addExpenseInput, expenseMutationOutput, cancelExpenseInput } from "../finance/finance.contracts";
 import { gmailLabelOutput, mailboxThreadsInput, mailboxThreadsOutput, mailboxActionInput, mailboxActionOutput, googleConnectionStatusOutput, reindexCalendarInput, reindexCalendarOutput, historicalImportJobOutput, createHistoricalImportInput, historicalImportIdInput, sendEmailInput, sendEmailOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
+import { audienceContextInput, audienceListOutput, audienceCountInput, audienceCountOutput, createAudienceInput, audienceOutput, updateAudienceInput, audienceByIdInput, audienceExportInput, audienceExportOutput } from "../marketing/audiences.contracts";
 import { listCampaignsInput, campaignListOutput, campaignByIdInput, campaignDetailOutput, createCampaignInput, campaignOutput, updateCampaignInput, sourceBreakdownOutput } from "../marketing/campaigns.contracts";
 import { listContentInput, contentListOutput, contentByIdInput, contentDetailOutput, createContentInput, contentOutput, updateContentInput, decideContentInput, scheduleContentInput, aiAssistInput } from "../marketing/content.contracts";
 import { emailTemplateContextInput, emailTemplateListOutput, createEmailTemplateInput, emailTemplateOutput, updateEmailTemplateInput, archiveEmailTemplateInput, emailTemplateByIdInput, emailTemplateRenderOutput, composeEmailCampaignInput, emailCampaignOutput, emailScheduleRequestInput, emailScheduleOutput, emailScheduleDecideInput, emailCreateListInput, emailListOutput, emailSyncListInput, emailSyncOutput, emailSubscribersInput, emailSubscribersOutput } from "../marketing/email.contracts";
@@ -734,6 +735,32 @@ const appRouter = t.router({
       .input(calendarEventInput)
       .output(calendarEventOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  marketingAudiences: t.router({
+    list: publicProcedure
+      .input(audienceContextInput)
+      .output(audienceListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    count: publicProcedure
+      .input(audienceCountInput)
+      .output(audienceCountOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    create: publicProcedure
+      .input(createAudienceInput)
+      .output(audienceOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    update: publicProcedure
+      .input(updateAudienceInput)
+      .output(audienceOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    archive: publicProcedure
+      .input(audienceByIdInput)
+      .output(audienceOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    exportToList: publicProcedure
+      .input(audienceExportInput)
+      .output(audienceExportOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   marketingCampaigns: t.router({
     list: publicProcedure

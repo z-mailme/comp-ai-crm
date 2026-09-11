@@ -3,6 +3,8 @@ import { AgentModule } from "../agent/agent.module";
 import { TrpcModule } from "../trpc/trpc.module";
 import { AdsClient } from "./ads.client";
 import { MarketingAttributionService } from "./attribution.service";
+import { MarketingAudiencesRouter } from "./audiences.router";
+import { MarketingAudiencesService } from "./audiences.service";
 import { MarketingCampaignsRouter } from "./campaigns.router";
 import { MarketingCampaignsService } from "./campaigns.service";
 import { MarketingContentRouter } from "./content.router";
@@ -34,6 +36,8 @@ import { MarketingSocialService } from "./social.service";
 		MarketingMediaRouter,
 		MarketingSocialService,
 		MarketingSocialRouter,
+		MarketingAudiencesService,
+		MarketingAudiencesRouter,
 		MarketingAttributionService,
 		ListmonkClient,
 		AdsClient,

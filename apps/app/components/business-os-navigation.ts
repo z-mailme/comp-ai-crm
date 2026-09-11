@@ -184,9 +184,10 @@ export const BUSINESS_OS_NAVIGATION: readonly NavigationGroup[] = [
 			},
 			{
 				title: "Audiences",
-				href: "/business-os/audiences",
-				status: "COMING_SOON",
+				href: "/marketing/audiences",
+				status: "ACTIVE",
 				match: "prefix",
+				prefetchSection: "/marketing/audiences",
 				icon: "people",
 			},
 		],
