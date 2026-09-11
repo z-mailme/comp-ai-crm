@@ -106,10 +106,7 @@ export class MarketingCampaignsRouter {
 	}
 }
 
-function sourceOf(
-	ctx: AuthedTrpcContext,
-	input?: { businessUnitId?: string },
-) {
+function sourceOf(ctx: AuthedTrpcContext, input?: { businessUnitId?: string }) {
 	return {
 		userId: ctx.user.id,
 		businessUnitId: input?.businessUnitId ?? businessUnitHeader(ctx),

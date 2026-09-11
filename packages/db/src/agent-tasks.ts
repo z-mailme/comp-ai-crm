@@ -14,6 +14,7 @@ export const TASK_KINDS = [
 	"provider-test",
 	"brain-scan",
 	"event-bridge",
+	"marketing-content-assist",
 ] as const;
 
 export type TaskKind = (typeof TASK_KINDS)[number];
@@ -27,6 +28,7 @@ export const DIRECT_KINDS = [
 	"provider-test",
 	"brain-scan",
 	"event-bridge",
+	"marketing-content-assist",
 ] as const;
 
 export type DirectKind = (typeof DIRECT_KINDS)[number];

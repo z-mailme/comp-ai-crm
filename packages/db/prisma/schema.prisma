@@ -54,6 +54,10 @@ model User {
   createdMarketingAudiences          MarketingAudience[]           @relation("MarketingAudienceCreator")
   ownedMarketingCampaigns            MarketingCampaign[]           @relation("MarketingCampaignOwner")
   createdMarketingCampaigns          MarketingCampaign[]           @relation("MarketingCampaignCreator")
+  ownedMarketingContents             MarketingContent[]            @relation("MarketingContentOwner")
+  createdMarketingContents           MarketingContent[]            @relation("MarketingContentCreator")
+  approvedMarketingContents          MarketingContent[]            @relation("MarketingContentApprover")
+  uploadedMarketingMedia             MarketingMediaAsset[]         @relation("MarketingMediaUploader")
   conversationShares                 AgentConversationShare[]      @relation("ConversationShareCreator")
   conversationSubmissions            AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
   conversationFeedback               AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
@@ -2006,6 +2010,8 @@ model BusinessUnit {
   marketingAudiences      MarketingAudience[]
   marketingCreativeAssets MarketingCreativeAsset[]
   marketingCampaigns      MarketingCampaign[]
+  marketingContents       MarketingContent[]
+  marketingMediaAssets    MarketingMediaAsset[]
   calendarEvents          CalendarEvent[]
   mailboxSyncs            MailboxSync[]
   customerIdentities      CustomerIdentity[]
@@ -2762,6 +2768,31 @@ enum MarketingCampaignStatus {
   ARCHIVED
 }
 
+enum MarketingContentStatus {
+  IDEA
+  DRAFT
+  READY_FOR_REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+  REJECTED
+  ARCHIVED
+}
+
+enum MarketingContentType {
+  SOCIAL_POST
+  REEL
+  STORY
+  STATIC_IMAGE
+  CAROUSEL
+  EMAIL
+  AD_COPY
+  BLOG
+  LANDING_COPY
+  PROMOTION
+  ANNOUNCEMENT
+}
+
 model MarketingCampaign {
   id String @id @default(cuid())
 
@@ -2791,12 +2822,117 @@ model MarketingCampaign {
   createdById String?
   createdBy   User?   @relation("MarketingCampaignCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
+  contents    MarketingContent[]
+  mediaAssets MarketingMediaAsset[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([businessUnitId, status])
   @@index([businessUnitId, utmCampaign])
   @@map("marketingCampaign")
+}
+
+model MarketingContent {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  campaignId String?
+  campaign   MarketingCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  title    String
+  type     MarketingContentType   @default(SOCIAL_POST)
+  status   MarketingContentStatus @default(DRAFT)
+  platforms Json                  @default("[]")
+
+  caption  String?
+  headline String?
+  cta      String?
+  link     String?
+  hashtags Json @default("[]")
+
+  scheduledAt DateTime?
+  publishedAt DateTime?
+
+  internalNotes String?
+  aiAssisted    Boolean @default(false)
+  aiSuggestion  Json?
+
+  listmonkCampaignId Int?
+
+  ownerId String?
+  owner   User?   @relation("MarketingContentOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  createdById String?
+  createdBy   User?   @relation("MarketingContentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  approvedById String?
+  approvedBy   User?   @relation("MarketingContentApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  archivedAt DateTime?
+
+  media MarketingContentMedia[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status])
+  @@index([businessUnitId, scheduledAt])
+  @@index([campaignId])
+  @@map("marketingContent")
+}
+
+model MarketingMediaAsset {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  campaignId String?
+  campaign   MarketingCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  width           Int?
+  height          Int?
+  durationSeconds Float?
+
+  sha256  String?
+  blobUrl String
+
+  tags Json @default("[]")
+
+  uploadedById String?
+  uploadedBy   User?   @relation("MarketingMediaUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  archivedAt DateTime?
+
+  usages MarketingContentMedia[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, sha256])
+  @@index([businessUnitId, archivedAt])
+  @@map("marketingMediaAsset")
+}
+
+model MarketingContentMedia {
+  contentId String
+  content   MarketingContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  assetId String
+  asset   MarketingMediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  position Int @default(0)
+
+  @@id([contentId, assetId])
+  @@index([assetId])
+  @@map("marketingContentMedia")
 }
 
 enum MarketingIntegrationStatus {

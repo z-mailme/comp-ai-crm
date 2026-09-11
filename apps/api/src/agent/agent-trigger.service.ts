@@ -119,6 +119,21 @@ export class AgentTriggerService {
 		});
 	}
 
+	async marketingContentAssistRequested(
+		contentId: string,
+		businessUnitId: string,
+		instruction: string,
+	): Promise<boolean> {
+		return this.enqueue({
+			kind: "marketing-content-assist",
+			reason: "Draft marketing copy for a content item",
+			priority: PRIORITY.requested,
+			budget: 4,
+			payload: { contentId, businessUnitId, instruction },
+			subject: { path: ["contentId"], value: contentId },
+		});
+	}
+
 	async eventBridgeRequested(): Promise<boolean> {
 		return this.enqueue({
 			kind: "event-bridge",

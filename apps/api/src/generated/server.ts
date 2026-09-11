@@ -32,7 +32,9 @@ import { financeWeekInput, financeWeekOutput, addExpenseInput, expenseMutationOu
 import { gmailLabelOutput, mailboxThreadsInput, mailboxThreadsOutput, mailboxActionInput, mailboxActionOutput, googleConnectionStatusOutput, reindexCalendarInput, reindexCalendarOutput, historicalImportJobOutput, createHistoricalImportInput, historicalImportIdInput, sendEmailInput, sendEmailOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
 import { listCampaignsInput, campaignListOutput, campaignByIdInput, campaignDetailOutput, createCampaignInput, campaignOutput, updateCampaignInput, sourceBreakdownOutput } from "../marketing/campaigns.contracts";
+import { listContentInput, contentListOutput, contentByIdInput, contentDetailOutput, createContentInput, contentOutput, updateContentInput, decideContentInput, scheduleContentInput, aiAssistInput } from "../marketing/content.contracts";
 import { marketingContextInput, marketingOverviewOutput, emailMarketingOutput, adsWorkspaceOutput, listmonkConnectionInput, marketingIntegrationOutput, adsConnectionInput, marketingProviderInput, createListmonkCampaignInput, createListmonkCampaignOutput, sendListmonkTestInput, requestMarketingActionInput, approvalRequestOutput } from "../marketing/marketing.contracts";
+import { listMediaInput, mediaListOutput, attachMediaInput, detachMediaInput, archiveMediaInput, mediaAssetOutput } from "../marketing/media.contracts";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
 import { agentModelOutput, modelCatalogOutput, aiProviderStatusOutput, testProviderInput, testProviderOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput, popAutoAcknowledgeOutput, setPopAutoAcknowledgeInput } from "../settings/settings.contracts";
 import { slackStatusOutput, slackMatchesOutput, slackChannelsInput, slackChannelsOutput, slackJoinChannelInput, slackJoinChannelOutput, slackRefreshPeopleOutput, slackCreateChannelInput, slackCreateChannelOutput, slackDisconnectOutput } from "../slack/slack.contracts";
@@ -761,6 +763,51 @@ const appRouter = t.router({
       .output(sourceBreakdownOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
+  marketingContent: t.router({
+    list: publicProcedure
+      .input(listContentInput)
+      .output(contentListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    detail: publicProcedure
+      .input(contentByIdInput)
+      .output(contentDetailOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    create: publicProcedure
+      .input(createContentInput)
+      .output(contentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    update: publicProcedure
+      .input(updateContentInput)
+      .output(contentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    duplicate: publicProcedure
+      .input(contentByIdInput)
+      .output(contentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    archive: publicProcedure
+      .input(contentByIdInput)
+      .output(contentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    submitForReview: publicProcedure
+      .input(contentByIdInput)
+      .output(z.object({
+			content: contentOutput,
+			approvalRequestId: z.string(),
+		}))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    decide: publicProcedure
+      .input(decideContentInput)
+      .output(contentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    schedule: publicProcedure
+      .input(scheduleContentInput)
+      .output(contentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    aiAssist: publicProcedure
+      .input(aiAssistInput)
+      .output(z.object({ queued: z.boolean() }))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
   marketing: t.router({
     overview: publicProcedure
       .input(marketingContextInput)
@@ -801,6 +848,24 @@ const appRouter = t.router({
     requestAction: publicProcedure
       .input(requestMarketingActionInput)
       .output(approvalRequestOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  marketingMedia: t.router({
+    list: publicProcedure
+      .input(listMediaInput)
+      .output(mediaListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    attach: publicProcedure
+      .input(attachMediaInput)
+      .output(z.object({ ok: z.boolean() }))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    detach: publicProcedure
+      .input(detachMediaInput)
+      .output(z.object({ ok: z.boolean() }))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    archive: publicProcedure
+      .input(archiveMediaInput)
+      .output(mediaAssetOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   microsoft: t.router({
