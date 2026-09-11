@@ -27,7 +27,13 @@ import {
 import { SimpleTable, SimpleTableRow } from "@crm/ui/components/simple-table";
 import { Spinner } from "@crm/ui/components/spinner";
 import { TableCell } from "@crm/ui/components/table";
-import { formatMoney } from "@crm/ui/lib/format";
+import {
+	Tabs,
+	TabsContent,
+	TabsList,
+	TabsTrigger,
+} from "@crm/ui/components/tabs";
+import { formatMoney, formatMoneyCompact } from "@crm/ui/lib/format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
@@ -38,6 +44,8 @@ import type { RouterOutputs } from "@/lib/trpc/types";
 import { useWorkspaceUrl } from "@/lib/use-workspace-url";
 
 type Campaign = RouterOutputs["marketingCampaigns"]["list"]["rows"][number];
+type PerformanceRow =
+	RouterOutputs["marketingCampaigns"]["performance"]["rows"][number];
 
 const STATUS_FILTERS = [
 	"ALL",
@@ -66,6 +74,22 @@ const COLUMNS = [
 	{ id: "budget", header: "Budget", align: "right" as const, width: "8rem" },
 	{ id: "utm", header: "UTM campaign" },
 	{ id: "updated", header: "Updated", width: "7rem" },
+];
+
+const PERFORMANCE_COLUMNS = [
+	{ id: "name", header: "Campaign" },
+	{ id: "spend", header: "Spend", align: "right" as const, width: "7rem" },
+	{ id: "leads", header: "Leads", align: "right" as const, width: "5rem" },
+	{
+		id: "bookings",
+		header: "Bookings",
+		align: "right" as const,
+		width: "6rem",
+	},
+	{ id: "revenue", header: "Revenue", align: "right" as const, width: "8rem" },
+	{ id: "cpl", header: "CPL", align: "right" as const, width: "6rem" },
+	{ id: "cpb", header: "CPB", align: "right" as const, width: "6rem" },
+	{ id: "roas", header: "ROAS", align: "right" as const, width: "5rem" },
 ];
 
 export function CampaignsView() {
@@ -103,25 +127,31 @@ export function CampaignsView() {
 	}
 
 	return (
-		<div className="flex flex-col gap-4">
+		<Tabs defaultValue="campaigns" className="flex flex-col gap-4">
 			<div className="flex flex-wrap items-center justify-between gap-3">
-				<Select
-					value={status}
-					onValueChange={(value) =>
-						setStatus(value as (typeof STATUS_FILTERS)[number])
-					}
-				>
-					<SelectTrigger className="w-40">
-						<SelectValue />
-					</SelectTrigger>
-					<SelectContent>
-						{STATUS_FILTERS.map((entry) => (
-							<SelectItem key={entry} value={entry}>
-								{entry === "ALL" ? "All statuses" : entry}
-							</SelectItem>
-						))}
-					</SelectContent>
-				</Select>
+				<div className="flex flex-wrap items-center gap-3">
+					<TabsList>
+						<TabsTrigger value="campaigns">Campaigns</TabsTrigger>
+						<TabsTrigger value="performance">Performance</TabsTrigger>
+					</TabsList>
+					<Select
+						value={status}
+						onValueChange={(value) =>
+							setStatus(value as (typeof STATUS_FILTERS)[number])
+						}
+					>
+						<SelectTrigger className="w-40">
+							<SelectValue />
+						</SelectTrigger>
+						<SelectContent>
+							{STATUS_FILTERS.map((entry) => (
+								<SelectItem key={entry} value={entry}>
+									{entry === "ALL" ? "All statuses" : entry}
+								</SelectItem>
+							))}
+						</SelectContent>
+					</Select>
+				</div>
 
 				<Dialog open={open} onOpenChange={setOpen}>
 					<DialogTrigger asChild>
@@ -160,24 +190,143 @@ export function CampaignsView() {
 				</Dialog>
 			</div>
 
+			<TabsContent value="campaigns" className="mt-0">
+				<Card className="min-w-0">
+					<CardContent className="p-0">
+						{list.data.rows.length === 0 ? (
+							<p className="p-6 text-muted-foreground text-sm">
+								No campaigns yet. Create one to group your ads, email, social
+								and content work.
+							</p>
+						) : (
+							<SimpleTable columns={COLUMNS} surface="page">
+								{list.data.rows.map((campaign) => (
+									<CampaignRow key={campaign.id} campaign={campaign} />
+								))}
+							</SimpleTable>
+						)}
+					</CardContent>
+				</Card>
+			</TabsContent>
+
+			<TabsContent value="performance" className="mt-0">
+				<CampaignPerformanceReport />
+			</TabsContent>
+		</Tabs>
+	);
+}
+
+function CampaignPerformanceReport() {
+	const trpc = useTRPC();
+	const workspaceUrl = useWorkspaceUrl();
+	const report = useQuery(trpc.marketingCampaigns.performance.queryOptions({}));
+
+	if (report.isPending || !report.data) {
+		return (
+			<div className="flex justify-center py-12">
+				<Spinner />
+			</div>
+		);
+	}
+
+	return (
+		<div className="flex flex-col gap-3">
 			<Card className="min-w-0">
 				<CardContent className="p-0">
-					{list.data.rows.length === 0 ? (
+					{report.data.rows.length === 0 ? (
 						<p className="p-6 text-muted-foreground text-sm">
-							No campaigns yet. Create one to group your ads, email, social and
-							content work.
+							No campaigns yet.
 						</p>
 					) : (
-						<SimpleTable columns={COLUMNS} surface="page">
-							{list.data.rows.map((campaign) => (
-								<CampaignRow key={campaign.id} campaign={campaign} />
+						<SimpleTable columns={PERFORMANCE_COLUMNS} surface="page">
+							{report.data.rows.map((row) => (
+								<PerformanceReportRow
+									key={row.campaignId}
+									row={row}
+									href={workspaceUrl(`/marketing/campaigns/${row.campaignId}`)}
+								/>
 							))}
 						</SimpleTable>
 					)}
 				</CardContent>
 			</Card>
+			<p className="text-muted-foreground text-xs">
+				Leads, bookings and revenue come from stored UTM attribution on tracked
+				visitors. Spend comes from ads snapshots matched by exact campaign name.
+				A dash means the number is not measured. CPL, CPB and ROAS assume the ad
+				account currency matches the reporting currency.
+			</p>
 		</div>
 	);
+}
+
+function PerformanceReportRow({
+	row,
+	href,
+}: {
+	row: PerformanceRow;
+	href: string;
+}) {
+	return (
+		<SimpleTableRow>
+			<TableCell>
+				<Link href={href} className="font-medium hover:underline">
+					{row.name}
+				</Link>
+				{row.utmCampaign ? (
+					<p className="mt-0.5 truncate text-muted-foreground text-xs">
+						utm: {row.utmCampaign}
+					</p>
+				) : null}
+			</TableCell>
+			<TableCell className="text-right tabular-nums">
+				{row.spendMatched && row.spendMicros !== null ? (
+					<span title={row.spendProvider ?? undefined}>
+						{formatUnits(row.spendMicros)}
+					</span>
+				) : (
+					<EmptyCellValue />
+				)}
+			</TableCell>
+			<TableCell className="text-right tabular-nums">
+				{row.measured ? row.leads : <EmptyCellValue />}
+			</TableCell>
+			<TableCell className="text-right tabular-nums">
+				{row.measured ? row.bookings : <EmptyCellValue />}
+			</TableCell>
+			<TableCell className="text-right tabular-nums">
+				{row.closedRevenueCents === null ? (
+					<EmptyCellValue />
+				) : (
+					formatMoneyCompact(row.closedRevenueCents, row.currency)
+				)}
+			</TableCell>
+			<TableCell className="text-right tabular-nums">
+				{row.costPerLeadMicros === null ? (
+					<EmptyCellValue />
+				) : (
+					formatUnits(row.costPerLeadMicros)
+				)}
+			</TableCell>
+			<TableCell className="text-right tabular-nums">
+				{row.costPerBookingMicros === null ? (
+					<EmptyCellValue />
+				) : (
+					formatUnits(row.costPerBookingMicros)
+				)}
+			</TableCell>
+			<TableCell className="text-right tabular-nums">
+				{row.roas === null ? <EmptyCellValue /> : row.roas.toFixed(2)}
+			</TableCell>
+		</SimpleTableRow>
+	);
+}
+
+function formatUnits(micros: number): string {
+	return new Intl.NumberFormat(undefined, {
+		notation: "compact",
+		maximumFractionDigits: 1,
+	}).format(micros / 1_000_000);
 }
 
 function CampaignRow({ campaign }: { campaign: Campaign }) {

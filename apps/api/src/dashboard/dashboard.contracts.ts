@@ -98,6 +98,15 @@ export const DASHBOARD_WIDGET_IDS = [
 	"upcoming-events",
 	"inbox-unread",
 	"pending-approvals",
+	"marketing-performance",
+	"google-ads-performance",
+	"meta-ads-performance",
+	"email-performance",
+	"social-schedule",
+	"upcoming-content",
+	"campaign-performance",
+	"leads-by-source",
+	"revenue-by-channel",
 ] as const;
 
 export type DashboardWidgetId = (typeof DASHBOARD_WIDGET_IDS)[number];

@@ -14,6 +14,7 @@ import {
 import { WORKSPACE_ID } from "@crm/db/workspace";
 import { BusinessOsService } from "../src/business-os/business-os.service";
 import { ConversionService } from "../src/currency/conversion.service";
+import { MarketingAttributionService } from "../src/marketing/attribution.service";
 import { MarketingEmailService } from "../src/marketing/email.service";
 import { MarketingService } from "../src/marketing/marketing.service";
 
@@ -37,6 +38,7 @@ beforeAll(async () => {
 		listmonk as never,
 		ads as never,
 		new MarketingEmailService(db, listmonk as never),
+		new MarketingAttributionService(db),
 	);
 	await clean();
 	await seedWorkspace();

@@ -210,6 +210,33 @@ export const syncAdsOutput = z.object({
 	error: z.string().nullable(),
 });
 
+export const marketingRange = z.enum(["today", "7d", "28d", "90d"]);
+
+export const performanceSummaryInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	range: marketingRange.default("28d"),
+});
+
+export const performanceSummaryOutput = z.object({
+	range: marketingRange,
+	from: z.string(),
+	to: z.string(),
+	currency: z.string(),
+	leads: z.number(),
+	bookings: z.number(),
+	attributedRevenueCents: z.number().nullable(),
+	adSpendMicros: z.number().nullable(),
+	costPerLeadMicros: z.number().nullable(),
+	costPerBookingMicros: z.number().nullable(),
+	roas: z.number().nullable(),
+	attribution: z.object({
+		available: z.boolean(),
+		attributedVisitors: z.number(),
+		status: z.string(),
+	}),
+	notes: z.array(z.string()),
+});
+
 export const emailPendingScheduleOutput = z.object({
 	id: z.string(),
 	summary: z.string(),
@@ -260,6 +287,7 @@ export const marketingOverviewOutput = z.object({
 	}),
 	attribution: z.object({
 		available: z.boolean(),
+		attributedVisitors: z.number(),
 		status: z.string(),
 	}),
 });
@@ -287,6 +315,8 @@ export type RequestMarketingActionInput = z.infer<
 export type SyncAdsInput = z.infer<typeof syncAdsInput>;
 export type SyncAdsOutput = z.infer<typeof syncAdsOutput>;
 export type AdsSnapshotPayload = z.infer<typeof adsSnapshotPayload>;
+export type PerformanceSummaryInput = z.infer<typeof performanceSummaryInput>;
+export type PerformanceSummaryOutput = z.infer<typeof performanceSummaryOutput>;
 export type MarketingIntegrationOutput = z.infer<
 	typeof marketingIntegrationOutput
 >;

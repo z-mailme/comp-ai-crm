@@ -168,6 +168,7 @@ export class MarketingAttributionService {
 
 	async sourceBreakdown(range: AttributionRange = {}): Promise<{
 		rows: SourceBreakdownRow[];
+		currency: string;
 	}> {
 		const visitors = await this.db.trackedVisitor.findMany({
 			where: { contactId: { not: null } },
@@ -263,7 +264,7 @@ export class MarketingAttributionService {
 		}
 
 		rows.sort((a, b) => b.leads - a.leads);
-		return { rows };
+		return { rows, currency: base };
 	}
 }
 

@@ -110,6 +110,40 @@ export const sourceBreakdownRow = z.object({
 
 export const sourceBreakdownOutput = z.object({
 	rows: z.array(sourceBreakdownRow),
+	currency: z.string(),
+});
+
+export const campaignPerformanceReportInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	from: z.string().datetime({ offset: true }).optional(),
+	to: z.string().datetime({ offset: true }).optional(),
+});
+
+export const campaignPerformanceReportRow = z.object({
+	campaignId: z.string(),
+	name: z.string(),
+	status: z.nativeEnum(MarketingCampaignStatus),
+	channels: z.array(marketingChannel),
+	utmCampaign: z.string().nullable(),
+	leads: z.number(),
+	firstTouchLeads: z.number(),
+	lastTouchLeads: z.number(),
+	bookings: z.number(),
+	expectedRevenueCents: z.number().nullable(),
+	closedRevenueCents: z.number().nullable(),
+	unconvertedDeals: z.number(),
+	currency: z.string(),
+	spendMicros: z.number().nullable(),
+	spendProvider: z.string().nullable(),
+	spendMatched: z.boolean(),
+	costPerLeadMicros: z.number().nullable(),
+	costPerBookingMicros: z.number().nullable(),
+	roas: z.number().nullable(),
+	measured: z.boolean(),
+});
+
+export const campaignPerformanceReportOutput = z.object({
+	rows: z.array(campaignPerformanceReportRow),
 });
 
 export type CreateCampaignInput = z.input<typeof createCampaignInput>;
@@ -119,4 +153,10 @@ export type CampaignByIdInput = z.input<typeof campaignByIdInput>;
 export type CampaignOutput = z.infer<typeof campaignOutput>;
 export type CampaignPerformanceOutput = z.infer<
 	typeof campaignPerformanceOutput
+>;
+export type CampaignPerformanceReportInput = z.infer<
+	typeof campaignPerformanceReportInput
+>;
+export type CampaignPerformanceReportOutput = z.infer<
+	typeof campaignPerformanceReportOutput
 >;

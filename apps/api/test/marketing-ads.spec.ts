@@ -16,6 +16,7 @@ import {
 	mapMetaAds,
 	mapMetaCampaigns,
 } from "../src/marketing/ads.client";
+import { MarketingAttributionService } from "../src/marketing/attribution.service";
 import { MarketingService } from "../src/marketing/marketing.service";
 
 const marker = `marketing-ads-${process.env.TEST_RUN_ID ?? crypto.randomUUID()}`;
@@ -220,6 +221,7 @@ const service = new MarketingService(
 	{} as never,
 	ads as never,
 	{} as never,
+	new MarketingAttributionService(db),
 );
 
 async function seed(): Promise<void> {

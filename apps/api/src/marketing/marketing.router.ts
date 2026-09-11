@@ -23,6 +23,8 @@ import {
 	marketingIntegrationOutput,
 	marketingOverviewOutput,
 	marketingProviderInput,
+	performanceSummaryInput,
+	performanceSummaryOutput,
 	requestMarketingActionInput,
 	sendListmonkTestInput,
 	syncAdsInput,
@@ -167,6 +169,18 @@ export class MarketingRouter {
 		@Input() input: z.infer<typeof syncAdsInput>,
 	) {
 		return this.marketing.syncAds(sourceOf(ctx, input), input);
+	}
+
+	@Query({
+		input: performanceSummaryInput,
+		output: performanceSummaryOutput,
+		meta: restMeta("GET", "/marketing/performance", ["Marketing"]),
+	})
+	async performanceSummary(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof performanceSummaryInput>,
+	) {
+		return this.marketing.performanceSummary(sourceOf(ctx, input), input);
 	}
 }
 

@@ -32,10 +32,10 @@ import { financeWeekInput, financeWeekOutput, addExpenseInput, expenseMutationOu
 import { gmailLabelOutput, mailboxThreadsInput, mailboxThreadsOutput, mailboxActionInput, mailboxActionOutput, googleConnectionStatusOutput, reindexCalendarInput, reindexCalendarOutput, historicalImportJobOutput, createHistoricalImportInput, historicalImportIdInput, sendEmailInput, sendEmailOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
 import { audienceContextInput, audienceListOutput, audienceCountInput, audienceCountOutput, createAudienceInput, audienceOutput, updateAudienceInput, audienceByIdInput, audienceExportInput, audienceExportOutput } from "../marketing/audiences.contracts";
-import { listCampaignsInput, campaignListOutput, campaignByIdInput, campaignDetailOutput, createCampaignInput, campaignOutput, updateCampaignInput, sourceBreakdownOutput } from "../marketing/campaigns.contracts";
+import { listCampaignsInput, campaignListOutput, campaignByIdInput, campaignDetailOutput, createCampaignInput, campaignOutput, updateCampaignInput, sourceBreakdownOutput, campaignPerformanceReportInput, campaignPerformanceReportOutput } from "../marketing/campaigns.contracts";
 import { listContentInput, contentListOutput, contentByIdInput, contentDetailOutput, createContentInput, contentOutput, updateContentInput, decideContentInput, scheduleContentInput, aiAssistInput } from "../marketing/content.contracts";
 import { emailTemplateContextInput, emailTemplateListOutput, createEmailTemplateInput, emailTemplateOutput, updateEmailTemplateInput, archiveEmailTemplateInput, emailTemplateByIdInput, emailTemplateRenderOutput, composeEmailCampaignInput, emailCampaignOutput, emailScheduleRequestInput, emailScheduleOutput, emailScheduleDecideInput, emailCreateListInput, emailListOutput, emailSyncListInput, emailSyncOutput, emailSubscribersInput, emailSubscribersOutput } from "../marketing/email.contracts";
-import { marketingContextInput, marketingOverviewOutput, emailMarketingOutput, adsWorkspaceOutput, listmonkConnectionInput, marketingIntegrationOutput, adsConnectionInput, marketingProviderInput, createListmonkCampaignInput, createListmonkCampaignOutput, sendListmonkTestInput, requestMarketingActionInput, approvalRequestOutput, syncAdsInput, syncAdsOutput } from "../marketing/marketing.contracts";
+import { marketingContextInput, marketingOverviewOutput, emailMarketingOutput, adsWorkspaceOutput, listmonkConnectionInput, marketingIntegrationOutput, adsConnectionInput, marketingProviderInput, createListmonkCampaignInput, createListmonkCampaignOutput, sendListmonkTestInput, requestMarketingActionInput, approvalRequestOutput, syncAdsInput, syncAdsOutput, performanceSummaryInput, performanceSummaryOutput } from "../marketing/marketing.contracts";
 import { listMediaInput, mediaListOutput, attachMediaInput, detachMediaInput, archiveMediaInput, mediaAssetOutput } from "../marketing/media.contracts";
 import { listAccountsInput, accountListOutput, registerAccountInput, accountOutput, accountByIdInput, listPostsInput, postListOutput, createPostInput, postOutput, postByIdInput, decidePostInput, schedulePostInput, socialCalendarInput, socialCalendarOutput, socialInboxOutput } from "../marketing/social.contracts";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
@@ -790,6 +790,10 @@ const appRouter = t.router({
 			to: z.string().datetime({ offset: true }).optional(),
 		}))
       .output(sourceBreakdownOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    performance: publicProcedure
+      .input(campaignPerformanceReportInput)
+      .output(campaignPerformanceReportOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   marketingContent: t.router({
@@ -927,7 +931,11 @@ const appRouter = t.router({
     syncAds: publicProcedure
       .input(syncAdsInput)
       .output(syncAdsOutput)
-      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    performanceSummary: publicProcedure
+      .input(performanceSummaryInput)
+      .output(performanceSummaryOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   marketingMedia: t.router({
     list: publicProcedure

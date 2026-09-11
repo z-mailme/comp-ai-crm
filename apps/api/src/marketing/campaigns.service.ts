@@ -13,11 +13,14 @@ import { InjectDatabase } from "../database/database.constants";
 import { MarketingAttributionService } from "./attribution.service";
 import type {
 	CampaignOutput,
+	CampaignPerformanceReportInput,
+	CampaignPerformanceReportOutput,
 	CreateCampaignInput,
 	ListCampaignsInput,
 	UpdateCampaignInput,
 } from "./campaigns.contracts";
 import { marketingChannel } from "./campaigns.contracts";
+import { adsSnapshotPayload } from "./marketing.contracts";
 
 @Injectable()
 export class MarketingCampaignsService {
@@ -157,6 +160,94 @@ export class MarketingCampaignsService {
 			from: input.from ? new Date(input.from) : undefined,
 			to: input.to ? new Date(input.to) : undefined,
 		});
+	}
+
+	async performance(
+		source: BusinessContextSource,
+		input: CampaignPerformanceReportInput,
+	): Promise<CampaignPerformanceReportOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const campaigns = await this.db.marketingCampaign.findMany({
+			where: {
+				businessUnitId: context.businessUnitId,
+				status: { not: MarketingCampaignStatus.ARCHIVED },
+			},
+			orderBy: [{ updatedAt: "desc" }],
+			take: 200,
+		});
+		const snapshots = await this.db.marketingAdsSnapshot.findMany({
+			where: { businessUnitId: context.businessUnitId },
+			select: { provider: true, payload: true },
+		});
+
+		const spendByName = new Map<
+			string,
+			{ spendMicros: number; provider: string }
+		>();
+		for (const snapshot of snapshots) {
+			const parsed = adsSnapshotPayload.safeParse(snapshot.payload);
+			if (!parsed.success) continue;
+			for (const row of parsed.data.campaigns) {
+				if (row.spendMicros === null) continue;
+				const key = row.name.trim().toLowerCase();
+				const existing = spendByName.get(key);
+				spendByName.set(key, {
+					spendMicros: (existing?.spendMicros ?? 0) + row.spendMicros,
+					provider: snapshot.provider,
+				});
+			}
+		}
+
+		const range = {
+			from: input.from ? new Date(input.from) : undefined,
+			to: input.to ? new Date(input.to) : undefined,
+		};
+
+		const rows = await Promise.all(
+			campaigns.map(async (campaign) => {
+				const perf = await this.attribution.performanceForUtmCampaign(
+					campaign.utmCampaign,
+					range,
+				);
+				const spend = spendByName.get(campaign.name.trim().toLowerCase());
+				const spendMicros = spend?.spendMicros ?? null;
+				return {
+					campaignId: campaign.id,
+					name: campaign.name,
+					status: campaign.status,
+					channels: parseChannels(campaign.channels),
+					utmCampaign: campaign.utmCampaign,
+					leads: perf.leads,
+					firstTouchLeads: perf.firstTouchLeads,
+					lastTouchLeads: perf.lastTouchLeads,
+					bookings: perf.bookings,
+					expectedRevenueCents: perf.expectedRevenueCents,
+					closedRevenueCents: perf.closedRevenueCents,
+					unconvertedDeals: perf.unconvertedDeals,
+					currency: perf.currency,
+					spendMicros,
+					spendProvider: spend?.provider ?? null,
+					spendMatched: spendMicros !== null,
+					costPerLeadMicros:
+						spendMicros !== null && perf.leads > 0
+							? Math.round(spendMicros / perf.leads)
+							: null,
+					costPerBookingMicros:
+						spendMicros !== null && perf.bookings > 0
+							? Math.round(spendMicros / perf.bookings)
+							: null,
+					roas:
+						spendMicros !== null &&
+						spendMicros > 0 &&
+						perf.closedRevenueCents !== null
+							? perf.closedRevenueCents / 100 / (spendMicros / 1_000_000)
+							: null,
+					measured: perf.measured,
+				};
+			}),
+		);
+
+		return { rows };
 	}
 }
 

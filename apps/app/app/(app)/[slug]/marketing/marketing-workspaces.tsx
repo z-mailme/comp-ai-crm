@@ -30,13 +30,22 @@ import {
 	TabsList,
 	TabsTrigger,
 } from "@crm/ui/components/tabs";
+import { formatMoneyCompact } from "@crm/ui/lib/format";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import type { FormEvent } from "react";
+import { useState } from "react";
 import { toast } from "sonner";
 import { useTRPC } from "@/lib/trpc/client";
 import type { RouterOutputs } from "@/lib/trpc/types";
 import { useWorkspaceUrl } from "@/lib/use-workspace-url";
+
+function formatAccountUnits(micros: number): string {
+	return new Intl.NumberFormat(undefined, {
+		notation: "compact",
+		maximumFractionDigits: 1,
+	}).format(micros / 1_000_000);
+}
 
 type AdsOutput = RouterOutputs["marketing"]["googleAds"];
 type MarketingOverviewOutput = RouterOutputs["marketing"]["overview"];
@@ -46,7 +55,11 @@ type AdsProvider = "GOOGLE_ADS" | "META_ADS";
 export function MarketingOverview() {
 	const trpc = useTRPC();
 	const workspaceUrl = useWorkspaceUrl();
+	const [range, setRange] = useState<"today" | "7d" | "28d" | "90d">("28d");
 	const overview = useQuery(trpc.marketing.overview.queryOptions());
+	const summary = useQuery(
+		trpc.marketing.performanceSummary.queryOptions({ range }),
+	);
 	const data = overview.data;
 
 	if (!data || overview.isPending) {
@@ -59,28 +72,97 @@ export function MarketingOverview() {
 
 	return (
 		<div className="flex flex-col gap-6">
-			<StatGroup>
-				<StatCard
-					label="Campaign leads"
-					value={data.crm.campaignLeads}
-					description="CRM events with lead intent"
-				/>
-				<StatCard
-					label="Deals"
-					value={data.crm.deals}
-					description="Deals in the selected business"
-				/>
-				<StatCard
-					label="Bookings"
-					value={data.crm.bookings}
-					description="Bookings with CRM links"
-				/>
-				<StatCard
-					label="Attribution"
-					value={data.attribution.available ? "On" : "Off"}
-					description={data.attribution.status}
-				/>
-			</StatGroup>
+			<Tabs
+				value={range}
+				onValueChange={(value) =>
+					setRange(value as "today" | "7d" | "28d" | "90d")
+				}
+			>
+				<TabsList>
+					<TabsTrigger value="today">Today</TabsTrigger>
+					<TabsTrigger value="7d">7 days</TabsTrigger>
+					<TabsTrigger value="28d">28 days</TabsTrigger>
+					<TabsTrigger value="90d">90 days</TabsTrigger>
+				</TabsList>
+			</Tabs>
+
+			{summary.data ? (
+				<>
+					<StatGroup>
+						<StatCard
+							label="Leads"
+							value={summary.data.leads}
+							description="Attributed to a tracked source"
+						/>
+						<StatCard
+							label="Bookings"
+							value={summary.data.bookings}
+							description="From attributed leads"
+						/>
+						<StatCard
+							label="Attributed revenue"
+							value={
+								summary.data.attributedRevenueCents === null
+									? "—"
+									: formatMoneyCompact(
+											summary.data.attributedRevenueCents,
+											summary.data.currency,
+										)
+							}
+							description={summary.data.currency}
+						/>
+						<StatCard
+							label="Ad spend"
+							value={
+								summary.data.adSpendMicros === null
+									? "—"
+									: formatAccountUnits(summary.data.adSpendMicros)
+							}
+							description="Account currency, from snapshots"
+						/>
+						<StatCard
+							label="Cost per lead"
+							value={
+								summary.data.costPerLeadMicros === null
+									? "—"
+									: formatAccountUnits(summary.data.costPerLeadMicros)
+							}
+							description="Account currency"
+						/>
+						<StatCard
+							label="Cost per booking"
+							value={
+								summary.data.costPerBookingMicros === null
+									? "—"
+									: formatAccountUnits(summary.data.costPerBookingMicros)
+							}
+							description="Account currency"
+						/>
+						<StatCard
+							label="ROAS"
+							value={
+								summary.data.roas === null ? "—" : summary.data.roas.toFixed(2)
+							}
+							description="Attributed revenue / ad spend"
+						/>
+					</StatGroup>
+					{summary.data.notes.length > 0 ? (
+						<Card className="min-w-0">
+							<CardHeader>
+								<CardTitle>Attribution notes</CardTitle>
+								<CardDescription>{data.attribution.status}</CardDescription>
+							</CardHeader>
+							<CardContent>
+								<ul className="flex flex-col gap-1 text-muted-foreground text-sm">
+									{summary.data.notes.map((note) => (
+										<li key={note}>{note}</li>
+									))}
+								</ul>
+							</CardContent>
+						</Card>
+					) : null}
+				</>
+			) : null}
 
 			<div className="grid gap-4 lg:grid-cols-3">
 				<ChannelCard

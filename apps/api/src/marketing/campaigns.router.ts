@@ -16,6 +16,8 @@ import {
 	campaignDetailOutput,
 	campaignListOutput,
 	campaignOutput,
+	campaignPerformanceReportInput,
+	campaignPerformanceReportOutput,
 	createCampaignInput,
 	listCampaignsInput,
 	sourceBreakdownOutput,
@@ -103,6 +105,18 @@ export class MarketingCampaignsRouter {
 		input: { businessUnitId?: string; from?: string; to?: string },
 	) {
 		return this.campaigns.sourceBreakdown(sourceOf(ctx, input), input);
+	}
+
+	@Query({
+		input: campaignPerformanceReportInput,
+		output: campaignPerformanceReportOutput,
+		meta: restMeta("GET", "/marketing/campaigns/performance", ["Marketing"]),
+	})
+	async performance(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof campaignPerformanceReportInput>,
+	) {
+		return this.campaigns.performance(sourceOf(ctx, input), input);
 	}
 }
 

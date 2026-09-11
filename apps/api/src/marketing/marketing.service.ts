@@ -3,10 +3,12 @@ import {
 	BusinessEventSource,
 	CommunicationChannel,
 	type Db,
+	DealStage,
 	MarketingIntegrationStatus,
 	MarketingProvider,
 	Prisma,
 } from "@crm/db";
+import { readReportingCurrency } from "@crm/db/settings";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { z } from "zod";
 import {
@@ -15,6 +17,7 @@ import {
 } from "../business-os/business-context";
 import { InjectDatabase } from "../database/database.constants";
 import { type AdsCampaign, AdsClient } from "./ads.client";
+import { MarketingAttributionService } from "./attribution.service";
 import { MarketingEmailService } from "./email.service";
 import { ListmonkClient, type ListmonkConfig } from "./listmonk.client";
 import {
@@ -29,6 +32,8 @@ import {
 	type MarketingIntegrationOutput,
 	type MarketingIntegrationRow,
 	type MarketingOverviewOutput,
+	type PerformanceSummaryInput,
+	type PerformanceSummaryOutput,
 	type RequestMarketingActionInput,
 	type SendListmonkTestInput,
 	type SyncAdsInput,
@@ -73,6 +78,7 @@ export class MarketingService {
 		private readonly listmonk: ListmonkClient,
 		private readonly ads: AdsClient,
 		private readonly emailService: MarketingEmailService,
+		private readonly attribution: MarketingAttributionService,
 	) {}
 
 	async overview(
@@ -80,23 +86,118 @@ export class MarketingService {
 		input: BusinessContextInput,
 	): Promise<MarketingOverviewOutput> {
 		const contextInput = input ?? {};
-		const [email, googleAds, metaAds, crm] = await Promise.all([
-			this.email(source, contextInput),
-			this.googleAds(source, contextInput),
-			this.metaAds(source, contextInput),
-			this.crm(source, contextInput),
-		]);
+		const [email, googleAds, metaAds, crm, attributedVisitors] =
+			await Promise.all([
+				this.email(source, contextInput),
+				this.googleAds(source, contextInput),
+				this.metaAds(source, contextInput),
+				this.crm(source, contextInput),
+				this.attributedVisitors(),
+			]);
 
 		return {
 			email,
 			googleAds,
 			metaAds,
 			crm,
-			attribution: {
-				available: false,
-				status:
-					"Campaign attribution is not complete until leads, deals, bookings and payments share campaign IDs.",
-			},
+			attribution: attributionStatus(attributedVisitors),
+		};
+	}
+
+	async performanceSummary(
+		source: BusinessContextSource,
+		input: PerformanceSummaryInput,
+	): Promise<PerformanceSummaryOutput> {
+		const context = await resolveBusinessContext(
+			this.db,
+			sourceWithBusinessUnit(source, input),
+		);
+		const { from, to } = rangeDates(input.range);
+		const [breakdown, attributedVisitors, snapshots, currency] =
+			await Promise.all([
+				this.attribution.sourceBreakdown({ from, to }),
+				this.attributedVisitors(),
+				this.db.marketingAdsSnapshot.findMany({
+					where: { businessUnitId: context.businessUnitId },
+					select: { payload: true, error: true },
+				}),
+				readReportingCurrency(this.db),
+			]);
+
+		let leads = 0;
+		let bookings = 0;
+		let revenueCents = 0;
+		let revenueSeen = false;
+		for (const row of breakdown.rows) {
+			leads += row.leads;
+			bookings += row.bookings;
+			if (row.closedRevenueCents !== null) {
+				revenueCents += row.closedRevenueCents;
+				revenueSeen = true;
+			}
+		}
+
+		let spendMicros = 0;
+		let spendSeen = false;
+		for (const snapshot of snapshots) {
+			const parsed = adsSnapshotPayload.safeParse(snapshot.payload);
+			if (!parsed.success) continue;
+			for (const campaign of parsed.data.campaigns) {
+				if (campaign.spendMicros === null) continue;
+				spendMicros += campaign.spendMicros;
+				spendSeen = true;
+			}
+		}
+
+		const adSpendMicros = spendSeen ? spendMicros : null;
+		const attributedRevenueCents = revenueSeen ? revenueCents : null;
+		const notes: string[] = [];
+		if (attributedVisitors === 0) {
+			notes.push(
+				"No tracked visitors are linked to CRM contacts yet. Leads, bookings and revenue only cover attributed sources.",
+			);
+		}
+		if (!spendSeen) {
+			notes.push(
+				"No ads snapshot with spend exists for this business. Use Sync now on the Google Ads or Meta Ads page.",
+			);
+		}
+		if (leads === 0) {
+			notes.push(
+				"No attributed leads in this range, so cost per lead is not computed.",
+			);
+		}
+		if (spendSeen && revenueSeen) {
+			notes.push(
+				"Ad spend uses the ad account currency and revenue uses the reporting currency. Cost per lead, cost per booking and ROAS assume both match.",
+			);
+		}
+
+		return {
+			range: input.range,
+			from: from.toISOString(),
+			to: to.toISOString(),
+			currency,
+			leads,
+			bookings,
+			attributedRevenueCents,
+			adSpendMicros,
+			costPerLeadMicros:
+				adSpendMicros !== null && leads > 0
+					? Math.round(adSpendMicros / leads)
+					: null,
+			costPerBookingMicros:
+				adSpendMicros !== null && bookings > 0
+					? Math.round(adSpendMicros / bookings)
+					: null,
+			roas:
+				adSpendMicros !== null &&
+				adSpendMicros > 0 &&
+				attributedRevenueCents !== null
+					? attributedRevenueCents / 100 / (adSpendMicros / 1_000_000)
+					: null,
+			attribution: attributionStatus(attributedVisitors),
+			notes,
 		};
 	}
 
@@ -642,7 +743,7 @@ export class MarketingService {
 			this.db,
 			sourceWithBusinessUnit(source, contextInput),
 		);
-		const [leads, deals, bookings] = await Promise.all([
+		const [leads, deals, bookings, closedDeals, currency] = await Promise.all([
 			this.db.businessEvent.count({
 				where: {
 					businessUnitId: context.businessUnitId,
@@ -651,15 +752,43 @@ export class MarketingService {
 			}),
 			this.db.deal.count({ where: dealScope(context) }),
 			this.db.booking.count({ where: bookingScope(context) }),
+			this.db.deal.findMany({
+				where: {
+					AND: [
+						dealScope(context),
+						{ stage: DealStage.CLOSED_WON, archivedAt: null },
+					],
+				},
+				select: { baseAmount: true, baseCurrency: true },
+			}),
+			readReportingCurrency(this.db),
 		]);
+
+		let cents = 0;
+		let seen = false;
+		let unconverted = 0;
+		for (const deal of closedDeals) {
+			if (deal.baseAmount === null || deal.baseCurrency !== currency) {
+				unconverted += 1;
+				continue;
+			}
+			cents += Number(deal.baseAmount) * 100;
+			seen = true;
+		}
 
 		return {
 			campaignLeads: leads,
 			deals,
 			bookings,
-			revenueCents: null,
-			measured: false,
+			revenueCents: seen ? Math.round(cents) : null,
+			measured: seen && unconverted === 0,
 		};
+	}
+
+	private attributedVisitors(): Promise<number> {
+		return this.db.trackedVisitor.count({
+			where: { contactId: { not: null } },
+		});
 	}
 
 	private integration(businessUnitId: string, provider: MarketingProvider) {
@@ -860,6 +989,34 @@ function adsMetrics(campaigns: AdsCampaign[]) {
 			measured: Boolean(spend && value),
 		},
 	];
+}
+
+function attributionStatus(attributedVisitors: number) {
+	if (attributedVisitors === 0) {
+		return {
+			available: false,
+			attributedVisitors,
+			status:
+				"No tracked visitors are linked to CRM contacts yet. Attribution starts when the tracking script identifies a visitor.",
+		};
+	}
+	return {
+		available: true,
+		attributedVisitors,
+		status: `Attribution is live: ${attributedVisitors} tracked visitors are linked to CRM contacts.`,
+	};
+}
+
+function rangeDates(range: "today" | "7d" | "28d" | "90d") {
+	const to = new Date();
+	const from = new Date(to);
+	if (range === "today") {
+		from.setHours(0, 0, 0, 0);
+		return { from, to };
+	}
+	const days = range === "7d" ? 7 : range === "28d" ? 28 : 90;
+	from.setDate(from.getDate() - days);
+	return { from, to };
 }
 
 function labelFor(provider: MarketingProvider): string {
