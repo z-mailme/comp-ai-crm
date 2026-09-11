@@ -13,6 +13,8 @@ import { MarketingService } from "./marketing.service";
 import { MarketingMediaController } from "./media.controller";
 import { MarketingMediaRouter } from "./media.router";
 import { MarketingMediaService } from "./media.service";
+import { MarketingSocialRouter } from "./social.router";
+import { MarketingSocialService } from "./social.service";
 
 @Module({
 	imports: [TrpcModule, AgentModule],
@@ -26,6 +28,8 @@ import { MarketingMediaService } from "./media.service";
 		MarketingContentRouter,
 		MarketingMediaService,
 		MarketingMediaRouter,
+		MarketingSocialService,
+		MarketingSocialRouter,
 		MarketingAttributionService,
 		ListmonkClient,
 		AdsClient,

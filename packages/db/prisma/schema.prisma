@@ -58,6 +58,9 @@ model User {
   createdMarketingContents           MarketingContent[]            @relation("MarketingContentCreator")
   approvedMarketingContents          MarketingContent[]            @relation("MarketingContentApprover")
   uploadedMarketingMedia             MarketingMediaAsset[]         @relation("MarketingMediaUploader")
+  createdSocialAccounts              SocialAccount[]               @relation("SocialAccountCreator")
+  createdSocialPosts                 SocialPost[]                  @relation("SocialPostCreator")
+  approvedSocialPosts                SocialPost[]                  @relation("SocialPostApprover")
   conversationShares                 AgentConversationShare[]      @relation("ConversationShareCreator")
   conversationSubmissions            AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
   conversationFeedback               AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
@@ -2012,6 +2015,9 @@ model BusinessUnit {
   marketingCampaigns      MarketingCampaign[]
   marketingContents       MarketingContent[]
   marketingMediaAssets    MarketingMediaAsset[]
+  socialAccounts          SocialAccount[]
+  socialPosts             SocialPost[]
+  socialInteractions      SocialInteraction[]
   calendarEvents          CalendarEvent[]
   mailboxSyncs            MailboxSync[]
   customerIdentities      CustomerIdentity[]
@@ -2824,6 +2830,7 @@ model MarketingCampaign {
 
   contents    MarketingContent[]
   mediaAssets MarketingMediaAsset[]
+  socialPosts SocialPost[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2875,6 +2882,7 @@ model MarketingContent {
   archivedAt DateTime?
 
   media MarketingContentMedia[]
+  socialPosts SocialPost[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -3013,6 +3021,172 @@ model MarketingCreativeAsset {
 
   @@index([businessUnitId, provider])
   @@map("marketingCreativeAsset")
+}
+
+enum SocialProvider {
+  META_FACEBOOK
+  META_INSTAGRAM
+  LINKEDIN
+  TIKTOK
+  YOUTUBE
+}
+
+enum SocialAccountStatus {
+  CONNECTED
+  NEEDS_ATTENTION
+  DISCONNECTED
+}
+
+model SocialAccount {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  provider          SocialProvider
+  externalAccountId String
+  displayName       String
+  handle            String?
+
+  scopes      Json                 @default("[]")
+  credentials Json?
+  status      SocialAccountStatus  @default(CONNECTED)
+
+  connectedAt DateTime  @default(now())
+  lastSyncAt  DateTime?
+  archivedAt  DateTime?
+
+  createdById String?
+  createdBy   User?   @relation("SocialAccountCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  posts        SocialPostTarget[]
+  interactions SocialInteraction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessUnitId, provider, externalAccountId])
+  @@index([businessUnitId, status])
+  @@map("socialAccount")
+}
+
+enum SocialPostStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
+model SocialPost {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  campaignId String?
+  campaign   MarketingCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  contentId String?
+  content   MarketingContent? @relation(fields: [contentId], references: [id], onDelete: SetNull)
+
+  caption   String
+  mediaUrls Json   @default("[]")
+
+  status          SocialPostStatus @default(DRAFT)
+  scheduledAt     DateTime?
+  requestedAt     DateTime?
+  publishedAt     DateTime?
+  providerPostId  String?
+  providerResponse Json?
+  error           String?
+
+  idempotencyKey String @unique
+
+  approvedById String?
+  approvedBy   User?   @relation("SocialPostApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  createdById String?
+  createdBy   User?   @relation("SocialPostCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  targets SocialPostTarget[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status, scheduledAt])
+  @@map("socialPost")
+}
+
+enum SocialPostTargetStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
+model SocialPostTarget {
+  id String @id @default(cuid())
+
+  postId String
+  post   SocialPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  accountId String
+  account   SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  status         SocialPostTargetStatus @default(PENDING)
+  providerPostId String?
+  publishedAt    DateTime?
+  error          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([postId, accountId])
+  @@index([accountId, status])
+  @@map("socialPostTarget")
+}
+
+enum SocialInteractionKind {
+  COMMENT
+  MENTION
+  MESSAGE
+}
+
+enum SocialInteractionStatus {
+  UNREAD
+  READ
+  ARCHIVED
+}
+
+model SocialInteraction {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  accountId String
+  account   SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  kind       SocialInteractionKind
+  externalId String
+
+  authorName String?
+  text       String?
+  occurredAt DateTime
+
+  status SocialInteractionStatus @default(UNREAD)
+  raw    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([accountId, kind, externalId])
+  @@index([businessUnitId, status, occurredAt])
+  @@map("socialInteraction")
 }
 
 model CalendarEvent {

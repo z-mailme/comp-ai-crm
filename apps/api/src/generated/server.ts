@@ -35,6 +35,7 @@ import { listCampaignsInput, campaignListOutput, campaignByIdInput, campaignDeta
 import { listContentInput, contentListOutput, contentByIdInput, contentDetailOutput, createContentInput, contentOutput, updateContentInput, decideContentInput, scheduleContentInput, aiAssistInput } from "../marketing/content.contracts";
 import { marketingContextInput, marketingOverviewOutput, emailMarketingOutput, adsWorkspaceOutput, listmonkConnectionInput, marketingIntegrationOutput, adsConnectionInput, marketingProviderInput, createListmonkCampaignInput, createListmonkCampaignOutput, sendListmonkTestInput, requestMarketingActionInput, approvalRequestOutput } from "../marketing/marketing.contracts";
 import { listMediaInput, mediaListOutput, attachMediaInput, detachMediaInput, archiveMediaInput, mediaAssetOutput } from "../marketing/media.contracts";
+import { listAccountsInput, accountListOutput, registerAccountInput, accountOutput, accountByIdInput, listPostsInput, postListOutput, createPostInput, postOutput, postByIdInput, decidePostInput, schedulePostInput, socialCalendarInput, socialCalendarOutput, socialInboxOutput } from "../marketing/social.contracts";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
 import { agentModelOutput, modelCatalogOutput, aiProviderStatusOutput, testProviderInput, testProviderOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput, popAutoAcknowledgeOutput, setPopAutoAcknowledgeInput } from "../settings/settings.contracts";
 import { slackStatusOutput, slackMatchesOutput, slackChannelsInput, slackChannelsOutput, slackJoinChannelInput, slackJoinChannelOutput, slackRefreshPeopleOutput, slackCreateChannelInput, slackCreateChannelOutput, slackDisconnectOutput } from "../slack/slack.contracts";
@@ -867,6 +868,59 @@ const appRouter = t.router({
       .input(archiveMediaInput)
       .output(mediaAssetOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  marketingSocial: t.router({
+    accounts: publicProcedure
+      .input(listAccountsInput)
+      .output(accountListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    registerAccount: publicProcedure
+      .input(registerAccountInput)
+      .output(accountOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    disconnectAccount: publicProcedure
+      .input(accountByIdInput)
+      .output(accountOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    posts: publicProcedure
+      .input(listPostsInput)
+      .output(postListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    createPost: publicProcedure
+      .input(createPostInput)
+      .output(postOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    submitForApproval: publicProcedure
+      .input(postByIdInput)
+      .output(z.object({
+			post: postOutput,
+			approvalRequestId: z.string(),
+		}))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    decide: publicProcedure
+      .input(decidePostInput)
+      .output(postOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    schedule: publicProcedure
+      .input(schedulePostInput)
+      .output(postOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    publish: publicProcedure
+      .input(postByIdInput)
+      .output(postOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    cancel: publicProcedure
+      .input(postByIdInput)
+      .output(postOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    calendar: publicProcedure
+      .input(socialCalendarInput)
+      .output(socialCalendarOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    inbox: publicProcedure
+      .input(listAccountsInput)
+      .output(socialInboxOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   microsoft: t.router({
     status: publicProcedure

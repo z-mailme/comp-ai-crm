@@ -151,6 +151,14 @@ export const BUSINESS_OS_NAVIGATION: readonly NavigationGroup[] = [
 				icon: "image",
 			},
 			{
+				title: "Social",
+				href: "/marketing/social",
+				status: "ACTIVE",
+				match: "prefix",
+				prefetchSection: "/marketing/social",
+				icon: "flow",
+			},
+			{
 				title: "Email",
 				href: "/marketing/email",
 				status: "NOT_CONFIGURED",
