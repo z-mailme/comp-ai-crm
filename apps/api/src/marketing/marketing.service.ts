@@ -17,18 +17,24 @@ import { InjectDatabase } from "../database/database.constants";
 import { type AdsCampaign, AdsClient } from "./ads.client";
 import { MarketingEmailService } from "./email.service";
 import { ListmonkClient, type ListmonkConfig } from "./listmonk.client";
-import type {
-	AdsConnectionInput,
-	AdsWorkspaceOutput,
-	BusinessContextInput,
-	CreateListmonkCampaignInput,
-	EmailMarketingOutput,
-	ListmonkConnectionInput,
-	MarketingIntegrationOutput,
-	MarketingOverviewOutput,
-	RequestMarketingActionInput,
-	SendListmonkTestInput,
+import {
+	type AdsConnectionInput,
+	type AdsSnapshotPayload,
+	type AdsWorkspaceOutput,
+	adsSnapshotPayload,
+	type BusinessContextInput,
+	type CreateListmonkCampaignInput,
+	type EmailMarketingOutput,
+	type ListmonkConnectionInput,
+	type MarketingIntegrationOutput,
+	type MarketingIntegrationRow,
+	type MarketingOverviewOutput,
+	type RequestMarketingActionInput,
+	type SendListmonkTestInput,
+	type SyncAdsInput,
+	type SyncAdsOutput,
 } from "./marketing.contracts";
+import { MARKETING_ADS } from "./marketing-config";
 
 const listmonkConfig = z.object({
 	baseUrl: z.string().url(),
@@ -429,38 +435,202 @@ export class MarketingService {
 		if (!integration) return emptyAds(notConfigured(provider));
 
 		const summary = summarizeIntegration(integration);
+		const snapshot = await this.db.marketingAdsSnapshot.findUnique({
+			where: {
+				businessUnitId_provider_kind: {
+					businessUnitId: context.businessUnitId,
+					provider,
+					kind: MARKETING_ADS.snapshotKind,
+				},
+			},
+		});
+		if (!snapshot) return emptyAds(summary);
+
+		const parsed = adsSnapshotPayload.safeParse(snapshot.payload);
+		if (!parsed.success) {
+			return emptyAds(
+				summary,
+				"The cached ads report could not be read. Run a sync to rebuild it.",
+				snapshot.syncedAt.toISOString(),
+			);
+		}
+
+		return {
+			integration: summary,
+			account: {
+				id: summary.accountId ?? "",
+				name: summary.label,
+			},
+			campaigns: parsed.data.campaigns,
+			searchTerms: parsed.data.searchTerms,
+			syncedAt: snapshot.syncedAt.toISOString(),
+			metrics: adsMetrics(parsed.data.campaigns),
+			error: snapshot.error,
+		};
+	}
+
+	async syncAds(
+		source: BusinessContextSource,
+		input: SyncAdsInput,
+	): Promise<SyncAdsOutput> {
+		const context = await resolveBusinessContext(
+			this.db,
+			sourceWithBusinessUnit(source, input),
+		);
+		return this.syncProvider(context.businessUnitId, input.provider);
+	}
+
+	async syncAllAds(): Promise<SyncAdsOutput[]> {
+		const integrations = await this.db.marketingIntegration.findMany({
+			where: {
+				provider: {
+					in: [MarketingProvider.GOOGLE_ADS, MarketingProvider.META_ADS],
+				},
+				status: MarketingIntegrationStatus.CONNECTED,
+			},
+			select: { businessUnitId: true, provider: true },
+		});
+
+		const results: SyncAdsOutput[] = [];
+		for (const row of integrations) {
+			results.push(await this.syncProvider(row.businessUnitId, row.provider));
+		}
+		return results;
+	}
+
+	private async syncProvider(
+		businessUnitId: string,
+		provider: MarketingProvider,
+	): Promise<SyncAdsOutput> {
+		const integration = await this.db.marketingIntegration.findUnique({
+			where: { businessUnitId_provider: { businessUnitId, provider } },
+			select: integrationSelect,
+		});
+		if (
+			!integration ||
+			integration.status === MarketingIntegrationStatus.NOT_CONFIGURED
+		) {
+			return {
+				provider,
+				synced: false,
+				campaigns: 0,
+				syncedAt: null,
+				error: `${labelFor(provider)} is not connected.`,
+			};
+		}
 
 		try {
-			const campaigns =
+			const payload =
 				provider === MarketingProvider.GOOGLE_ADS
-					? await this.ads.googleCampaigns({
-							...googleAdsConfig.parse(integration.config ?? {}),
-							...googleAdsSecrets.parse(integration.secrets ?? {}),
-						})
-					: await this.ads.metaCampaigns({
-							...metaAdsConfig.parse(integration.config ?? {}),
-							...metaAdsSecrets.parse(integration.secrets ?? {}),
-						});
-			await this.markHealthy(integration.id);
-
-			return {
-				integration: summary,
-				account: {
-					id: summary.accountId ?? "",
-					name: summary.label,
+					? await this.googleSnapshot(integration)
+					: await this.metaSnapshot(integration);
+			const snapshot = await this.db.marketingAdsSnapshot.upsert({
+				where: {
+					businessUnitId_provider_kind: {
+						businessUnitId,
+						provider,
+						kind: MARKETING_ADS.snapshotKind,
+					},
 				},
-				campaigns,
-				metrics: adsMetrics(campaigns),
+				create: {
+					businessUnitId,
+					provider,
+					kind: MARKETING_ADS.snapshotKind,
+					payload,
+					error: null,
+					syncedAt: new Date(),
+				},
+				update: {
+					payload,
+					error: null,
+					syncedAt: new Date(),
+				},
+			});
+			await this.markHealthy(integration.id);
+			return {
+				provider,
+				synced: true,
+				campaigns: payload.campaigns.length,
+				syncedAt: snapshot.syncedAt.toISOString(),
 				error: null,
 			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
+			const existing = await this.db.marketingAdsSnapshot.findUnique({
+				where: {
+					businessUnitId_provider_kind: {
+						businessUnitId,
+						provider,
+						kind: MARKETING_ADS.snapshotKind,
+					},
+				},
+				select: { id: true, syncedAt: true },
+			});
+			if (existing) {
+				await this.db.marketingAdsSnapshot.update({
+					where: { id: existing.id },
+					data: { error: message },
+				});
+			} else {
+				await this.db.marketingAdsSnapshot.create({
+					data: {
+						businessUnitId,
+						provider,
+						kind: MARKETING_ADS.snapshotKind,
+						payload: { campaigns: [], searchTerms: [] },
+						error: message,
+					},
+				});
+			}
 			await this.markUnhealthy(integration.id, message);
-			return emptyAds(
-				{ ...summary, status: MarketingIntegrationStatus.NEEDS_ATTENTION },
-				message,
-			);
+			return {
+				provider,
+				synced: false,
+				campaigns: 0,
+				syncedAt: existing?.syncedAt.toISOString() ?? null,
+				error: message,
+			};
 		}
+	}
+
+	private async googleSnapshot(
+		integration: MarketingIntegrationRow & { id: string },
+	): Promise<AdsSnapshotPayload> {
+		const config = {
+			...googleAdsConfig.parse(integration.config ?? {}),
+			...googleAdsSecrets.parse(integration.secrets ?? {}),
+		};
+		const [campaigns, adGroups, searchTerms] = await Promise.all([
+			this.ads.googleCampaigns(config),
+			this.ads.googleAdGroups(config),
+			this.ads.googleSearchTerms(config),
+		]);
+		for (const campaign of campaigns) {
+			campaign.children = adGroups.get(campaign.id) ?? [];
+		}
+		return { campaigns, searchTerms };
+	}
+
+	private async metaSnapshot(
+		integration: MarketingIntegrationRow & { id: string },
+	): Promise<AdsSnapshotPayload> {
+		const config = {
+			...metaAdsConfig.parse(integration.config ?? {}),
+			...metaAdsSecrets.parse(integration.secrets ?? {}),
+		};
+		const [campaigns, adSets, ads] = await Promise.all([
+			this.ads.metaCampaigns(config),
+			this.ads.metaAdSets(config),
+			this.ads.metaAds(config),
+		]);
+		for (const [campaignId, children] of adSets) {
+			for (const child of children) {
+				child.children = ads.get(child.id) ?? [];
+			}
+			const campaign = campaigns.find((row) => row.id === campaignId);
+			if (campaign) campaign.children = children;
+		}
+		return { campaigns, searchTerms: [] };
 	}
 
 	private async crm(
@@ -600,15 +770,19 @@ function emptyEmail(
 function emptyAds(
 	integration: MarketingIntegrationOutput,
 	error: string | null = null,
+	syncedAt: string | null = null,
 ): AdsWorkspaceOutput {
 	return {
 		integration,
 		account: null,
 		campaigns: [],
+		searchTerms: [],
+		syncedAt,
 		metrics: [
 			{ label: "Spend", value: null, unit: "micros", measured: false },
 			{ label: "Leads", value: null, unit: "conversions", measured: false },
 			{ label: "CPL", value: null, unit: "micros", measured: false },
+			{ label: "CPM", value: null, unit: "micros", measured: false },
 			{ label: "ROAS", value: null, unit: "ratio", measured: false },
 		],
 		error,
@@ -646,6 +820,7 @@ function emailMetrics(campaigns: EmailMarketingOutput["campaigns"]) {
 
 function adsMetrics(campaigns: AdsCampaign[]) {
 	const spend = sumNullable(campaigns, (row) => row.spendMicros);
+	const impressions = sumNullable(campaigns, (row) => row.impressions);
 	const conversions = sumNullable(campaigns, (row) => row.conversions);
 	const value = sumNullable(campaigns, (row) => row.conversionValue);
 
@@ -668,6 +843,15 @@ function adsMetrics(campaigns: AdsCampaign[]) {
 				spend !== null && conversions ? Math.round(spend / conversions) : null,
 			unit: "micros",
 			measured: spend !== null && Boolean(conversions),
+		},
+		{
+			label: "CPM",
+			value:
+				spend !== null && impressions
+					? Math.round((spend / impressions) * 1000)
+					: null,
+			unit: "micros",
+			measured: spend !== null && Boolean(impressions),
 		},
 		{
 			label: "ROAS",

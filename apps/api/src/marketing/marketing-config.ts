@@ -23,3 +23,9 @@ export const MARKETING_EMAIL = {
 	subscriberPageSize: 50,
 	syncContactLimit: 500,
 } as const;
+
+export const MARKETING_ADS = {
+	queryLimit: 50,
+	metaMaxPages: 4,
+	snapshotKind: "campaigns",
+} as const;

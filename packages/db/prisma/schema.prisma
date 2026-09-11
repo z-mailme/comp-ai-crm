@@ -2011,6 +2011,7 @@ model BusinessUnit {
 
   channelAccounts         ChannelAccount[]
   marketingIntegrations   MarketingIntegration[]
+  marketingAdsSnapshots   MarketingAdsSnapshot[]
   marketingAudiences      MarketingAudience[]
   marketingCreativeAssets MarketingCreativeAsset[]
   marketingCampaigns      MarketingCampaign[]
@@ -2999,6 +3000,25 @@ model MarketingIntegration {
   @@unique([businessUnitId, provider])
   @@index([provider, status])
   @@map("marketingIntegration")
+}
+
+model MarketingAdsSnapshot {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  provider MarketingProvider
+  kind     String            @default("campaigns")
+  payload  Json
+  error    String?
+  syncedAt DateTime          @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessUnitId, provider, kind])
+  @@map("marketingAdsSnapshot")
 }
 
 model MarketingAudience {

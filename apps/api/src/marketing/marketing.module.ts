@@ -14,6 +14,7 @@ import { MarketingEmailService } from "./email.service";
 import { ListmonkClient } from "./listmonk.client";
 import { MarketingRouter } from "./marketing.router";
 import { MarketingService } from "./marketing.service";
+import { MarketingSyncController } from "./marketing-sync.controller";
 import { MarketingMediaController } from "./media.controller";
 import { MarketingMediaRouter } from "./media.router";
 import { MarketingMediaService } from "./media.service";
@@ -22,7 +23,7 @@ import { MarketingSocialService } from "./social.service";
 
 @Module({
 	imports: [TrpcModule, AgentModule],
-	controllers: [MarketingMediaController],
+	controllers: [MarketingMediaController, MarketingSyncController],
 	providers: [
 		MarketingService,
 		MarketingRouter,

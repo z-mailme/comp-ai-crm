@@ -185,6 +185,10 @@ describe("Business OS visible workspaces", () => {
 				developerToken: "google-developer-token",
 			},
 		);
+		await marketingService.syncAds(
+			{ userId, businessUnitId: unitAId },
+			{ provider: MarketingProvider.GOOGLE_ADS },
+		);
 		const workspace = await marketingService.googleAds(
 			{ userId, businessUnitId: unitAId },
 			{},
@@ -411,12 +415,31 @@ class FakeAdsClient {
 				conversionValue: 25,
 				cpaMicros: 100_000,
 				roas: 50,
+				reach: null,
+				cpmMicros: null,
+				costPerResultMicros: null,
 				children: [],
 			},
 		];
 	}
 
+	async googleAdGroups() {
+		return new Map();
+	}
+
+	async googleSearchTerms() {
+		return [];
+	}
+
 	async metaCampaigns() {
 		return [];
+	}
+
+	async metaAdSets() {
+		return new Map();
+	}
+
+	async metaAds() {
+		return new Map();
 	}
 }

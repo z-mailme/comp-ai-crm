@@ -143,12 +143,7 @@ const listmonkTemplateOutput = z.object({
 	type: z.string().nullable(),
 });
 
-const adsCampaignOutput = z.object({
-	id: z.string(),
-	name: z.string(),
-	status: z.string(),
-	type: z.string().nullable(),
-	budgetMicros: z.number().nullable(),
+const adsMetricFields = {
 	spendMicros: z.number().nullable(),
 	impressions: z.number().nullable(),
 	clicks: z.number().nullable(),
@@ -158,14 +153,61 @@ const adsCampaignOutput = z.object({
 	conversionValue: z.number().nullable(),
 	cpaMicros: z.number().nullable(),
 	roas: z.number().nullable(),
-	children: z.array(
-		z.object({
-			id: z.string(),
-			name: z.string(),
-			status: z.string(),
-			type: z.string(),
-		}),
-	),
+	reach: z.number().nullable(),
+	cpmMicros: z.number().nullable(),
+	costPerResultMicros: z.number().nullable(),
+};
+
+const adsEntityBase = {
+	id: z.string(),
+	name: z.string(),
+	status: z.string(),
+	type: z.string().nullable(),
+	...adsMetricFields,
+};
+
+const adsAdOutput = z.object(adsEntityBase);
+
+const adsChildOutput = z.object({
+	...adsEntityBase,
+	children: z.array(adsAdOutput),
+});
+
+const adsCampaignOutput = z.object({
+	...adsEntityBase,
+	budgetMicros: z.number().nullable(),
+	children: z.array(adsChildOutput),
+});
+
+export const adsSearchTermOutput = z.object({
+	term: z.string(),
+	campaignId: z.string(),
+	campaignName: z.string(),
+	adGroupId: z.string().nullable(),
+	adGroupName: z.string().nullable(),
+	impressions: z.number().nullable(),
+	clicks: z.number().nullable(),
+	ctr: z.number().nullable(),
+	costMicros: z.number().nullable(),
+	conversions: z.number().nullable(),
+});
+
+export const adsSnapshotPayload = z.object({
+	campaigns: z.array(adsCampaignOutput),
+	searchTerms: z.array(adsSearchTermOutput),
+});
+
+export const syncAdsInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	provider: z.enum([MarketingProvider.GOOGLE_ADS, MarketingProvider.META_ADS]),
+});
+
+export const syncAdsOutput = z.object({
+	provider: z.nativeEnum(MarketingProvider),
+	synced: z.boolean(),
+	campaigns: z.number(),
+	syncedAt: z.string().nullable(),
+	error: z.string().nullable(),
 });
 
 export const emailPendingScheduleOutput = z.object({
@@ -199,6 +241,8 @@ export const adsWorkspaceOutput = z.object({
 		})
 		.nullable(),
 	campaigns: z.array(adsCampaignOutput),
+	searchTerms: z.array(adsSearchTermOutput),
+	syncedAt: z.string().nullable(),
 	metrics: z.array(metricOutput),
 	error: z.string().nullable(),
 });
@@ -240,6 +284,9 @@ export type SendListmonkTestInput = z.infer<typeof sendListmonkTestInput>;
 export type RequestMarketingActionInput = z.infer<
 	typeof requestMarketingActionInput
 >;
+export type SyncAdsInput = z.infer<typeof syncAdsInput>;
+export type SyncAdsOutput = z.infer<typeof syncAdsOutput>;
+export type AdsSnapshotPayload = z.infer<typeof adsSnapshotPayload>;
 export type MarketingIntegrationOutput = z.infer<
 	typeof marketingIntegrationOutput
 >;

@@ -30,9 +30,29 @@ Verified from [Google Ads API release notes](https://developers.google.com/googl
 - Reporting is GAQL over `searchStream`; there is no paging token on
   `searchStream` (it streams the full result), so the client caps with
   `LIMIT 50` and a date-window `WHERE segments.date DURING LAST_30_DAYS`.
+- Reports used: `FROM campaign` (budgets + metrics), `FROM ad_group`
+  (nested under campaigns), and `FROM search_term_view` (the search terms
+  report with campaign and ad group context).
 - Quotas: developer tokens have daily operation limits by access level
   (test / basic / standard). Cached snapshots are stored so a page render never
   calls the API.
+
+## Snapshot caching (Google Ads and Meta Ads)
+
+Page renders never call provider APIs. Reads come from the
+`MarketingAdsSnapshot` table (one row per BusinessUnit, provider and report
+kind). Two triggers refresh the snapshots:
+
+- The `marketing.syncAds` mutation (`POST /rest/marketing/ads/sync`) behind
+  the Sync now button.
+- The cron route `GET|POST /internal/sync/marketing-ads`, gated by
+  `CRON_SECRET`, scheduled in `apps/api/vercel.json` every 6 hours. It syncs
+  every BusinessUnit with a connected Google Ads or Meta Ads integration.
+
+A failed sync records the error on the snapshot row, keeps the last good
+payload, and moves the integration to NEEDS_ATTENTION. Listmonk is
+intentionally NOT snapshot-cached: it is self-hosted on the same VPS, has no
+quota, and the dashboard read is a same-network call.
 
 ## Meta (unverified this session — re-verify before enabling)
 
@@ -42,6 +62,13 @@ Recorded requirements, to confirm against the live docs:
   `graphVersion` per connection; the code never hardcodes one.
 - Expected permissions for read-only reporting: `ads_read`, plus
   `ads_management` only if writes are ever enabled (not in this milestone).
+- Reporting reads three account edges with nested
+  `insights.date_preset(last_30d)`: `/campaigns`, `/adsets` (grouped by
+  `campaign_id`) and `/ads` (grouped by `adset_id`). Insights include
+  `spend, impressions, clicks, ctr, cpc, cpm, reach, actions, action_values,
+  cost_per_action_type`.
+- Meta paginates with `paging.next`; the client follows it up to 4 pages per
+  edge and per sync, capped by `MARKETING_ADS.metaMaxPages`.
 - Expected permissions for organic publishing: `pages_manage_posts`,
   `pages_read_engagement` for Facebook Pages; `instagram_basic`,
   `instagram_content_publish` for Instagram professional accounts via the
