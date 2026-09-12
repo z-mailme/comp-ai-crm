@@ -172,3 +172,39 @@ describe("reading a touch back", () => {
 		);
 	});
 });
+
+describe("click identifiers", () => {
+	test("passes gclid, gbraid, wbraid and fbclid through unchanged", () => {
+		const touch = classifyTouch(
+			{
+				source: "google",
+				medium: "cpc",
+				campaign: "spring-sale",
+				gclid: "CjwK_test_gclid",
+				gbraid: "gbraid-value",
+				wbraid: "wbraid-value",
+				fbclid: "fbclid-value",
+			},
+			AT,
+		);
+
+		expect(touch.gclid).toBe("CjwK_test_gclid");
+		expect(touch.gbraid).toBe("gbraid-value");
+		expect(touch.wbraid).toBe("wbraid-value");
+		expect(touch.fbclid).toBe("fbclid-value");
+	});
+
+	test("keeps click ids on direct touches too", () => {
+		const touch = classifyTouch({ gclid: "only-gclid" }, AT);
+
+		expect(touch.source).toBe("Direct");
+		expect(touch.gclid).toBe("only-gclid");
+		expect(touch.fbclid).toBeNull();
+	});
+
+	test("treats a blank click id as absent", () => {
+		const touch = classifyTouch({ gclid: "   " }, AT);
+
+		expect(touch.gclid).toBeNull();
+	});
+});

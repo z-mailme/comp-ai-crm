@@ -10,6 +10,7 @@ import { settledWithin } from "./deadline";
 import { DISPATCH } from "./dispatch-config";
 import { markRunning, settle } from "./enrichment";
 import { drainMemoryBridge } from "./event-bridge";
+import { runMarketingContentAssist } from "./marketing-content";
 import { collapsing, runLimited } from "./pool";
 import { runPortrait } from "./portrait";
 import { testProviderConnection } from "./providers";
@@ -190,6 +191,11 @@ async function handleDirect(task: LeasedTask): Promise<void> {
 			task.id,
 			`Processed ${outcome.processed} events, detected ${outcome.pops} proofs of payment, ${outcome.failed} failed.`,
 		);
+		return;
+	}
+
+	if (task.kind === "marketing-content-assist") {
+		await completeTask(task.id, await runMarketingContentAssist(task.payload));
 		return;
 	}
 

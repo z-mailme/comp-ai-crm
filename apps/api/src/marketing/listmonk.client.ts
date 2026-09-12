@@ -20,6 +20,7 @@ const listmonkCampaign = z.object({
 	clicks: z.number().nullable().optional(),
 	bounces: z.number().nullable().optional(),
 	unsubscribes: z.number().nullable().optional(),
+	send_at: z.string().nullable().optional(),
 	created_at: z.string().nullable().optional(),
 	updated_at: z.string().nullable().optional(),
 	started_at: z.string().nullable().optional(),
@@ -29,6 +30,21 @@ const listmonkTemplate = z.object({
 	id: z.number(),
 	name: z.string(),
 	type: z.string().nullable().optional(),
+});
+
+const listmonkSubscriber = z.object({
+	id: z.number(),
+	email: z.string(),
+	name: z.string().nullable().optional(),
+	status: z.string(),
+	lists: z
+		.array(
+			z.object({
+				id: z.number(),
+				subscription_status: z.string().nullable().optional(),
+			}),
+		)
+		.default([]),
 });
 
 const page = <T extends z.ZodTypeAny>(item: T) =>
@@ -46,6 +62,29 @@ const createdCampaign = z.object({
 	}),
 });
 
+const createdList = z.object({
+	data: z.object({
+		id: z.number(),
+		name: z.string(),
+		status: z.string(),
+		subscriber_count: z.number().nullable().optional(),
+	}),
+});
+
+const createdSubscriber = z.object({
+	data: z.object({
+		id: z.number(),
+	}),
+});
+
+const updatedCampaign = z.object({
+	data: z.object({
+		id: z.number(),
+		status: z.string(),
+		send_at: z.string().nullable().optional(),
+	}),
+});
+
 export type ListmonkConfig = {
 	baseUrl: string;
 	authMethod: "basic" | "token";
@@ -57,6 +96,7 @@ export type ListmonkConfig = {
 export type ListmonkCampaign = z.infer<typeof listmonkCampaign>;
 export type ListmonkList = z.infer<typeof listmonkList>;
 export type ListmonkTemplate = z.infer<typeof listmonkTemplate>;
+export type ListmonkSubscriber = z.infer<typeof listmonkSubscriber>;
 
 @Injectable()
 export class ListmonkClient {
@@ -64,7 +104,7 @@ export class ListmonkClient {
 		const [campaigns, lists, templates, subscribers] = await Promise.all([
 			this.get(
 				config,
-				"/api/campaigns?page=1&per_page=50",
+				"/api/campaigns?page=1&per_page=50&no_body=true",
 				page(listmonkCampaign),
 			),
 			this.get(config, "/api/lists?page=1&per_page=50", page(listmonkList)),
@@ -95,20 +135,50 @@ export class ListmonkClient {
 			subject: string;
 			body: string;
 			listIds: number[];
+			fromEmail?: string;
+			sendAt?: string;
+			tags?: string[];
 		},
 	) {
-		const body = new FormData();
-		body.set("name", input.name);
-		body.set("subject", input.subject);
-		body.set("type", "regular");
-		body.set("content_type", "html");
-		body.set("body", input.body);
-		for (const id of input.listIds) body.append("lists", String(id));
-
 		return this.request(config, "/api/campaigns", {
 			method: "POST",
-			body,
+			json: {
+				name: input.name,
+				subject: input.subject,
+				type: "regular",
+				content_type: "html",
+				body: input.body,
+				lists: input.listIds,
+				from_email: input.fromEmail,
+				send_at: input.sendAt,
+				tags: input.tags?.length ? input.tags : undefined,
+			},
 			schema: createdCampaign,
+		});
+	}
+
+	async updateCampaign(
+		config: ListmonkConfig,
+		input: { campaignId: number; sendAt?: string },
+	) {
+		return this.request(config, `/api/campaigns/${input.campaignId}`, {
+			method: "PUT",
+			json: { send_at: input.sendAt },
+			schema: updatedCampaign,
+		});
+	}
+
+	async updateCampaignStatus(
+		config: ListmonkConfig,
+		input: {
+			campaignId: number;
+			status: "scheduled" | "running" | "paused" | "cancelled" | "draft";
+		},
+	) {
+		return this.request(config, `/api/campaigns/${input.campaignId}/status`, {
+			method: "PUT",
+			json: { status: input.status },
+			schema: updatedCampaign,
 		});
 	}
 
@@ -126,6 +196,60 @@ export class ListmonkClient {
 		});
 	}
 
+	async createList(
+		config: ListmonkConfig,
+		input: { name: string; description?: string },
+	) {
+		return this.request(config, "/api/lists", {
+			method: "POST",
+			json: {
+				name: input.name,
+				type: "private",
+				optin: "single",
+				description: input.description,
+			},
+			schema: createdList,
+		});
+	}
+
+	async subscribers(
+		config: ListmonkConfig,
+		input: { listId?: number; page: number; perPage: number | "all" },
+	) {
+		const params = new URLSearchParams();
+		params.set("page", String(input.page));
+		params.set("per_page", String(input.perPage));
+		if (input.listId) params.set("list_id", String(input.listId));
+
+		const result = await this.get(
+			config,
+			`/api/subscribers?${params.toString()}`,
+			page(listmonkSubscriber),
+		);
+
+		return {
+			total: result.data.total ?? null,
+			subscribers: result.data.results,
+		};
+	}
+
+	async createSubscriber(
+		config: ListmonkConfig,
+		input: { email: string; name: string; listIds: number[] },
+	) {
+		return this.request(config, "/api/subscribers", {
+			method: "POST",
+			json: {
+				email: input.email,
+				name: input.name,
+				status: "enabled",
+				lists: input.listIds,
+				preconfirm_subscriptions: true,
+			},
+			schema: createdSubscriber,
+		});
+	}
+
 	private async get<T extends z.ZodTypeAny>(
 		config: ListmonkConfig,
 		path: string,
@@ -137,12 +261,25 @@ export class ListmonkClient {
 	private async request<T extends z.ZodTypeAny>(
 		config: ListmonkConfig,
 		path: string,
-		options: { method: string; body?: FormData; schema: T },
+		options: {
+			method: string;
+			body?: FormData;
+			json?: object;
+			schema: T;
+		},
 	): Promise<z.infer<T>> {
+		const json =
+			options.json !== undefined ? JSON.stringify(options.json) : undefined;
+		const body = json ?? options.body;
+		const headers =
+			json !== undefined
+				? { ...authHeaders(config), "content-type": "application/json" }
+				: authHeaders(config);
+
 		const response = await fetch(new URL(path, config.baseUrl), {
 			method: options.method,
-			headers: authHeaders(config),
-			body: options.body,
+			headers,
+			body,
 		});
 
 		if (!response.ok) {

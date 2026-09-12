@@ -15,6 +15,7 @@ import Document from "@carbon/icons-react/es/Document";
 import Email from "@carbon/icons-react/es/Email";
 import Finance from "@carbon/icons-react/es/Finance";
 import Flow from "@carbon/icons-react/es/Flow";
+import Image from "@carbon/icons-react/es/Image";
 import Money from "@carbon/icons-react/es/Money";
 import Notebook from "@carbon/icons-react/es/Notebook";
 import Partnership from "@carbon/icons-react/es/Partnership";
@@ -77,6 +78,7 @@ const ICONS = new Map<string, CarbonIcon>(
 		email: Email,
 		finance: Finance,
 		flow: Flow,
+		image: Image,
 		marketing: Bullhorn,
 		money: Money,
 		notebook: Notebook,

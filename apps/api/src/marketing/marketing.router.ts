@@ -23,8 +23,12 @@ import {
 	marketingIntegrationOutput,
 	marketingOverviewOutput,
 	marketingProviderInput,
+	performanceSummaryInput,
+	performanceSummaryOutput,
 	requestMarketingActionInput,
 	sendListmonkTestInput,
+	syncAdsInput,
+	syncAdsOutput,
 } from "./marketing.contracts";
 import { MarketingService } from "./marketing.service";
 
@@ -153,6 +157,30 @@ export class MarketingRouter {
 		@Input() input: z.infer<typeof requestMarketingActionInput>,
 	) {
 		return this.marketing.requestAction(sourceOf(ctx, input), input);
+	}
+
+	@Mutation({
+		input: syncAdsInput,
+		output: syncAdsOutput,
+		meta: restMeta("POST", "/marketing/ads/sync", ["Marketing"]),
+	})
+	async syncAds(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof syncAdsInput>,
+	) {
+		return this.marketing.syncAds(sourceOf(ctx, input), input);
+	}
+
+	@Query({
+		input: performanceSummaryInput,
+		output: performanceSummaryOutput,
+		meta: restMeta("GET", "/marketing/performance", ["Marketing"]),
+	})
+	async performanceSummary(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof performanceSummaryInput>,
+	) {
+		return this.marketing.performanceSummary(sourceOf(ctx, input), input);
 	}
 }
 

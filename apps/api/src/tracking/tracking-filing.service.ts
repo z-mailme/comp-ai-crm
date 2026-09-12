@@ -36,6 +36,10 @@ function columns(
 		[`${prefix}Content`]: touch.content,
 		[`${prefix}Referrer`]: touch.referrer,
 		[`${prefix}Landing`]: touch.landing,
+		[`${prefix}Gclid`]: touch.gclid,
+		[`${prefix}Gbraid`]: touch.gbraid,
+		[`${prefix}Wbraid`]: touch.wbraid,
+		[`${prefix}Fbclid`]: touch.fbclid,
 		[`${prefix}TouchAt`]: touch.at,
 	};
 }

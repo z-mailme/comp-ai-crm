@@ -18,6 +18,7 @@ const STEPS = {
 	"provider-test": "Testing a model provider",
 	"brain-scan": "Learning from your mailbox",
 	"event-bridge": "Reading new business events",
+	"marketing-content-assist": "Drafting marketing copy",
 } satisfies Record<TaskKind, string>;
 
 const STEP_BY_KIND = new Map<string, string>(Object.entries(STEPS));

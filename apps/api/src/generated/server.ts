@@ -31,7 +31,13 @@ import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput
 import { financeWeekInput, financeWeekOutput, addExpenseInput, expenseMutationOutput, cancelExpenseInput } from "../finance/finance.contracts";
 import { gmailLabelOutput, mailboxThreadsInput, mailboxThreadsOutput, mailboxActionInput, mailboxActionOutput, googleConnectionStatusOutput, reindexCalendarInput, reindexCalendarOutput, historicalImportJobOutput, createHistoricalImportInput, historicalImportIdInput, sendEmailInput, sendEmailOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
-import { marketingContextInput, marketingOverviewOutput, emailMarketingOutput, adsWorkspaceOutput, listmonkConnectionInput, marketingIntegrationOutput, adsConnectionInput, marketingProviderInput, createListmonkCampaignInput, createListmonkCampaignOutput, sendListmonkTestInput, requestMarketingActionInput, approvalRequestOutput } from "../marketing/marketing.contracts";
+import { audienceContextInput, audienceListOutput, audienceCountInput, audienceCountOutput, createAudienceInput, audienceOutput, updateAudienceInput, audienceByIdInput, audienceExportInput, audienceExportOutput } from "../marketing/audiences.contracts";
+import { listCampaignsInput, campaignListOutput, campaignByIdInput, campaignDetailOutput, createCampaignInput, campaignOutput, updateCampaignInput, sourceBreakdownOutput, campaignPerformanceReportInput, campaignPerformanceReportOutput } from "../marketing/campaigns.contracts";
+import { listContentInput, contentListOutput, contentByIdInput, contentDetailOutput, createContentInput, contentOutput, updateContentInput, decideContentInput, scheduleContentInput, aiAssistInput } from "../marketing/content.contracts";
+import { emailTemplateContextInput, emailTemplateListOutput, createEmailTemplateInput, emailTemplateOutput, updateEmailTemplateInput, archiveEmailTemplateInput, emailTemplateByIdInput, emailTemplateRenderOutput, composeEmailCampaignInput, emailCampaignOutput, emailScheduleRequestInput, emailScheduleOutput, emailScheduleDecideInput, emailCreateListInput, emailListOutput, emailSyncListInput, emailSyncOutput, emailSubscribersInput, emailSubscribersOutput } from "../marketing/email.contracts";
+import { marketingContextInput, marketingOverviewOutput, emailMarketingOutput, adsWorkspaceOutput, listmonkConnectionInput, marketingIntegrationOutput, adsConnectionInput, marketingProviderInput, createListmonkCampaignInput, createListmonkCampaignOutput, sendListmonkTestInput, requestMarketingActionInput, approvalRequestOutput, syncAdsInput, syncAdsOutput, performanceSummaryInput, performanceSummaryOutput } from "../marketing/marketing.contracts";
+import { listMediaInput, mediaListOutput, attachMediaInput, detachMediaInput, archiveMediaInput, mediaAssetOutput } from "../marketing/media.contracts";
+import { listAccountsInput, accountListOutput, registerAccountInput, accountOutput, accountByIdInput, listPostsInput, postListOutput, createPostInput, postOutput, postByIdInput, decidePostInput, schedulePostInput, socialCalendarInput, socialCalendarOutput, socialInboxOutput } from "../marketing/social.contracts";
 import { savedViewListInput, savedViewListOutput, savedViewCreateInput, savedViewOutput, savedViewUpdateArgs, savedViewIdInput, savedViewDeleteOutput } from "../saved-views/saved-views.contracts";
 import { agentModelOutput, modelCatalogOutput, aiProviderStatusOutput, testProviderInput, testProviderOutput, setAgentModelInput, researchKeyOutput, setResearchKeyInput, archiveRetentionOutput, setArchiveRetentionDaysInput, popAutoAcknowledgeOutput, setPopAutoAcknowledgeInput } from "../settings/settings.contracts";
 import { slackStatusOutput, slackMatchesOutput, slackChannelsInput, slackChannelsOutput, slackJoinChannelInput, slackJoinChannelOutput, slackRefreshPeopleOutput, slackCreateChannelInput, slackCreateChannelOutput, slackDisconnectOutput } from "../slack/slack.contracts";
@@ -730,6 +736,157 @@ const appRouter = t.router({
       .output(calendarEventOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
+  marketingAudiences: t.router({
+    list: publicProcedure
+      .input(audienceContextInput)
+      .output(audienceListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    count: publicProcedure
+      .input(audienceCountInput)
+      .output(audienceCountOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    create: publicProcedure
+      .input(createAudienceInput)
+      .output(audienceOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    update: publicProcedure
+      .input(updateAudienceInput)
+      .output(audienceOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    archive: publicProcedure
+      .input(audienceByIdInput)
+      .output(audienceOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    exportToList: publicProcedure
+      .input(audienceExportInput)
+      .output(audienceExportOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  marketingCampaigns: t.router({
+    list: publicProcedure
+      .input(listCampaignsInput)
+      .output(campaignListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    detail: publicProcedure
+      .input(campaignByIdInput)
+      .output(campaignDetailOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    create: publicProcedure
+      .input(createCampaignInput)
+      .output(campaignOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    update: publicProcedure
+      .input(updateCampaignInput)
+      .output(campaignOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    archive: publicProcedure
+      .input(z.object({ id: z.string().trim().min(1) }))
+      .output(campaignOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    sources: publicProcedure
+      .input(z.object({
+			businessUnitId: z.string().trim().min(1).optional(),
+			from: z.string().datetime({ offset: true }).optional(),
+			to: z.string().datetime({ offset: true }).optional(),
+		}))
+      .output(sourceBreakdownOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    performance: publicProcedure
+      .input(campaignPerformanceReportInput)
+      .output(campaignPerformanceReportOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  marketingContent: t.router({
+    list: publicProcedure
+      .input(listContentInput)
+      .output(contentListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    detail: publicProcedure
+      .input(contentByIdInput)
+      .output(contentDetailOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    create: publicProcedure
+      .input(createContentInput)
+      .output(contentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    update: publicProcedure
+      .input(updateContentInput)
+      .output(contentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    duplicate: publicProcedure
+      .input(contentByIdInput)
+      .output(contentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    archive: publicProcedure
+      .input(contentByIdInput)
+      .output(contentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    submitForReview: publicProcedure
+      .input(contentByIdInput)
+      .output(z.object({
+			content: contentOutput,
+			approvalRequestId: z.string(),
+		}))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    decide: publicProcedure
+      .input(decideContentInput)
+      .output(contentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    schedule: publicProcedure
+      .input(scheduleContentInput)
+      .output(contentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    aiAssist: publicProcedure
+      .input(aiAssistInput)
+      .output(z.object({ queued: z.boolean() }))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  marketingEmail: t.router({
+    templates: publicProcedure
+      .input(emailTemplateContextInput)
+      .output(emailTemplateListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    createTemplate: publicProcedure
+      .input(createEmailTemplateInput)
+      .output(emailTemplateOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    updateTemplate: publicProcedure
+      .input(updateEmailTemplateInput)
+      .output(emailTemplateOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    archiveTemplate: publicProcedure
+      .input(archiveEmailTemplateInput)
+      .output(emailTemplateOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    renderTemplate: publicProcedure
+      .input(emailTemplateByIdInput)
+      .output(emailTemplateRenderOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    composeCampaign: publicProcedure
+      .input(composeEmailCampaignInput)
+      .output(emailCampaignOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    requestSchedule: publicProcedure
+      .input(emailScheduleRequestInput)
+      .output(emailScheduleOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    decideSchedule: publicProcedure
+      .input(emailScheduleDecideInput)
+      .output(emailScheduleOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    createList: publicProcedure
+      .input(emailCreateListInput)
+      .output(emailListOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    syncList: publicProcedure
+      .input(emailSyncListInput)
+      .output(emailSyncOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    subscribers: publicProcedure
+      .input(emailSubscribersInput)
+      .output(emailSubscribersOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
   marketing: t.router({
     overview: publicProcedure
       .input(marketingContextInput)
@@ -770,7 +927,86 @@ const appRouter = t.router({
     requestAction: publicProcedure
       .input(requestMarketingActionInput)
       .output(approvalRequestOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    syncAds: publicProcedure
+      .input(syncAdsInput)
+      .output(syncAdsOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    performanceSummary: publicProcedure
+      .input(performanceSummaryInput)
+      .output(performanceSummaryOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  marketingMedia: t.router({
+    list: publicProcedure
+      .input(listMediaInput)
+      .output(mediaListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    attach: publicProcedure
+      .input(attachMediaInput)
+      .output(z.object({ ok: z.boolean() }))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    detach: publicProcedure
+      .input(detachMediaInput)
+      .output(z.object({ ok: z.boolean() }))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    archive: publicProcedure
+      .input(archiveMediaInput)
+      .output(mediaAssetOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  marketingSocial: t.router({
+    accounts: publicProcedure
+      .input(listAccountsInput)
+      .output(accountListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    registerAccount: publicProcedure
+      .input(registerAccountInput)
+      .output(accountOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    disconnectAccount: publicProcedure
+      .input(accountByIdInput)
+      .output(accountOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    posts: publicProcedure
+      .input(listPostsInput)
+      .output(postListOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    createPost: publicProcedure
+      .input(createPostInput)
+      .output(postOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    submitForApproval: publicProcedure
+      .input(postByIdInput)
+      .output(z.object({
+			post: postOutput,
+			approvalRequestId: z.string(),
+		}))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    decide: publicProcedure
+      .input(decidePostInput)
+      .output(postOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    schedule: publicProcedure
+      .input(schedulePostInput)
+      .output(postOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    publish: publicProcedure
+      .input(postByIdInput)
+      .output(postOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    cancel: publicProcedure
+      .input(postByIdInput)
+      .output(postOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    calendar: publicProcedure
+      .input(socialCalendarInput)
+      .output(socialCalendarOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    inbox: publicProcedure
+      .input(listAccountsInput)
+      .output(socialInboxOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   microsoft: t.router({
     status: publicProcedure

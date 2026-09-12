@@ -14,6 +14,8 @@ import {
 import { WORKSPACE_ID } from "@crm/db/workspace";
 import { BusinessOsService } from "../src/business-os/business-os.service";
 import { ConversionService } from "../src/currency/conversion.service";
+import { MarketingAttributionService } from "../src/marketing/attribution.service";
+import { MarketingEmailService } from "../src/marketing/email.service";
 import { MarketingService } from "../src/marketing/marketing.service";
 
 const suffix = process.env.TEST_RUN_ID ?? crypto.randomUUID();
@@ -31,7 +33,13 @@ let marketingService: MarketingService;
 beforeAll(async () => {
 	listmonk = new FakeListmonkClient();
 	ads = new FakeAdsClient();
-	marketingService = new MarketingService(db, listmonk as never, ads as never);
+	marketingService = new MarketingService(
+		db,
+		listmonk as never,
+		ads as never,
+		new MarketingEmailService(db, listmonk as never),
+		new MarketingAttributionService(db),
+	);
 	await clean();
 	await seedWorkspace();
 });
@@ -178,6 +186,10 @@ describe("Business OS visible workspaces", () => {
 				accessToken: "google-access-token",
 				developerToken: "google-developer-token",
 			},
+		);
+		await marketingService.syncAds(
+			{ userId, businessUnitId: unitAId },
+			{ provider: MarketingProvider.GOOGLE_ADS },
 		);
 		const workspace = await marketingService.googleAds(
 			{ userId, businessUnitId: unitAId },
@@ -405,12 +417,31 @@ class FakeAdsClient {
 				conversionValue: 25,
 				cpaMicros: 100_000,
 				roas: 50,
+				reach: null,
+				cpmMicros: null,
+				costPerResultMicros: null,
 				children: [],
 			},
 		];
 	}
 
+	async googleAdGroups() {
+		return new Map();
+	}
+
+	async googleSearchTerms() {
+		return [];
+	}
+
 	async metaCampaigns() {
 		return [];
+	}
+
+	async metaAdSets() {
+		return new Map();
+	}
+
+	async metaAds() {
+		return new Map();
 	}
 }

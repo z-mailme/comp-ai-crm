@@ -52,6 +52,16 @@ model User {
   createdAutomationRules             AutomationRule[]              @relation("AutomationRuleCreator")
   createdMarketingIntegrations       MarketingIntegration[]        @relation("MarketingIntegrationCreator")
   createdMarketingAudiences          MarketingAudience[]           @relation("MarketingAudienceCreator")
+  ownedMarketingCampaigns            MarketingCampaign[]           @relation("MarketingCampaignOwner")
+  createdMarketingCampaigns          MarketingCampaign[]           @relation("MarketingCampaignCreator")
+  ownedMarketingContents             MarketingContent[]            @relation("MarketingContentOwner")
+  createdMarketingContents           MarketingContent[]            @relation("MarketingContentCreator")
+  approvedMarketingContents          MarketingContent[]            @relation("MarketingContentApprover")
+  uploadedMarketingMedia             MarketingMediaAsset[]         @relation("MarketingMediaUploader")
+  createdSocialAccounts              SocialAccount[]               @relation("SocialAccountCreator")
+  createdSocialPosts                 SocialPost[]                  @relation("SocialPostCreator")
+  approvedSocialPosts                SocialPost[]                  @relation("SocialPostApprover")
+  createdMarketingEmailTemplates     MarketingEmailTemplate[]      @relation("MarketingEmailTemplateCreator")
   conversationShares                 AgentConversationShare[]      @relation("ConversationShareCreator")
   conversationSubmissions            AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
   conversationFeedback               AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
@@ -463,6 +473,11 @@ model Contact {
 
   source RecordSource @default(MANUAL)
 
+  emailMarketingAllowed  Boolean   @default(false)
+  marketingConsentSource String?
+  consentDate            DateTime?
+  unsubscribeDate        DateTime?
+
   lastActivityAt DateTime?
   archivedAt     DateTime?
 
@@ -782,7 +797,7 @@ model AgentVersion {
   status AgentVersionStatus @default(DRAFT)
 
   instructions             String
-  autonomyLevel            Int     @default(1)
+  autonomyLevel            Int    @default(1)
   manifest                 Json
   modelId                  String
   modelContextWindowTokens Int    @default(1000000)
@@ -1064,15 +1079,15 @@ model Deal {
   lastActivityAt DateTime?
   archivedAt     DateTime?
 
-  contacts     DealContact[]
-  bookings     Booking[]
-  expenses     Expense[]
-  activities   Activity[]
-  emailThreads EmailThread[]
-  fieldValues  FieldValue[]
+  contacts          DealContact[]
+  bookings          Booking[]
+  expenses          Expense[]
+  activities        Activity[]
+  emailThreads      EmailThread[]
+  fieldValues       FieldValue[]
   businessKnowledge BusinessKnowledge[]
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  createdAt         DateTime            @default(now())
+  updatedAt         DateTime            @updatedAt
 
   @@index([companyId])
   @@index([ownerId])
@@ -1184,11 +1199,11 @@ model Expense {
   booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: Cascade)
 
   dealId String?
-  deal   Deal? @relation(fields: [dealId], references: [id], onDelete: SetNull)
+  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
 
   category ExpenseCategory
-  source   ExpenseSource  @default(MANUAL)
-  status   ExpenseStatus  @default(RECORDED)
+  source   ExpenseSource   @default(MANUAL)
+  status   ExpenseStatus   @default(RECORDED)
 
   amountCents Int
   currency    String @default("ZAR")
@@ -1631,7 +1646,7 @@ model EmailMessage {
   threadId String
   thread   EmailThread @relation(fields: [threadId], references: [id], onDelete: Cascade)
 
-  rfcMessageId     String  @unique
+  rfcMessageId     String   @unique
   syncedByUserId   String?
   gmailMessageId   String?
   gmailThreadId    String?
@@ -1776,19 +1791,19 @@ model BrainAnalysisJob {
   userId String
   user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
 
-  source String @default("gmail")
+  source String                 @default("gmail")
   status BrainAnalysisJobStatus @default(PLANNING)
 
   cursorLastMessageAt DateTime?
   cursorThreadId      String?
 
-  totalThreads      Int @default(0)
-  processedThreads  Int @default(0)
-  knowledgeWritten  Int @default(0)
-  conflictsFound    Int @default(0)
+  totalThreads     Int @default(0)
+  processedThreads Int @default(0)
+  knowledgeWritten Int @default(0)
+  conflictsFound   Int @default(0)
 
-  tokensInput  Int @default(0)
-  tokensOutput Int @default(0)
+  tokensInput  Int     @default(0)
+  tokensOutput Int     @default(0)
   modelUsed    String?
   providerUsed String?
 
@@ -1796,8 +1811,8 @@ model BrainAnalysisJob {
 
   startedAt   DateTime?
   completedAt DateTime?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
   @@index([userId, status])
   @@index([status])
@@ -1827,10 +1842,10 @@ model BusinessKnowledge {
   confirmedById  String?
   confirmedAt    DateTime?
 
-  validFrom     DateTime  @default(now())
-  validUntil    DateTime?
+  validFrom      DateTime            @default(now())
+  validUntil     DateTime?
   supersededById String?
-  supersededBy   BusinessKnowledge? @relation("KnowledgeSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
+  supersededBy   BusinessKnowledge?  @relation("KnowledgeSupersession", fields: [supersededById], references: [id], onDelete: SetNull)
   supersedes     BusinessKnowledge[] @relation("KnowledgeSupersession")
 
   companyId String?
@@ -1852,7 +1867,6 @@ model BusinessKnowledge {
   @@index([supersededById])
   @@map("businessKnowledge")
 }
-
 
 enum AgentKind {
   CUSTOMER_SERVICE
@@ -1997,8 +2011,16 @@ model BusinessUnit {
 
   channelAccounts         ChannelAccount[]
   marketingIntegrations   MarketingIntegration[]
+  marketingAdsSnapshots   MarketingAdsSnapshot[]
   marketingAudiences      MarketingAudience[]
   marketingCreativeAssets MarketingCreativeAsset[]
+  marketingCampaigns      MarketingCampaign[]
+  marketingContents       MarketingContent[]
+  marketingMediaAssets    MarketingMediaAsset[]
+  marketingEmailTemplates MarketingEmailTemplate[]
+  socialAccounts          SocialAccount[]
+  socialPosts             SocialPost[]
+  socialInteractions      SocialInteraction[]
   calendarEvents          CalendarEvent[]
   mailboxSyncs            MailboxSync[]
   customerIdentities      CustomerIdentity[]
@@ -2746,6 +2768,207 @@ enum MarketingProvider {
   META_ADS
 }
 
+enum MarketingCampaignStatus {
+  DRAFT
+  PLANNED
+  ACTIVE
+  PAUSED
+  COMPLETED
+  ARCHIVED
+}
+
+enum MarketingContentStatus {
+  IDEA
+  DRAFT
+  READY_FOR_REVIEW
+  APPROVED
+  SCHEDULED
+  PUBLISHED
+  REJECTED
+  ARCHIVED
+}
+
+enum MarketingContentType {
+  SOCIAL_POST
+  REEL
+  STORY
+  STATIC_IMAGE
+  CAROUSEL
+  EMAIL
+  AD_COPY
+  BLOG
+  LANDING_COPY
+  PROMOTION
+  ANNOUNCEMENT
+}
+
+model MarketingCampaign {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  name           String
+  objective      String?
+  status         MarketingCampaignStatus @default(DRAFT)
+  startDate      DateTime?
+  endDate        DateTime?
+  budget         Decimal?                @db.Decimal(14, 2)
+  currency       String                  @default("USD")
+  targetAudience String?
+  channels       Json                    @default("[]")
+  notes          String?
+
+  utmSource   String?
+  utmMedium   String?
+  utmCampaign String?
+  utmContent  String?
+  utmTerm     String?
+
+  ownerId String?
+  owner   User?   @relation("MarketingCampaignOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  createdById String?
+  createdBy   User?   @relation("MarketingCampaignCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  contents    MarketingContent[]
+  mediaAssets MarketingMediaAsset[]
+  socialPosts SocialPost[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status])
+  @@index([businessUnitId, utmCampaign])
+  @@map("marketingCampaign")
+}
+
+model MarketingContent {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  campaignId String?
+  campaign   MarketingCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  title    String
+  type     MarketingContentType   @default(SOCIAL_POST)
+  status   MarketingContentStatus @default(DRAFT)
+  platforms Json                  @default("[]")
+
+  caption  String?
+  headline String?
+  cta      String?
+  link     String?
+  hashtags Json @default("[]")
+
+  scheduledAt DateTime?
+  publishedAt DateTime?
+
+  internalNotes String?
+  aiAssisted    Boolean @default(false)
+  aiSuggestion  Json?
+
+  listmonkCampaignId Int?
+
+  ownerId String?
+  owner   User?   @relation("MarketingContentOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+
+  createdById String?
+  createdBy   User?   @relation("MarketingContentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  approvedById String?
+  approvedBy   User?   @relation("MarketingContentApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  archivedAt DateTime?
+
+  media MarketingContentMedia[]
+  socialPosts SocialPost[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status])
+  @@index([businessUnitId, scheduledAt])
+  @@index([campaignId])
+  @@map("marketingContent")
+}
+
+model MarketingMediaAsset {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  campaignId String?
+  campaign   MarketingCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  fileName        String
+  mimeType        String
+  sizeBytes       Int
+  width           Int?
+  height          Int?
+  durationSeconds Float?
+
+  sha256  String?
+  blobUrl String
+
+  tags Json @default("[]")
+
+  uploadedById String?
+  uploadedBy   User?   @relation("MarketingMediaUploader", fields: [uploadedById], references: [id], onDelete: SetNull)
+
+  archivedAt DateTime?
+
+  usages MarketingContentMedia[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, sha256])
+  @@index([businessUnitId, archivedAt])
+  @@map("marketingMediaAsset")
+}
+
+model MarketingContentMedia {
+  contentId String
+  content   MarketingContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  assetId String
+  asset   MarketingMediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  position Int @default(0)
+
+  @@id([contentId, assetId])
+  @@index([assetId])
+  @@map("marketingContentMedia")
+}
+
+model MarketingEmailTemplate {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  name        String
+  description String?
+  previewText String?
+  blocks      Json
+
+  status String @default("draft")
+
+  createdById String?
+  createdBy   User?   @relation("MarketingEmailTemplateCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status])
+  @@map("marketingEmailTemplate")
+}
+
 enum MarketingIntegrationStatus {
   CONNECTED
   NOT_CONFIGURED
@@ -2777,6 +3000,25 @@ model MarketingIntegration {
   @@unique([businessUnitId, provider])
   @@index([provider, status])
   @@map("marketingIntegration")
+}
+
+model MarketingAdsSnapshot {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  provider MarketingProvider
+  kind     String            @default("campaigns")
+  payload  Json
+  error    String?
+  syncedAt DateTime          @default(now())
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessUnitId, provider, kind])
+  @@map("marketingAdsSnapshot")
 }
 
 model MarketingAudience {
@@ -2824,6 +3066,172 @@ model MarketingCreativeAsset {
 
   @@index([businessUnitId, provider])
   @@map("marketingCreativeAsset")
+}
+
+enum SocialProvider {
+  META_FACEBOOK
+  META_INSTAGRAM
+  LINKEDIN
+  TIKTOK
+  YOUTUBE
+}
+
+enum SocialAccountStatus {
+  CONNECTED
+  NEEDS_ATTENTION
+  DISCONNECTED
+}
+
+model SocialAccount {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  provider          SocialProvider
+  externalAccountId String
+  displayName       String
+  handle            String?
+
+  scopes      Json                 @default("[]")
+  credentials Json?
+  status      SocialAccountStatus  @default(CONNECTED)
+
+  connectedAt DateTime  @default(now())
+  lastSyncAt  DateTime?
+  archivedAt  DateTime?
+
+  createdById String?
+  createdBy   User?   @relation("SocialAccountCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  posts        SocialPostTarget[]
+  interactions SocialInteraction[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessUnitId, provider, externalAccountId])
+  @@index([businessUnitId, status])
+  @@map("socialAccount")
+}
+
+enum SocialPostStatus {
+  DRAFT
+  PENDING_APPROVAL
+  APPROVED
+  SCHEDULED
+  PUBLISHING
+  PUBLISHED
+  FAILED
+  CANCELLED
+}
+
+model SocialPost {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  campaignId String?
+  campaign   MarketingCampaign? @relation(fields: [campaignId], references: [id], onDelete: SetNull)
+
+  contentId String?
+  content   MarketingContent? @relation(fields: [contentId], references: [id], onDelete: SetNull)
+
+  caption   String
+  mediaUrls Json   @default("[]")
+
+  status          SocialPostStatus @default(DRAFT)
+  scheduledAt     DateTime?
+  requestedAt     DateTime?
+  publishedAt     DateTime?
+  providerPostId  String?
+  providerResponse Json?
+  error           String?
+
+  idempotencyKey String @unique
+
+  approvedById String?
+  approvedBy   User?   @relation("SocialPostApprover", fields: [approvedById], references: [id], onDelete: SetNull)
+  approvedAt   DateTime?
+
+  createdById String?
+  createdBy   User?   @relation("SocialPostCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  targets SocialPostTarget[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status, scheduledAt])
+  @@map("socialPost")
+}
+
+enum SocialPostTargetStatus {
+  PENDING
+  PUBLISHED
+  FAILED
+}
+
+model SocialPostTarget {
+  id String @id @default(cuid())
+
+  postId String
+  post   SocialPost @relation(fields: [postId], references: [id], onDelete: Cascade)
+
+  accountId String
+  account   SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  status         SocialPostTargetStatus @default(PENDING)
+  providerPostId String?
+  publishedAt    DateTime?
+  error          String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([postId, accountId])
+  @@index([accountId, status])
+  @@map("socialPostTarget")
+}
+
+enum SocialInteractionKind {
+  COMMENT
+  MENTION
+  MESSAGE
+}
+
+enum SocialInteractionStatus {
+  UNREAD
+  READ
+  ARCHIVED
+}
+
+model SocialInteraction {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  accountId String
+  account   SocialAccount @relation(fields: [accountId], references: [id], onDelete: Cascade)
+
+  kind       SocialInteractionKind
+  externalId String
+
+  authorName String?
+  text       String?
+  occurredAt DateTime
+
+  status SocialInteractionStatus @default(UNREAD)
+  raw    Json?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([accountId, kind, externalId])
+  @@index([businessUnitId, status, occurredAt])
+  @@map("socialInteraction")
 }
 
 model CalendarEvent {
@@ -2966,6 +3374,10 @@ model TrackedVisitor {
   firstContent  String?
   firstReferrer String?
   firstLanding  String?
+  firstGclid    String?
+  firstGbraid   String?
+  firstWbraid   String?
+  firstFbclid   String?
   firstTouchAt  DateTime?
 
   lastSource   String?
@@ -2975,6 +3387,10 @@ model TrackedVisitor {
   lastContent  String?
   lastReferrer String?
   lastLanding  String?
+  lastGclid    String?
+  lastGbraid   String?
+  lastWbraid   String?
+  lastFbclid   String?
   lastTouchAt  DateTime?
 
   firstSeen DateTime @default(now())

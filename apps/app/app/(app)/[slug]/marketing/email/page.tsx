@@ -12,7 +12,7 @@ import {
 import { requireSession } from "@/lib/session";
 import { HydrateClient } from "@/lib/trpc/hydrate";
 import { getServerQueryClient, getServerTrpc } from "@/lib/trpc/server";
-import { EmailMarketingWorkspace } from "../marketing-workspaces";
+import { EmailMarketingWorkspace } from "./email-workspace";
 
 export const metadata: Metadata = {
 	title: "Email Marketing",
@@ -25,7 +25,7 @@ export default function EmailMarketingPage() {
 				<PageShellHeading>
 					<PageShellTitle>Email Marketing</PageShellTitle>
 					<PageShellDescription>
-						Listmonk campaigns, lists, templates, and test sends.
+						Listmonk campaigns, templates, lists, subscribers and performance.
 					</PageShellDescription>
 				</PageShellHeading>
 			</PageShellHeader>
@@ -43,7 +43,10 @@ async function EmailMarketingData() {
 	const queryClient = getServerQueryClient();
 	const trpc = getServerTrpc();
 
-	await queryClient.prefetchQuery(trpc.marketing.email.queryOptions());
+	await Promise.all([
+		queryClient.prefetchQuery(trpc.marketing.email.queryOptions()),
+		queryClient.prefetchQuery(trpc.marketingEmail.templates.queryOptions()),
+	]);
 
 	return (
 		<HydrateClient>

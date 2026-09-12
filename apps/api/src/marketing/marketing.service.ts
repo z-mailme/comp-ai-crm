@@ -3,10 +3,12 @@ import {
 	BusinessEventSource,
 	CommunicationChannel,
 	type Db,
+	DealStage,
 	MarketingIntegrationStatus,
 	MarketingProvider,
 	Prisma,
 } from "@crm/db";
+import { readReportingCurrency } from "@crm/db/settings";
 import { BadRequestException, Injectable } from "@nestjs/common";
 import { z } from "zod";
 import {
@@ -15,19 +17,29 @@ import {
 } from "../business-os/business-context";
 import { InjectDatabase } from "../database/database.constants";
 import { type AdsCampaign, AdsClient } from "./ads.client";
+import { MarketingAttributionService } from "./attribution.service";
+import { MarketingEmailService } from "./email.service";
 import { ListmonkClient, type ListmonkConfig } from "./listmonk.client";
-import type {
-	AdsConnectionInput,
-	AdsWorkspaceOutput,
-	BusinessContextInput,
-	CreateListmonkCampaignInput,
-	EmailMarketingOutput,
-	ListmonkConnectionInput,
-	MarketingIntegrationOutput,
-	MarketingOverviewOutput,
-	RequestMarketingActionInput,
-	SendListmonkTestInput,
+import {
+	type AdsConnectionInput,
+	type AdsSnapshotPayload,
+	type AdsWorkspaceOutput,
+	adsSnapshotPayload,
+	type BusinessContextInput,
+	type CreateListmonkCampaignInput,
+	type EmailMarketingOutput,
+	type ListmonkConnectionInput,
+	type MarketingIntegrationOutput,
+	type MarketingIntegrationRow,
+	type MarketingOverviewOutput,
+	type PerformanceSummaryInput,
+	type PerformanceSummaryOutput,
+	type RequestMarketingActionInput,
+	type SendListmonkTestInput,
+	type SyncAdsInput,
+	type SyncAdsOutput,
 } from "./marketing.contracts";
+import { MARKETING_ADS } from "./marketing-config";
 
 const listmonkConfig = z.object({
 	baseUrl: z.string().url(),
@@ -65,6 +77,8 @@ export class MarketingService {
 		@InjectDatabase() private readonly db: Db,
 		private readonly listmonk: ListmonkClient,
 		private readonly ads: AdsClient,
+		private readonly emailService: MarketingEmailService,
+		private readonly attribution: MarketingAttributionService,
 	) {}
 
 	async overview(
@@ -72,23 +86,118 @@ export class MarketingService {
 		input: BusinessContextInput,
 	): Promise<MarketingOverviewOutput> {
 		const contextInput = input ?? {};
-		const [email, googleAds, metaAds, crm] = await Promise.all([
-			this.email(source, contextInput),
-			this.googleAds(source, contextInput),
-			this.metaAds(source, contextInput),
-			this.crm(source, contextInput),
-		]);
+		const [email, googleAds, metaAds, crm, attributedVisitors] =
+			await Promise.all([
+				this.email(source, contextInput),
+				this.googleAds(source, contextInput),
+				this.metaAds(source, contextInput),
+				this.crm(source, contextInput),
+				this.attributedVisitors(),
+			]);
 
 		return {
 			email,
 			googleAds,
 			metaAds,
 			crm,
-			attribution: {
-				available: false,
-				status:
-					"Campaign attribution is not complete until leads, deals, bookings and payments share campaign IDs.",
-			},
+			attribution: attributionStatus(attributedVisitors),
+		};
+	}
+
+	async performanceSummary(
+		source: BusinessContextSource,
+		input: PerformanceSummaryInput,
+	): Promise<PerformanceSummaryOutput> {
+		const context = await resolveBusinessContext(
+			this.db,
+			sourceWithBusinessUnit(source, input),
+		);
+		const { from, to } = rangeDates(input.range);
+		const [breakdown, attributedVisitors, snapshots, currency] =
+			await Promise.all([
+				this.attribution.sourceBreakdown({ from, to }),
+				this.attributedVisitors(),
+				this.db.marketingAdsSnapshot.findMany({
+					where: { businessUnitId: context.businessUnitId },
+					select: { payload: true, error: true },
+				}),
+				readReportingCurrency(this.db),
+			]);
+
+		let leads = 0;
+		let bookings = 0;
+		let revenueCents = 0;
+		let revenueSeen = false;
+		for (const row of breakdown.rows) {
+			leads += row.leads;
+			bookings += row.bookings;
+			if (row.closedRevenueCents !== null) {
+				revenueCents += row.closedRevenueCents;
+				revenueSeen = true;
+			}
+		}
+
+		let spendMicros = 0;
+		let spendSeen = false;
+		for (const snapshot of snapshots) {
+			const parsed = adsSnapshotPayload.safeParse(snapshot.payload);
+			if (!parsed.success) continue;
+			for (const campaign of parsed.data.campaigns) {
+				if (campaign.spendMicros === null) continue;
+				spendMicros += campaign.spendMicros;
+				spendSeen = true;
+			}
+		}
+
+		const adSpendMicros = spendSeen ? spendMicros : null;
+		const attributedRevenueCents = revenueSeen ? revenueCents : null;
+		const notes: string[] = [];
+		if (attributedVisitors === 0) {
+			notes.push(
+				"No tracked visitors are linked to CRM contacts yet. Leads, bookings and revenue only cover attributed sources.",
+			);
+		}
+		if (!spendSeen) {
+			notes.push(
+				"No ads snapshot with spend exists for this business. Use Sync now on the Google Ads or Meta Ads page.",
+			);
+		}
+		if (leads === 0) {
+			notes.push(
+				"No attributed leads in this range, so cost per lead is not computed.",
+			);
+		}
+		if (spendSeen && revenueSeen) {
+			notes.push(
+				"Ad spend uses the ad account currency and revenue uses the reporting currency. Cost per lead, cost per booking and ROAS assume both match.",
+			);
+		}
+
+		return {
+			range: input.range,
+			from: from.toISOString(),
+			to: to.toISOString(),
+			currency,
+			leads,
+			bookings,
+			attributedRevenueCents,
+			adSpendMicros,
+			costPerLeadMicros:
+				adSpendMicros !== null && leads > 0
+					? Math.round(adSpendMicros / leads)
+					: null,
+			costPerBookingMicros:
+				adSpendMicros !== null && bookings > 0
+					? Math.round(adSpendMicros / bookings)
+					: null,
+			roas:
+				adSpendMicros !== null &&
+				adSpendMicros > 0 &&
+				attributedRevenueCents !== null
+					? attributedRevenueCents / 100 / (adSpendMicros / 1_000_000)
+					: null,
+			attribution: attributionStatus(attributedVisitors),
+			notes,
 		};
 	}
 
@@ -105,8 +214,15 @@ export class MarketingService {
 			context.businessUnitId,
 			MarketingProvider.LISTMONK,
 		);
+		const pendingSchedules = await this.emailService.pendingSchedules(
+			context.businessUnitId,
+		);
 		if (!integration)
-			return emptyEmail(notConfigured(MarketingProvider.LISTMONK));
+			return emptyEmail(
+				notConfigured(MarketingProvider.LISTMONK),
+				null,
+				pendingSchedules,
+			);
 
 		const summary = summarizeIntegration(integration);
 
@@ -148,6 +264,7 @@ export class MarketingService {
 					type: template.type ?? null,
 				})),
 				subscribers: { total: data.subscriberTotal },
+				pendingSchedules,
 				metrics: emailMetrics(campaigns),
 				error: null,
 			};
@@ -157,6 +274,7 @@ export class MarketingService {
 			return emptyEmail(
 				{ ...summary, status: MarketingIntegrationStatus.NEEDS_ATTENTION },
 				message,
+				pendingSchedules,
 			);
 		}
 	}
@@ -418,38 +536,202 @@ export class MarketingService {
 		if (!integration) return emptyAds(notConfigured(provider));
 
 		const summary = summarizeIntegration(integration);
+		const snapshot = await this.db.marketingAdsSnapshot.findUnique({
+			where: {
+				businessUnitId_provider_kind: {
+					businessUnitId: context.businessUnitId,
+					provider,
+					kind: MARKETING_ADS.snapshotKind,
+				},
+			},
+		});
+		if (!snapshot) return emptyAds(summary);
+
+		const parsed = adsSnapshotPayload.safeParse(snapshot.payload);
+		if (!parsed.success) {
+			return emptyAds(
+				summary,
+				"The cached ads report could not be read. Run a sync to rebuild it.",
+				snapshot.syncedAt.toISOString(),
+			);
+		}
+
+		return {
+			integration: summary,
+			account: {
+				id: summary.accountId ?? "",
+				name: summary.label,
+			},
+			campaigns: parsed.data.campaigns,
+			searchTerms: parsed.data.searchTerms,
+			syncedAt: snapshot.syncedAt.toISOString(),
+			metrics: adsMetrics(parsed.data.campaigns),
+			error: snapshot.error,
+		};
+	}
+
+	async syncAds(
+		source: BusinessContextSource,
+		input: SyncAdsInput,
+	): Promise<SyncAdsOutput> {
+		const context = await resolveBusinessContext(
+			this.db,
+			sourceWithBusinessUnit(source, input),
+		);
+		return this.syncProvider(context.businessUnitId, input.provider);
+	}
+
+	async syncAllAds(): Promise<SyncAdsOutput[]> {
+		const integrations = await this.db.marketingIntegration.findMany({
+			where: {
+				provider: {
+					in: [MarketingProvider.GOOGLE_ADS, MarketingProvider.META_ADS],
+				},
+				status: MarketingIntegrationStatus.CONNECTED,
+			},
+			select: { businessUnitId: true, provider: true },
+		});
+
+		const results: SyncAdsOutput[] = [];
+		for (const row of integrations) {
+			results.push(await this.syncProvider(row.businessUnitId, row.provider));
+		}
+		return results;
+	}
+
+	private async syncProvider(
+		businessUnitId: string,
+		provider: MarketingProvider,
+	): Promise<SyncAdsOutput> {
+		const integration = await this.db.marketingIntegration.findUnique({
+			where: { businessUnitId_provider: { businessUnitId, provider } },
+			select: integrationSelect,
+		});
+		if (
+			!integration ||
+			integration.status === MarketingIntegrationStatus.NOT_CONFIGURED
+		) {
+			return {
+				provider,
+				synced: false,
+				campaigns: 0,
+				syncedAt: null,
+				error: `${labelFor(provider)} is not connected.`,
+			};
+		}
 
 		try {
-			const campaigns =
+			const payload =
 				provider === MarketingProvider.GOOGLE_ADS
-					? await this.ads.googleCampaigns({
-							...googleAdsConfig.parse(integration.config ?? {}),
-							...googleAdsSecrets.parse(integration.secrets ?? {}),
-						})
-					: await this.ads.metaCampaigns({
-							...metaAdsConfig.parse(integration.config ?? {}),
-							...metaAdsSecrets.parse(integration.secrets ?? {}),
-						});
-			await this.markHealthy(integration.id);
-
-			return {
-				integration: summary,
-				account: {
-					id: summary.accountId ?? "",
-					name: summary.label,
+					? await this.googleSnapshot(integration)
+					: await this.metaSnapshot(integration);
+			const snapshot = await this.db.marketingAdsSnapshot.upsert({
+				where: {
+					businessUnitId_provider_kind: {
+						businessUnitId,
+						provider,
+						kind: MARKETING_ADS.snapshotKind,
+					},
 				},
-				campaigns,
-				metrics: adsMetrics(campaigns),
+				create: {
+					businessUnitId,
+					provider,
+					kind: MARKETING_ADS.snapshotKind,
+					payload,
+					error: null,
+					syncedAt: new Date(),
+				},
+				update: {
+					payload,
+					error: null,
+					syncedAt: new Date(),
+				},
+			});
+			await this.markHealthy(integration.id);
+			return {
+				provider,
+				synced: true,
+				campaigns: payload.campaigns.length,
+				syncedAt: snapshot.syncedAt.toISOString(),
 				error: null,
 			};
 		} catch (error) {
 			const message = error instanceof Error ? error.message : String(error);
+			const existing = await this.db.marketingAdsSnapshot.findUnique({
+				where: {
+					businessUnitId_provider_kind: {
+						businessUnitId,
+						provider,
+						kind: MARKETING_ADS.snapshotKind,
+					},
+				},
+				select: { id: true, syncedAt: true },
+			});
+			if (existing) {
+				await this.db.marketingAdsSnapshot.update({
+					where: { id: existing.id },
+					data: { error: message },
+				});
+			} else {
+				await this.db.marketingAdsSnapshot.create({
+					data: {
+						businessUnitId,
+						provider,
+						kind: MARKETING_ADS.snapshotKind,
+						payload: { campaigns: [], searchTerms: [] },
+						error: message,
+					},
+				});
+			}
 			await this.markUnhealthy(integration.id, message);
-			return emptyAds(
-				{ ...summary, status: MarketingIntegrationStatus.NEEDS_ATTENTION },
-				message,
-			);
+			return {
+				provider,
+				synced: false,
+				campaigns: 0,
+				syncedAt: existing?.syncedAt.toISOString() ?? null,
+				error: message,
+			};
 		}
+	}
+
+	private async googleSnapshot(
+		integration: MarketingIntegrationRow & { id: string },
+	): Promise<AdsSnapshotPayload> {
+		const config = {
+			...googleAdsConfig.parse(integration.config ?? {}),
+			...googleAdsSecrets.parse(integration.secrets ?? {}),
+		};
+		const [campaigns, adGroups, searchTerms] = await Promise.all([
+			this.ads.googleCampaigns(config),
+			this.ads.googleAdGroups(config),
+			this.ads.googleSearchTerms(config),
+		]);
+		for (const campaign of campaigns) {
+			campaign.children = adGroups.get(campaign.id) ?? [];
+		}
+		return { campaigns, searchTerms };
+	}
+
+	private async metaSnapshot(
+		integration: MarketingIntegrationRow & { id: string },
+	): Promise<AdsSnapshotPayload> {
+		const config = {
+			...metaAdsConfig.parse(integration.config ?? {}),
+			...metaAdsSecrets.parse(integration.secrets ?? {}),
+		};
+		const [campaigns, adSets, ads] = await Promise.all([
+			this.ads.metaCampaigns(config),
+			this.ads.metaAdSets(config),
+			this.ads.metaAds(config),
+		]);
+		for (const [campaignId, children] of adSets) {
+			for (const child of children) {
+				child.children = ads.get(child.id) ?? [];
+			}
+			const campaign = campaigns.find((row) => row.id === campaignId);
+			if (campaign) campaign.children = children;
+		}
+		return { campaigns, searchTerms: [] };
 	}
 
 	private async crm(
@@ -461,7 +743,7 @@ export class MarketingService {
 			this.db,
 			sourceWithBusinessUnit(source, contextInput),
 		);
-		const [leads, deals, bookings] = await Promise.all([
+		const [leads, deals, bookings, closedDeals, currency] = await Promise.all([
 			this.db.businessEvent.count({
 				where: {
 					businessUnitId: context.businessUnitId,
@@ -470,15 +752,43 @@ export class MarketingService {
 			}),
 			this.db.deal.count({ where: dealScope(context) }),
 			this.db.booking.count({ where: bookingScope(context) }),
+			this.db.deal.findMany({
+				where: {
+					AND: [
+						dealScope(context),
+						{ stage: DealStage.CLOSED_WON, archivedAt: null },
+					],
+				},
+				select: { baseAmount: true, baseCurrency: true },
+			}),
+			readReportingCurrency(this.db),
 		]);
+
+		let cents = 0;
+		let seen = false;
+		let unconverted = 0;
+		for (const deal of closedDeals) {
+			if (deal.baseAmount === null || deal.baseCurrency !== currency) {
+				unconverted += 1;
+				continue;
+			}
+			cents += Number(deal.baseAmount) * 100;
+			seen = true;
+		}
 
 		return {
 			campaignLeads: leads,
 			deals,
 			bookings,
-			revenueCents: null,
-			measured: false,
+			revenueCents: seen ? Math.round(cents) : null,
+			measured: seen && unconverted === 0,
 		};
+	}
+
+	private attributedVisitors(): Promise<number> {
+		return this.db.trackedVisitor.count({
+			where: { contactId: { not: null } },
+		});
 	}
 
 	private integration(businessUnitId: string, provider: MarketingProvider) {
@@ -567,6 +877,7 @@ function notConfigured(
 function emptyEmail(
 	integration: MarketingIntegrationOutput,
 	error: string | null = null,
+	pendingSchedules: EmailMarketingOutput["pendingSchedules"] = [],
 ): EmailMarketingOutput {
 	return {
 		integration,
@@ -574,6 +885,7 @@ function emptyEmail(
 		lists: [],
 		templates: [],
 		subscribers: { total: null },
+		pendingSchedules,
 		metrics: [
 			{ label: "Sent", value: null, unit: "messages", measured: false },
 			{ label: "Opens", value: null, unit: "events", measured: false },
@@ -587,15 +899,19 @@ function emptyEmail(
 function emptyAds(
 	integration: MarketingIntegrationOutput,
 	error: string | null = null,
+	syncedAt: string | null = null,
 ): AdsWorkspaceOutput {
 	return {
 		integration,
 		account: null,
 		campaigns: [],
+		searchTerms: [],
+		syncedAt,
 		metrics: [
 			{ label: "Spend", value: null, unit: "micros", measured: false },
 			{ label: "Leads", value: null, unit: "conversions", measured: false },
 			{ label: "CPL", value: null, unit: "micros", measured: false },
+			{ label: "CPM", value: null, unit: "micros", measured: false },
 			{ label: "ROAS", value: null, unit: "ratio", measured: false },
 		],
 		error,
@@ -633,6 +949,7 @@ function emailMetrics(campaigns: EmailMarketingOutput["campaigns"]) {
 
 function adsMetrics(campaigns: AdsCampaign[]) {
 	const spend = sumNullable(campaigns, (row) => row.spendMicros);
+	const impressions = sumNullable(campaigns, (row) => row.impressions);
 	const conversions = sumNullable(campaigns, (row) => row.conversions);
 	const value = sumNullable(campaigns, (row) => row.conversionValue);
 
@@ -657,12 +974,49 @@ function adsMetrics(campaigns: AdsCampaign[]) {
 			measured: spend !== null && Boolean(conversions),
 		},
 		{
+			label: "CPM",
+			value:
+				spend !== null && impressions
+					? Math.round((spend / impressions) * 1000)
+					: null,
+			unit: "micros",
+			measured: spend !== null && Boolean(impressions),
+		},
+		{
 			label: "ROAS",
 			value: spend && value ? value / (spend / 1_000_000) : null,
 			unit: "ratio",
 			measured: Boolean(spend && value),
 		},
 	];
+}
+
+function attributionStatus(attributedVisitors: number) {
+	if (attributedVisitors === 0) {
+		return {
+			available: false,
+			attributedVisitors,
+			status:
+				"No tracked visitors are linked to CRM contacts yet. Attribution starts when the tracking script identifies a visitor.",
+		};
+	}
+	return {
+		available: true,
+		attributedVisitors,
+		status: `Attribution is live: ${attributedVisitors} tracked visitors are linked to CRM contacts.`,
+	};
+}
+
+function rangeDates(range: "today" | "7d" | "28d" | "90d") {
+	const to = new Date();
+	const from = new Date(to);
+	if (range === "today") {
+		from.setHours(0, 0, 0, 0);
+		return { from, to };
+	}
+	const days = range === "7d" ? 7 : range === "28d" ? 28 : 90;
+	from.setDate(from.getDate() - days);
+	return { from, to };
 }
 
 function labelFor(provider: MarketingProvider): string {

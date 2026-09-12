@@ -10,6 +10,10 @@
 			"schedule": "0 6 * * *"
 		},
 		{
+			"path": "/internal/sync/marketing-ads",
+			"schedule": "17 */6 * * *"
+		},
+		{
 			"path": "/internal/telemetry/rollup",
 			"schedule": "0 7 * * *"
 		},
