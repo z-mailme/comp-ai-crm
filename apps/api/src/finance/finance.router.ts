@@ -17,6 +17,7 @@ import {
 	expenseMutationOutput,
 	financeWeekInput,
 	financeWeekOutput,
+	markExpensePaidInput,
 } from "./finance.contracts";
 import { FinanceService } from "./finance.service";
 
@@ -64,5 +65,20 @@ export class FinanceRouter {
 		@Input() input: z.infer<typeof cancelExpenseInput>,
 	) {
 		return this.finance.cancelExpense({ userId: ctx.user.id }, input);
+	}
+
+	@Mutation({
+		input: markExpensePaidInput,
+		output: expenseMutationOutput,
+		meta: restMeta("POST", "/finance/expenses/mark-paid", ["Finance"]),
+	})
+	async markExpensePaid(
+		@Ctx() ctx: AuthedTrpcContext,
+		@Input() input: z.infer<typeof markExpensePaidInput>,
+	) {
+		return this.finance.markExpensePaid(
+			{ userId: ctx.user.id, businessUnitId: input.businessUnitId },
+			input,
+		);
 	}
 }

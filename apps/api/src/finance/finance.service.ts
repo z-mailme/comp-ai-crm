@@ -339,6 +339,33 @@ export class FinanceService {
 		return { expense: toExpenseEntry(updated) };
 	}
 
+	async markExpensePaid(
+		source: BusinessContextSource & { userId: string },
+		input: { id: string },
+	): Promise<{ expense: ExpenseEntryOutput }> {
+		const context = await resolveBusinessContext(this.db, source);
+
+		const expense = await this.db.expense.findFirst({
+			where: { AND: [{ id: input.id }, directBusinessUnitScope(context)] },
+			select: { ...EXPENSE_SELECT },
+		});
+
+		if (!expense) {
+			throw new NotFoundException(`No expense with id ${input.id}.`);
+		}
+		if (expense.status === ExpenseStatus.CANCELLED) {
+			throw new BadRequestException("A cancelled expense cannot be paid.");
+		}
+
+		const updated = await this.db.expense.update({
+			where: { id: expense.id },
+			data: { status: ExpenseStatus.PAID },
+			select: EXPENSE_SELECT,
+		});
+
+		return { expense: toExpenseEntry(updated) };
+	}
+
 	private async reconcileLabour(
 		context: BusinessContext,
 		bookings: WeekBooking[],
@@ -355,6 +382,7 @@ export class FinanceService {
 				id: true,
 				bookingId: true,
 				dealId: true,
+				status: true,
 				amountCents: true,
 				currency: true,
 				incurredAt: true,
@@ -370,6 +398,10 @@ export class FinanceService {
 			const operatorCount = operatorCountOf(booking.resources);
 			const costCents = operatorLabourCostCents(durationMinutes, operatorCount);
 			const current = byBooking.get(booking.id);
+			const derivedStatus =
+				current?.status === ExpenseStatus.PAID
+					? ExpenseStatus.PAID
+					: labourStatusOf(booking);
 
 			if (
 				costCents === null ||
@@ -393,6 +425,7 @@ export class FinanceService {
 				current &&
 				current.amountCents === costCents &&
 				current.dealId === booking.dealId &&
+				current.status === derivedStatus &&
 				current.incurredAt.getTime() === booking.eventDate.getTime() &&
 				parseExpenseEvidence(current.evidence)?.durationMinutes ===
 					durationMinutes &&
@@ -410,7 +443,7 @@ export class FinanceService {
 					dealId: booking.dealId,
 					category: ExpenseCategory.OPERATOR_LABOUR,
 					source: ExpenseSource.CALCULATED,
-					status: ExpenseStatus.RECORDED,
+					status: derivedStatus,
 					amountCents: costCents,
 					currency: FINANCE.operatorLabour.currency,
 					incurredAt: booking.eventDate,
@@ -423,6 +456,7 @@ export class FinanceService {
 					amountCents: costCents,
 					incurredAt: booking.eventDate,
 					evidence,
+					status: derivedStatus,
 				},
 			});
 		}
@@ -552,6 +586,23 @@ function toExpenseEntry(expense: ExpenseRow): ExpenseEntryOutput {
 		note: expense.note,
 		evidence: parseExpenseEvidence(expense.evidence),
 	};
+}
+
+function labourStatusOf(booking: WeekBooking): ExpenseStatus {
+	const todayStart = new Date(
+		Date.UTC(
+			new Date().getUTCFullYear(),
+			new Date().getUTCMonth(),
+			new Date().getUTCDate(),
+		),
+	);
+	const eventPassed = booking.eventDate.getTime() < todayStart.getTime();
+	const settled = (
+		CONFIRMED_BOOKING_STATUSES as readonly BookingStatus[]
+	).includes(booking.status);
+	return eventPassed && settled
+		? ExpenseStatus.CONFIRMED
+		: ExpenseStatus.PROJECTED;
 }
 
 function dayDate(value: string): Date {

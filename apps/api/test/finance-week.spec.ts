@@ -441,4 +441,76 @@ describe("finance expenses", () => {
 			);
 		}
 	});
+
+	it("marks a manual expense paid", async () => {
+		const booking = await seedBooking({
+			key: "manual-paid",
+			eventDate: "2026-09-07",
+			operators: 1,
+			durationMinutes: 120,
+			amount: 5000,
+		});
+		const added = await service.addExpense(source, {
+			bookingId: booking.id,
+			category: ExpenseCategory.TRAVEL,
+			amountCents: 45000,
+			currency: "ZAR",
+			incurredAt: "2026-09-07",
+			note: "Paid fuel",
+		});
+
+		const paid = await service.markExpensePaid(source, {
+			id: added.expense.id,
+		});
+
+		expect(paid.expense.status).toBe(ExpenseStatus.PAID);
+		expect(paid.expense.source).toBe(ExpenseSource.MANUAL);
+	});
+
+	it("preserves paid calculated labour during reconciliation", async () => {
+		const booking = await seedBooking({
+			key: "calc-paid",
+			eventDate: "2026-09-07",
+			operators: 1,
+			durationMinutes: 360,
+			amount: 5000,
+		});
+		await service.week(source, { weekStart: "2026-09-07" });
+		const [calculated] = await calculatedExpenses(booking.id);
+		if (!calculated) throw new Error("expected a calculated expense");
+
+		await service.markExpensePaid(source, { id: calculated.id });
+		await service.week(source, { weekStart: "2026-09-07" });
+
+		const [after] = await calculatedExpenses(booking.id);
+		expect(after?.status).toBe(ExpenseStatus.PAID);
+	});
+
+	it("refuses to mark a cancelled expense paid", async () => {
+		const booking = await seedBooking({
+			key: "cancelled-paid",
+			eventDate: "2026-09-07",
+			operators: 1,
+			durationMinutes: 120,
+			amount: 5000,
+		});
+		const added = await service.addExpense(source, {
+			bookingId: booking.id,
+			category: ExpenseCategory.TRAVEL,
+			amountCents: 45000,
+			currency: "ZAR",
+			incurredAt: "2026-09-07",
+			note: "Cancelled fuel",
+		});
+		await service.cancelExpense(source, { id: added.expense.id });
+
+		try {
+			await service.markExpensePaid(source, { id: added.expense.id });
+			throw new Error("markExpensePaid should have thrown");
+		} catch (error) {
+			expect(error instanceof Error ? error.message : "").toContain(
+				"cancelled expense cannot be paid",
+			);
+		}
+	});
 });

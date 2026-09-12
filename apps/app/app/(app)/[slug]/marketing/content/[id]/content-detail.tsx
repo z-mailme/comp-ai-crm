@@ -81,11 +81,19 @@ const PLATFORM_OPTIONS = Object.keys(PLATFORM_LABELS) as Content["platforms"];
 const STATUS_LABELS = {
 	IDEA: "Idea",
 	DRAFT: "Draft",
+	PLANNED: "Planned",
+	MEDIA_SELECTED: "Media selected",
+	COPY_GENERATED: "Copy generated",
+	DESIGN_GENERATED: "Design generated",
 	READY_FOR_REVIEW: "In review",
+	AWAITING_APPROVAL: "Awaiting approval",
 	APPROVED: "Approved",
 	SCHEDULED: "Scheduled",
+	PUBLISHING: "Publishing",
 	PUBLISHED: "Published",
+	FAILED: "Failed",
 	REJECTED: "Rejected",
+	CANCELLED: "Cancelled",
 	ARCHIVED: "Archived",
 } satisfies Record<Content["status"], string>;
 

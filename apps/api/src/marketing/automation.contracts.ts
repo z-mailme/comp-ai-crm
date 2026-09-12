@@ -39,7 +39,6 @@ const automationStatuses = [
 
 export const automationContentStatus = z.enum(automationStatuses);
 
-// A — automation configuration
 export const automationConfigInput = z.object({ businessUnitId });
 
 export const automationConfigOutput = z.object({
@@ -61,7 +60,6 @@ export const updateAutomationConfigInput = z.object({
 	paused: z.boolean().optional(),
 });
 
-// B — upcoming content plan
 export const automationPlanInput = z.object({
 	businessUnitId,
 	from: dateTimeString.optional(),
@@ -87,7 +85,6 @@ export const automationPlanOutput = z.object({
 	rows: z.array(automationPlanItemOutput),
 });
 
-// C — create/update content item
 export const automationUpsertContentInput = z.object({
 	businessUnitId,
 	id: z.string().trim().min(1).optional(),
@@ -120,7 +117,6 @@ export const automationContentOutput = z.object({
 	created: z.boolean(),
 });
 
-// D — request approved-media selection
 export const mediaSelectionRequestInput = z.object({
 	businessUnitId,
 	contentId,
@@ -154,7 +150,6 @@ export const mediaSelectionOutput = z.object({
 	reason: z.string().nullable(),
 });
 
-// E — register Drive asset
 export const registerDriveAssetInput = z.object({
 	businessUnitId,
 	driveFileId: z.string().trim().min(1).max(200),
@@ -167,7 +162,6 @@ export const registerDriveAssetInput = z.object({
 	doNotUseUntil: dateTimeString.nullish(),
 });
 
-// F — save generated caption/copy
 export const saveCopyInput = z.object({
 	businessUnitId,
 	contentId,
@@ -178,7 +172,6 @@ export const saveCopyInput = z.object({
 	idempotencyKey,
 });
 
-// G — save rendered Canva/design asset
 export const saveRenderInput = z.object({
 	businessUnitId,
 	contentId,
@@ -211,14 +204,12 @@ export const canvaRenderOutput = z.object({
 	createdAt: z.string(),
 });
 
-// H — send content for approval
 export const sendApprovalInput = z.object({
 	businessUnitId,
 	contentId,
 	summary: z.string().trim().max(500).optional(),
 });
 
-// I — read approval status
 export const approvalStatusInput = z.object({
 	businessUnitId,
 	contentId,
@@ -244,7 +235,6 @@ export const approvalStatusOutput = z.object({
 		.nullable(),
 });
 
-// J — mark content approved/rejected
 export const decideApprovalInput = z.object({
 	businessUnitId,
 	contentId,
@@ -253,7 +243,6 @@ export const decideApprovalInput = z.object({
 	actor: z.enum(["USER", "AUTOPILOT"]).default("USER"),
 });
 
-// K — record publishing result (terminal)
 export const publishResultInput = z.object({
 	businessUnitId,
 	contentId,
@@ -277,7 +266,6 @@ export const publishResultInput = z.object({
 	idempotencyKey,
 });
 
-// L — record platform post IDs/URLs
 export const recordPostIdsInput = z.object({
 	businessUnitId,
 	socialPostId: z.string().trim().min(1),
@@ -286,7 +274,6 @@ export const recordPostIdsInput = z.object({
 	externalPostUrl: z.string().trim().url().max(1000).nullish(),
 });
 
-// M — record failure/retry information (non-terminal)
 export const recordFailureInput = z.object({
 	businessUnitId,
 	contentId,
@@ -318,7 +305,6 @@ export const publishAttemptOutput = z.object({
 	replayed: z.boolean(),
 });
 
-// N — save analytics metrics
 export const saveMetricsInput = z.object({
 	businessUnitId,
 	contentId,
@@ -344,7 +330,6 @@ export const metricOutput = z.object({
 	clicks: z.number(),
 });
 
-// O — save asset usage
 export const recordUsageInput = z.object({
 	businessUnitId,
 	assetId: z.string().trim().min(1).optional(),
@@ -355,7 +340,6 @@ export const recordUsageInput = z.object({
 	idempotencyKey,
 });
 
-// P — Business Brain context
 export const brainContextInput = z.object({
 	businessUnitId,
 	service: serviceName.optional(),

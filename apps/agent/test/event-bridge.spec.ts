@@ -201,7 +201,10 @@ describe("drainMemoryBridge", () => {
 		expect(pop?.bookingId).toBe(bookingId);
 
 		const activity = await db.activity.findFirst({
-			where: { meta: { path: ["source"], equals: "pop-bridge" } },
+			where: {
+				contactId: contact.id,
+				meta: { path: ["source"], equals: "pop-bridge" },
+			},
 		});
 		expect(activity?.subject).toContain("R12,500");
 

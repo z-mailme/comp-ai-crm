@@ -493,6 +493,16 @@ export const NAVIGATION_EXCLUSIONS: readonly NavigationExclusion[] = [
 		reason: "Agent detail opens from Agents.",
 	},
 	{
+		route: "/marketing/campaigns/[id]",
+		status: "INTERNAL_ONLY",
+		reason: "Campaign detail opens from Campaigns.",
+	},
+	{
+		route: "/marketing/content/[id]",
+		status: "INTERNAL_ONLY",
+		reason: "Content detail opens from Content.",
+	},
+	{
 		route: "/settings/connections/intake",
 		status: "INTERNAL_ONLY",
 		reason: "Connection intake opens from OAuth callback flow.",

@@ -141,6 +141,11 @@ export const cancelExpenseInput = z.object({
 	id: z.string().trim().min(1),
 });
 
+export const markExpensePaidInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	id: z.string().trim().min(1),
+});
+
 export const expenseMutationOutput = z.object({
 	expense: expenseEntryOutput,
 });
