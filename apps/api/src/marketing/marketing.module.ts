@@ -5,6 +5,8 @@ import { AdsClient } from "./ads.client";
 import { MarketingAttributionService } from "./attribution.service";
 import { MarketingAudiencesRouter } from "./audiences.router";
 import { MarketingAudiencesService } from "./audiences.service";
+import { MarketingAutomationRouter } from "./automation.router";
+import { MarketingAutomationService } from "./automation.service";
 import { MarketingCampaignsRouter } from "./campaigns.router";
 import { MarketingCampaignsService } from "./campaigns.service";
 import { MarketingContentRouter } from "./content.router";
@@ -27,6 +29,8 @@ import { MarketingSocialService } from "./social.service";
 	providers: [
 		MarketingService,
 		MarketingRouter,
+		MarketingAutomationService,
+		MarketingAutomationRouter,
 		MarketingCampaignsService,
 		MarketingCampaignsRouter,
 		MarketingContentService,

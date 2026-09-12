@@ -29,3 +29,38 @@ export const MARKETING_ADS = {
 	metaMaxPages: 4,
 	snapshotKind: "campaigns",
 } as const;
+
+export const MARKETING_AUTOMATION = {
+	mediaCooldownDays: 14,
+	planHorizonDays: 28,
+	planListLimit: 100,
+	metricListLimit: 90,
+	publishErrorSummaryMaxChars: 500,
+	services: [
+		"360 Video Booth",
+		"Instant Printing Photo Booth",
+		"Photography",
+		"Backdrops & Decor",
+		"Testimonials",
+	],
+	contentTypes: [
+		"promotional",
+		"educational",
+		"portfolio",
+		"testimonial",
+		"behind-the-scenes",
+		"event highlight",
+		"availability",
+		"offer",
+		"seasonal",
+		"engagement/community",
+	],
+	brainContext: {
+		offersLimit: 10,
+		pricingLimit: 15,
+		servicesLimit: 10,
+		faqLimit: 15,
+		bookingTrendDays: 90,
+		upcomingBookingDays: 60,
+	},
+} as const;
