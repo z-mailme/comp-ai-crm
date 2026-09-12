@@ -7,6 +7,9 @@ import {
 	ExpenseCategory,
 	ExpenseSource,
 	ExpenseStatus,
+	FinanceDocumentStatus,
+	InvoiceLifecycleStatus,
+	PaymentRecordStatus,
 } from "@crm/db";
 import { WORKSPACE_ID } from "@crm/db/workspace";
 import { ConversionService } from "../src/currency/conversion.service";
@@ -512,5 +515,121 @@ describe("finance expenses", () => {
 				"cancelled expense cannot be paid",
 			);
 		}
+	});
+});
+
+describe("finance documents", () => {
+	it("creates a quote with ZAR defaults and an audit event", async () => {
+		await seedWorkspace();
+
+		const result = await service.createQuote(source, {
+			title: `Quote ${marker}`,
+			currency: "ZAR",
+			lineItems: [
+				{
+					description: "360 booth",
+					quantity: 2,
+					unitAmountCents: 150_000,
+				},
+			],
+		});
+
+		expect(result.quote.number).toStartWith("Q-");
+		expect(result.quote.status).toBe(FinanceDocumentStatus.DRAFT);
+		expect(result.quote.currency).toBe("ZAR");
+		expect(result.quote.taxEnabled).toBe(false);
+		expect(result.quote.taxRateBasisPoints).toBe(0);
+		expect(result.quote.totalCents).toBe(300_000);
+		expect(result.quote.auditEvents[0]?.summary).toBe("Quote created.");
+	});
+
+	it("changes quote status and records the audit trail", async () => {
+		await seedWorkspace();
+		const created = await service.createQuote(source, {
+			title: `Status Quote ${marker}`,
+			currency: "ZAR",
+			lineItems: [
+				{
+					description: "Event package",
+					quantity: 1,
+					unitAmountCents: 250_000,
+				},
+			],
+		});
+
+		const sent = await service.updateQuoteStatus(source, {
+			id: created.quote.id,
+			status: "SENT",
+		});
+
+		expect(sent.quote.status).toBe(FinanceDocumentStatus.SENT);
+		expect(sent.quote.sentAt).not.toBeNull();
+		expect(sent.quote.auditEvents[0]?.summary).toBe("Quote marked sent.");
+	});
+
+	it("creates an invoice and balanced ledger entries", async () => {
+		await seedWorkspace();
+
+		const invoice = await service.createInvoice(source, {
+			title: `Invoice ${marker}`,
+			currency: "ZAR",
+			issueDate: "2026-09-12",
+			lineItems: [
+				{
+					description: "Event package",
+					quantity: 1,
+					unitAmountCents: 400_000,
+				},
+			],
+		});
+		const accounting = await service.accounting(source);
+		const invoiceEntries = accounting.entries.filter(
+			(entry) => entry.sourceId === invoice.invoice.id,
+		);
+
+		expect(invoice.invoice.status).toBe(InvoiceLifecycleStatus.DRAFT);
+		expect(invoice.invoice.balanceCents).toBe(400_000);
+		expect(invoiceEntries).toHaveLength(2);
+		expect(
+			invoiceEntries.reduce((total, entry) => total + entry.debitCents, 0),
+		).toBe(400_000);
+		expect(
+			invoiceEntries.reduce((total, entry) => total + entry.creditCents, 0),
+		).toBe(400_000);
+	});
+
+	it("matches a payment to an invoice and marks the invoice paid", async () => {
+		await seedWorkspace();
+		const invoice = await service.createInvoice(source, {
+			title: `Paid Invoice ${marker}`,
+			currency: "ZAR",
+			issueDate: "2026-09-12",
+			lineItems: [
+				{
+					description: "Event package",
+					quantity: 1,
+					unitAmountCents: 500_000,
+				},
+			],
+		});
+
+		const payment = await service.createPayment(source, {
+			invoiceId: invoice.invoice.id,
+			amountCents: 500_000,
+			currency: "ZAR",
+			paidAt: "2026-09-12",
+			method: "BANK_TRANSFER",
+			reference: `POP ${marker}`,
+		});
+		const invoices = await service.invoices(source, {
+			search: invoice.invoice.number,
+		});
+		const updated = invoices.invoices.find(
+			(row) => row.id === invoice.invoice.id,
+		);
+
+		expect(payment.payment.status).toBe(PaymentRecordStatus.MATCHED);
+		expect(updated?.status).toBe(InvoiceLifecycleStatus.PAID);
+		expect(updated?.balanceCents).toBe(0);
 	});
 });

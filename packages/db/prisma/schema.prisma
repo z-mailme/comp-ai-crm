@@ -68,6 +68,11 @@ model User {
   conversationFeedback               AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
   slackMemberMatch                   SlackMemberMatch?
   createdExpenses                    Expense[]                     @relation("ExpenseCreator")
+  createdFinanceRules                FinanceRule[]                 @relation("FinanceRuleCreator")
+  createdQuotes                      Quote[]                       @relation("QuoteCreator")
+  createdInvoices                    Invoice[]                     @relation("InvoiceCreator")
+  createdPayments                    PaymentRecord[]               @relation("PaymentCreator")
+  financeAuditEvents                 FinanceAuditEvent[]           @relation("FinanceAuditActor")
   dashboardLayouts                   UserDashboardLayout[]
 
   members     Member[]
@@ -410,6 +415,9 @@ model Company {
   businessTasks              BusinessTask[]
   conversationInsights       ConversationInsight[]
   deals                      Deal[]
+  quotes                     Quote[]
+  invoices                   Invoice[]
+  paymentRecords             PaymentRecord[]
   activities                 Activity[]
   emailThreads               EmailThread[]
   calendarEvents             CalendarEvent[]
@@ -483,6 +491,8 @@ model Contact {
   archivedAt     DateTime?
 
   deals                     DealContact[]
+  quotes                    Quote[]
+  invoices                  Invoice[]
   activities                Activity[]
   emailThreads              EmailThread[]
   calendarEvents            CalendarEvent[]
@@ -1083,6 +1093,9 @@ model Deal {
   contacts          DealContact[]
   bookings          Booking[]
   expenses          Expense[]
+  quotes            Quote[]
+  invoices          Invoice[]
+  paymentRecords    PaymentRecord[]
   activities        Activity[]
   emailThreads      EmailThread[]
   fieldValues       FieldValue[]
@@ -1125,6 +1138,9 @@ model Booking {
 
   resources                  BookingResource[]
   expenses                   Expense[]
+  quotes                     Quote[]
+  invoices                   Invoice[]
+  paymentRecords             PaymentRecord[]
   emailThreads               EmailThread[]
   communicationConversations Conversation[]
   businessEvents             BusinessEvent[]
@@ -1221,6 +1237,8 @@ model Expense {
   createdById String?
   createdBy   User?   @relation("ExpenseCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
+  financeEvidence FinanceEvidence[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -1233,6 +1251,425 @@ model Expense {
 enum RateSource {
   FETCHED
   MANUAL
+}
+
+enum FinanceDocumentStatus {
+  DRAFT
+  READY
+  SENT
+  ACCEPTED
+  DECLINED
+  VOID
+}
+
+enum InvoiceLifecycleStatus {
+  DRAFT
+  SENT
+  PARTIALLY_PAID
+  PAID
+  OVERDUE
+  VOID
+}
+
+enum PaymentRecordStatus {
+  UNMATCHED
+  MATCHED
+  REFUNDED
+  CANCELLED
+}
+
+enum PaymentMethod {
+  BANK_TRANSFER
+  CASH
+  CARD
+  OTHER
+}
+
+enum FinanceLedgerAccountType {
+  ASSET
+  LIABILITY
+  EQUITY
+  INCOME
+  EXPENSE
+}
+
+enum FinanceLedgerEntrySource {
+  INVOICE
+  PAYMENT
+  EXPENSE
+  ADJUSTMENT
+}
+
+enum FinanceEvidenceType {
+  EMAIL
+  MESSAGE
+  EVENT
+  MANUAL
+  SYSTEM
+}
+
+enum FinanceAuditAction {
+  CREATED
+  UPDATED
+  SENT
+  ACCEPTED
+  DECLINED
+  VOIDED
+  PAID
+  MATCHED
+  UNMATCHED
+  OVERRIDDEN
+}
+
+model FinanceRule {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  key   String
+  value Json
+
+  createdById String?
+  createdBy   User?   @relation("FinanceRuleCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessUnitId, key])
+  @@index([key])
+  @@map("financeRule")
+}
+
+model Quote {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  dealId String?
+  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  number String @unique
+  title  String
+  status FinanceDocumentStatus @default(DRAFT)
+
+  currency String @default("ZAR")
+  subtotalCents Int @default(0)
+  taxCents      Int @default(0)
+  totalCents    Int @default(0)
+
+  taxEnabled        Boolean @default(false)
+  taxRateBasisPoints Int    @default(0)
+
+  notes      String?
+  validUntil DateTime? @db.Date
+  sentAt     DateTime?
+  acceptedAt DateTime?
+  declinedAt DateTime?
+  voidedAt   DateTime?
+
+  createdById String?
+  createdBy   User?   @relation("QuoteCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  lineItems QuoteLineItem[]
+  invoices  Invoice[]
+  evidence  FinanceEvidence[]
+  auditEvents FinanceAuditEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status])
+  @@index([dealId])
+  @@index([bookingId])
+  @@index([companyId])
+  @@index([contactId])
+  @@index([createdAt])
+  @@map("quote")
+}
+
+model QuoteLineItem {
+  id String @id @default(cuid())
+
+  quoteId String
+  quote   Quote  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  description String
+  quantity    Int @default(1)
+  unitAmountCents Int @default(0)
+  totalCents      Int @default(0)
+  sortOrder       Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([quoteId, sortOrder])
+  @@map("quoteLineItem")
+}
+
+model Invoice {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  quoteId String?
+  quote   Quote?  @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+
+  dealId String?
+  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  contactId String?
+  contact   Contact? @relation(fields: [contactId], references: [id], onDelete: SetNull)
+
+  number String @unique
+  title  String
+  status InvoiceLifecycleStatus @default(DRAFT)
+
+  currency String @default("ZAR")
+  subtotalCents Int @default(0)
+  taxCents      Int @default(0)
+  totalCents    Int @default(0)
+  paidCents     Int @default(0)
+  balanceCents  Int @default(0)
+
+  taxEnabled        Boolean @default(false)
+  taxRateBasisPoints Int    @default(0)
+
+  issueDate DateTime @db.Date
+  dueDate   DateTime? @db.Date
+  sentAt    DateTime?
+  paidAt    DateTime?
+  voidedAt  DateTime?
+  notes     String?
+
+  createdById String?
+  createdBy   User?   @relation("InvoiceCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  lineItems InvoiceLineItem[]
+  payments  PaymentRecord[]
+  ledgerEntries LedgerEntry[]
+  evidence  FinanceEvidence[]
+  auditEvents FinanceAuditEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, status])
+  @@index([quoteId])
+  @@index([dealId])
+  @@index([bookingId])
+  @@index([companyId])
+  @@index([contactId])
+  @@index([issueDate])
+  @@index([dueDate])
+  @@map("invoice")
+}
+
+model InvoiceLineItem {
+  id String @id @default(cuid())
+
+  invoiceId String
+  invoice   Invoice @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  description String
+  quantity    Int @default(1)
+  unitAmountCents Int @default(0)
+  totalCents      Int @default(0)
+  sortOrder       Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([invoiceId, sortOrder])
+  @@map("invoiceLineItem")
+}
+
+model PaymentRecord {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  dealId String?
+  deal   Deal?   @relation(fields: [dealId], references: [id], onDelete: SetNull)
+
+  bookingId String?
+  booking   Booking? @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+
+  companyId String?
+  company   Company? @relation(fields: [companyId], references: [id], onDelete: SetNull)
+
+  amountCents Int
+  currency    String @default("ZAR")
+  paidAt      DateTime @db.Date
+  method      PaymentMethod @default(BANK_TRANSFER)
+  reference   String?
+  payerName   String?
+  status      PaymentRecordStatus @default(UNMATCHED)
+
+  createdById String?
+  createdBy   User?   @relation("PaymentCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  ledgerEntries LedgerEntry[]
+  evidence FinanceEvidence[]
+  auditEvents FinanceAuditEvent[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([businessUnitId, paidAt])
+  @@index([invoiceId])
+  @@index([dealId])
+  @@index([bookingId])
+  @@index([companyId])
+  @@index([status])
+  @@map("paymentRecord")
+}
+
+model LedgerAccount {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  code String
+  name String
+  type FinanceLedgerAccountType
+  system Boolean @default(false)
+  active Boolean @default(true)
+
+  entries LedgerEntry[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessUnitId, code])
+  @@index([type, active])
+  @@map("ledgerAccount")
+}
+
+model LedgerEntry {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  accountId String
+  account   LedgerAccount @relation(fields: [accountId], references: [id], onDelete: Restrict)
+
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  paymentId String?
+  payment   PaymentRecord? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  source   FinanceLedgerEntrySource
+  sourceId String?
+  memo     String?
+  currency String @default("ZAR")
+  debitCents  Int @default(0)
+  creditCents Int @default(0)
+  occurredAt  DateTime @db.Date
+
+  createdAt DateTime @default(now())
+
+  @@index([businessUnitId, occurredAt])
+  @@index([accountId, occurredAt])
+  @@index([invoiceId])
+  @@index([paymentId])
+  @@index([source, sourceId])
+  @@map("ledgerEntry")
+}
+
+model FinanceEvidence {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  quoteId String?
+  quote   Quote?  @relation(fields: [quoteId], references: [id], onDelete: Cascade)
+
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: Cascade)
+
+  paymentId String?
+  payment   PaymentRecord? @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+
+  expenseId String?
+  expense   Expense? @relation(fields: [expenseId], references: [id], onDelete: Cascade)
+
+  businessEventId String?
+  businessEvent   BusinessEvent? @relation(fields: [businessEventId], references: [id], onDelete: SetNull)
+
+  type FinanceEvidenceType
+  label String
+  summary String?
+  occurredAt DateTime?
+  data Json?
+
+  createdAt DateTime @default(now())
+
+  @@index([businessUnitId, occurredAt])
+  @@index([quoteId])
+  @@index([invoiceId])
+  @@index([paymentId])
+  @@index([expenseId])
+  @@index([businessEventId])
+  @@map("financeEvidence")
+}
+
+model FinanceAuditEvent {
+  id String @id @default(cuid())
+
+  businessUnitId String?
+  businessUnit   BusinessUnit? @relation(fields: [businessUnitId], references: [id], onDelete: SetNull)
+
+  quoteId String?
+  quote   Quote?  @relation(fields: [quoteId], references: [id], onDelete: SetNull)
+
+  invoiceId String?
+  invoice   Invoice? @relation(fields: [invoiceId], references: [id], onDelete: SetNull)
+
+  paymentId String?
+  payment   PaymentRecord? @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+
+  action FinanceAuditAction
+  summary String
+  before Json?
+  after  Json?
+
+  actorUserId String?
+  actorUser   User?   @relation("FinanceAuditActor", fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([businessUnitId, createdAt])
+  @@index([quoteId, createdAt])
+  @@index([invoiceId, createdAt])
+  @@index([paymentId, createdAt])
+  @@index([actorUserId, createdAt])
+  @@map("financeAuditEvent")
 }
 
 model ExchangeRate {
@@ -2044,6 +2481,14 @@ model BusinessUnit {
   automationRules         AutomationRule[]
   agentSafetyPolicies     AgentSafetyPolicy[]
   expenses                Expense[]
+  financeRules            FinanceRule[]
+  quotes                  Quote[]
+  invoices                Invoice[]
+  paymentRecords          PaymentRecord[]
+  ledgerAccounts          LedgerAccount[]
+  ledgerEntries           LedgerEntry[]
+  financeEvidence         FinanceEvidence[]
+  financeAuditEvents      FinanceAuditEvent[]
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
@@ -2348,6 +2793,7 @@ model BusinessEvent {
   businessTasks        BusinessTask[]
   memoryLinks          ExternalMemoryLink[]
   automationExecutions AutomationExecution[]
+  financeEvidence      FinanceEvidence[]
 
   createdAt DateTime @default(now())
 
