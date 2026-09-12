@@ -1,6 +1,7 @@
 import { db, type Prisma } from "@crm/db";
 import {
 	currentKnowledge,
+	type KnowledgeInput,
 	recordKnowledge,
 	supersedeKnowledge,
 } from "@crm/db/knowledge";
@@ -143,14 +144,27 @@ export async function runBrainScan(
 		digests.map((digest) => [digest.threadId, digest]),
 	);
 
+	console.warn("[brain-scan]", {
+		event: "brain_scan_batch_started",
+		jobId: job.id,
+		threadCount: threads.length,
+		cursorThreadId: job.cursorThreadId,
+	});
+
 	let extraction: ExtractionResult;
 	try {
 		extraction = await extract(digests);
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
+		console.warn("[brain-scan]", {
+			event: "brain_scan_batch_failed",
+			jobId: job.id,
+			threadCount: threads.length,
+			reason,
+		});
 		await db.brainAnalysisJob.update({
 			where: { id: job.id },
-			data: { status: "FAILED", lastError: reason },
+			data: { status: "FAILED", lastError: reason, completedAt: new Date() },
 		});
 		return { processed: 0, written: 0, conflicts: 0, finished: true, reason };
 	}
@@ -163,6 +177,21 @@ export async function runBrainScan(
 		if (!digest) continue;
 
 		const sourceAt = digest.messages[0]?.sentAt ?? null;
+		const input: KnowledgeInput = {
+			kind: fact.kind,
+			subject: fact.subject,
+			detail: fact.detail,
+			sourceType: "GMAIL",
+			sourceId: fact.threadId,
+			sourceAt,
+			confidence: fact.confidence,
+			companyId: digest.companyId,
+			contactId: digest.contactId,
+			dealId: digest.dealId,
+			bookingId: digest.bookingId,
+		};
+
+		if (await hasBrainKnowledge(input)) continue;
 
 		if (CONFLICT_KINDS.has(fact.kind) && digest.companyId) {
 			const existing = await currentKnowledge(db, {
@@ -176,7 +205,7 @@ export async function runBrainScan(
 				conflicts += 1;
 
 				if (current.humanConfirmed) {
-					await recordKnowledge(db, {
+					const recorded = await recordBrainKnowledge({
 						kind: "INFERENCE",
 						subject: `Possible update to "${current.subject}": ${fact.subject}`,
 						detail: fact.detail,
@@ -186,7 +215,7 @@ export async function runBrainScan(
 						confidence: fact.confidence,
 						companyId: digest.companyId,
 					});
-					written += 1;
+					if (recorded) written += 1;
 					continue;
 				}
 
@@ -209,20 +238,7 @@ export async function runBrainScan(
 			}
 		}
 
-		await recordKnowledge(db, {
-			kind: fact.kind,
-			subject: fact.subject,
-			detail: fact.detail,
-			sourceType: "GMAIL",
-			sourceId: fact.threadId,
-			sourceAt,
-			confidence: fact.confidence,
-			companyId: digest.companyId,
-			contactId: digest.contactId,
-			dealId: digest.dealId,
-			bookingId: digest.bookingId,
-		});
-		written += 1;
+		if (await recordBrainKnowledge(input)) written += 1;
 	}
 
 	const last = threads[threads.length - 1];
@@ -250,10 +266,45 @@ export async function runBrainScan(
 		data: progress,
 	});
 
+	console.warn("[brain-scan]", {
+		event: "brain_scan_batch_completed",
+		jobId: job.id,
+		processed: threads.length,
+		written,
+		conflicts,
+		exhausted,
+		cursorThreadId: last?.id ?? job.cursorThreadId,
+	});
+
 	return {
 		processed: threads.length,
 		written,
 		conflicts,
 		finished: exhausted,
 	};
+}
+
+async function recordBrainKnowledge(input: KnowledgeInput): Promise<boolean> {
+	if (await hasBrainKnowledge(input)) return false;
+	await recordKnowledge(db, input);
+	return true;
+}
+
+async function hasBrainKnowledge(input: KnowledgeInput): Promise<boolean> {
+	const existing = await db.businessKnowledge.findFirst({
+		where: {
+			kind: input.kind,
+			subject: input.subject,
+			detail: input.detail ?? null,
+			sourceType: input.sourceType,
+			sourceId: input.sourceId ?? null,
+			companyId: input.companyId ?? null,
+			contactId: input.contactId ?? null,
+			dealId: input.dealId ?? null,
+			bookingId: input.bookingId ?? null,
+		},
+		select: { id: true },
+	});
+
+	return existing !== null;
 }

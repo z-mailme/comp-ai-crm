@@ -1,9 +1,4 @@
-import {
-	gateway,
-	generateObject,
-	type LanguageModel,
-	NoObjectGeneratedError,
-} from "ai";
+import { gateway, generateText, type LanguageModel } from "ai";
 import { z } from "zod";
 import { BRAIN } from "./brain-config";
 import { selectedModel } from "./model";
@@ -71,7 +66,20 @@ const extractionSchema = z.object({
 
 type ExtractionObject = z.infer<typeof extractionSchema>;
 
-type ExtractionFact = ExtractionObject["threads"][number]["facts"][number];
+type GenerateTextResult = Awaited<ReturnType<typeof generateText>>;
+
+type ParseFailure = {
+	kind: "json" | "schema";
+	issues: { path: string; message: string }[];
+};
+
+type ParseSuccess = {
+	ok: true;
+	object: ExtractionObject;
+	normalized: boolean;
+};
+
+type ParseResult = ParseSuccess | { ok: false; failure: ParseFailure };
 
 export const EXTRACTION_SYSTEM_PROMPT = [
 	"You extract durable business knowledge from a company's own email.",
@@ -102,10 +110,9 @@ const REPAIR_SYSTEM_PROMPT = [
 	"Do not invent facts.",
 ].join(" ");
 
-const rawConfidence = z.union([
-	z.number(),
-	z.string().transform((value) => Number(value.trim())),
-]);
+const rawConfidence = z
+	.union([z.number(), z.string().transform((value) => Number(value.trim()))])
+	.pipe(z.number().finite().min(0).max(1));
 
 const rawFact = z.object({
 	kind: z.string(),
@@ -116,90 +123,145 @@ const rawFact = z.object({
 
 const rawThread = z.object({
 	threadId: z.string().min(1),
-	facts: z.array(rawFact.nullable().catch(null)).nullish(),
+	facts: z.array(rawFact).nullish(),
 });
 
 const rawExtraction = z.object({
-	threads: z.array(rawThread.nullable().catch(null)),
+	threads: z.array(rawThread),
 });
 
-const confidenceRange = z.number().min(0).max(1);
+const usageToken = z
+	.union([
+		z.number().transform((value) => value),
+		z.object({ total: z.number() }).transform((value) => value.total),
+	])
+	.catch(0);
 
-function normalizeFact(fact: z.infer<typeof rawFact>): ExtractionFact | null {
-	const kind = extractedFact.shape.kind.safeParse(fact.kind);
-	if (!kind.success) return null;
-
-	const confidence = confidenceRange.safeParse(fact.confidence);
-	if (!confidence.success) return null;
-
-	return {
-		kind: kind.data,
-		subject: fact.subject,
-		detail: fact.detail ?? null,
-		confidence: confidence.data,
-	};
+function issuesOf(error: z.ZodError): { path: string; message: string }[] {
+	return error.issues.slice(0, BRAIN.diagnosticIssueLimit).map((issue) => ({
+		path: issue.path.join("."),
+		message: issue.message.slice(0, BRAIN.diagnosticMessageChars),
+	}));
 }
 
-export function normalizeExtractionText(text: string): ExtractionObject | null {
-	let parsed: z.infer<typeof rawExtraction>;
+function parseExtractionText(text: string): ParseResult {
+	let value: unknown;
 	try {
-		const raw = rawExtraction.safeParse(JSON.parse(text));
-		if (!raw.success) return null;
-		parsed = raw.data;
+		value = JSON.parse(text);
 	} catch {
-		return null;
+		return {
+			ok: false,
+			failure: {
+				kind: "json",
+				issues: [{ path: "$", message: "Invalid JSON" }],
+			},
+		};
 	}
 
-	const threads = parsed.threads.flatMap((thread) => {
-		if (!thread) return [];
-		const facts = (thread.facts ?? []).flatMap((fact) => {
-			if (!fact) return [];
-			const normalized = normalizeFact(fact);
-			return normalized ? [normalized] : [];
+	const raw = rawExtraction.safeParse(value);
+	if (!raw.success) {
+		return {
+			ok: false,
+			failure: { kind: "schema", issues: issuesOf(raw.error) },
+		};
+	}
+
+	let normalized = false;
+	const threads = raw.data.threads.map((thread) => {
+		const facts = (thread.facts ?? []).map((fact) => {
+			if (fact.detail === undefined) normalized = true;
+			return {
+				...fact,
+				detail: fact.detail ?? null,
+			};
 		});
-		return [{ threadId: thread.threadId, facts }];
+		if (thread.facts === undefined) normalized = true;
+		return { threadId: thread.threadId, facts };
 	});
 
 	const validated = extractionSchema.safeParse({ threads });
-	return validated.success ? validated.data : null;
-}
+	if (!validated.success) {
+		return {
+			ok: false,
+			failure: { kind: "schema", issues: issuesOf(validated.error) },
+		};
+	}
 
-const validationCause = z.object({
-	issues: z
-		.array(
-			z.object({
-				path: z.array(z.union([z.string(), z.number()])).catch([]),
-				message: z.string().catch(""),
-			}),
-		)
-		.catch([]),
-});
+	return { ok: true, object: validated.data, normalized };
+}
 
 export type ExtractionFailureDiagnostics = {
 	model: string;
 	provider: string;
-	finishReason: string | null;
+	issueKind: "json" | "schema";
 	issues: { path: string; message: string }[];
 };
 
 export function extractionFailureDiagnostics(
-	error: NoObjectGeneratedError,
+	failure: ParseFailure,
 	modelId: string,
 ): ExtractionFailureDiagnostics {
-	const cause = validationCause.safeParse(error.cause);
-	const issues = (cause.success ? cause.data.issues : [])
-		.slice(0, BRAIN.diagnosticIssueLimit)
-		.map((issue) => ({
-			path: issue.path.join("."),
-			message: issue.message.slice(0, BRAIN.diagnosticMessageChars),
-		}));
-
 	return {
 		model: modelId,
 		provider: modelId.split("/")[0] ?? "gateway",
-		finishReason: error.finishReason ?? null,
-		issues,
+		issueKind: failure.kind,
+		issues: failure.issues,
 	};
+}
+
+export function normalizeExtractionText(text: string): ExtractionObject | null {
+	const parsed = parseExtractionText(text);
+	return parsed.ok ? parsed.object : null;
+}
+
+class BrainExtractionError extends Error {
+	constructor(message: string) {
+		super(message);
+		this.name = "BrainExtractionError";
+	}
+}
+
+function repairSystemPrompt(failure: ParseFailure): string {
+	const issueSummary = failure.issues
+		.map((issue) => `${issue.path || "$"}: ${issue.message}`)
+		.join("; ");
+	return [REPAIR_SYSTEM_PROMPT, `Previous validation failure: ${issueSummary}`]
+		.filter(Boolean)
+		.join(" ");
+}
+
+async function generateTextWithDeadline(
+	request: Parameters<typeof generateText>[0],
+	timeoutMs: number,
+): Promise<GenerateTextResult> {
+	const controller = new AbortController();
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	const work = generateText({
+		...request,
+		maxRetries: 0,
+		abortSignal: controller.signal,
+	});
+	const timeout = new Promise<never>((_, reject) => {
+		timer = setTimeout(() => {
+			controller.abort();
+			reject(
+				new BrainExtractionError(
+					`Business Brain extraction exceeded ${timeoutMs}ms.`,
+				),
+			);
+		}, timeoutMs);
+	});
+
+	try {
+		return await Promise.race([work, timeout]);
+	} finally {
+		clearTimeout(timer);
+		work.catch(() => {});
+	}
+}
+
+function tokenCount(value: GenerateTextResult["usage"]["inputTokens"]): number {
+	return usageToken.parse(value);
 }
 
 export function aiExtractor(override?: {
@@ -245,61 +307,72 @@ export function aiExtractor(override?: {
 
 		let inputTokens = 0;
 		let outputTokens = 0;
+		let lastFailure: ParseFailure | null = null;
 
-		const attempt = async (system: string): Promise<ExtractionObject> => {
-			try {
-				const result = await generateObject({
-					model,
-					schema: extractionSchema,
-					system,
-					prompt,
-					abortSignal: AbortSignal.timeout(BRAIN.fetchTimeoutMs),
+		const attempt = async (
+			system: string,
+			round: number,
+		): Promise<ExtractionObject | null> => {
+			const startedAt = Date.now();
+			const result = await generateTextWithDeadline(
+				{ model, system, prompt },
+				BRAIN.modelCallTimeoutMs,
+			);
+			inputTokens += tokenCount(result.usage.inputTokens);
+			outputTokens += tokenCount(result.usage.outputTokens);
+
+			const parsed = parseExtractionText(result.text);
+			const elapsedMs = Date.now() - startedAt;
+
+			if (!parsed.ok) {
+				lastFailure = parsed.failure;
+				console.warn("[brain-extractor]", {
+					event: "brain_extraction_validation_failed",
+					model: modelId,
+					provider: modelId.split("/")[0] ?? "gateway",
+					attempt: round + 1,
+					threadCount: threads.length,
+					elapsedMs,
+					issueKind: parsed.failure.kind,
+					issueCount: parsed.failure.issues.length,
+					issuePaths: parsed.failure.issues.map((issue) => issue.path),
+					inputTokens,
+					outputTokens,
 				});
-				inputTokens += result.usage.inputTokens ?? 0;
-				outputTokens += result.usage.outputTokens ?? 0;
-				return result.object;
-			} catch (error) {
-				if (!NoObjectGeneratedError.isInstance(error)) throw error;
-
-				inputTokens += error.usage?.inputTokens ?? 0;
-				outputTokens += error.usage?.outputTokens ?? 0;
-
-				console.warn(
-					"[brain-extractor] extraction response did not match the schema",
-					extractionFailureDiagnostics(error, modelId),
-				);
-
-				const repaired = error.text
-					? normalizeExtractionText(error.text)
-					: null;
-				if (!repaired) throw error;
-
-				console.warn(
-					"[brain-extractor] recovered the response with safe normalization",
-					{ model: modelId },
-				);
-				return repaired;
+				return null;
 			}
+
+			console.warn("[brain-extractor]", {
+				event: "brain_extraction_completed",
+				model: modelId,
+				provider: modelId.split("/")[0] ?? "gateway",
+				attempt: round + 1,
+				threadCount: threads.length,
+				elapsedMs,
+				normalized: parsed.normalized,
+				inputTokens,
+				outputTokens,
+			});
+			return parsed.object;
 		};
 
 		let object: ExtractionObject | null = null;
-		let lastFailure: NoObjectGeneratedError | null = null;
-
 		for (let round = 0; round <= BRAIN.repairAttempts && !object; round += 1) {
-			try {
-				object = await attempt(
-					round === 0 ? EXTRACTION_SYSTEM_PROMPT : REPAIR_SYSTEM_PROMPT,
-				);
-			} catch (error) {
-				if (!NoObjectGeneratedError.isInstance(error)) throw error;
-				lastFailure = error;
-			}
+			const system =
+				round === 0
+					? EXTRACTION_SYSTEM_PROMPT
+					: repairSystemPrompt(
+							lastFailure ?? {
+								kind: "schema",
+								issues: [{ path: "$", message: "Unknown schema failure" }],
+							},
+						);
+			object = await attempt(system, round);
 		}
 
 		if (!object) {
-			throw (
-				lastFailure ??
-				new Error("Business Brain extraction produced no usable result.")
+			throw new BrainExtractionError(
+				"Business Brain extraction produced no usable JSON result.",
 			);
 		}
 
