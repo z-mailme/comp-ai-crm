@@ -28,10 +28,11 @@ import { dashboardLayoutOutput, saveDashboardLayoutInput, dashboardSummaryInput,
 import { dealListInput, dealListOutput, dealIdInput, dealDetailOutput, dealCreateInput, dealCreateOutput, dealUpdateArgs, dealMutateOutput, setStageInput, dealSetStageOutput, dealContactsInput, dealContactOptionsOutput, dealAttachContactInput, dealContactLinkOutput, dealDetachContactInput, dealContactRoleInput, dealContactRoleOutput, dealBulkOwnerInput, dealBulkResultOutput, dealBulkStageInput, dealBulkInput } from "../deals/deals.contracts";
 import { enrichmentQueueInput } from "@crm/validation/enrichment-queue";
 import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput, fieldEntityInput, fieldFiltersOutput, fieldIdInput, fieldCoverageOutput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput, fieldReorderOutput, fieldDeleteOutput, fieldBackfillOutput } from "../fields/fields.contracts";
-import { financeWeekInput, financeWeekOutput, addExpenseInput, expenseMutationOutput, cancelExpenseInput } from "../finance/finance.contracts";
+import { financeWeekInput, financeWeekOutput, addExpenseInput, expenseMutationOutput, cancelExpenseInput, markExpensePaidInput } from "../finance/finance.contracts";
 import { gmailLabelOutput, mailboxThreadsInput, mailboxThreadsOutput, mailboxActionInput, mailboxActionOutput, googleConnectionStatusOutput, reindexCalendarInput, reindexCalendarOutput, historicalImportJobOutput, createHistoricalImportInput, historicalImportIdInput, sendEmailInput, sendEmailOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
 import { audienceContextInput, audienceListOutput, audienceCountInput, audienceCountOutput, createAudienceInput, audienceOutput, updateAudienceInput, audienceByIdInput, audienceExportInput, audienceExportOutput } from "../marketing/audiences.contracts";
+import { automationConfigInput, automationConfigOutput, updateAutomationConfigInput, automationPlanInput, automationPlanOutput, automationUpsertContentInput, automationContentOutput, mediaSelectionRequestInput, mediaSelectionOutput, registerDriveAssetInput, driveAssetOutput, saveCopyInput, saveRenderInput, canvaRenderOutput, sendApprovalInput, approvalStatusOutput, approvalStatusInput, decideApprovalInput, publishResultInput, publishAttemptOutput, recordPostIdsInput, recordFailureInput, saveMetricsInput, metricOutput, recordUsageInput, brainContextInput, brainContextOutput } from "../marketing/automation.contracts";
 import { listCampaignsInput, campaignListOutput, campaignByIdInput, campaignDetailOutput, createCampaignInput, campaignOutput, updateCampaignInput, sourceBreakdownOutput, campaignPerformanceReportInput, campaignPerformanceReportOutput } from "../marketing/campaigns.contracts";
 import { listContentInput, contentListOutput, contentByIdInput, contentDetailOutput, createContentInput, contentOutput, updateContentInput, decideContentInput, scheduleContentInput, aiAssistInput } from "../marketing/content.contracts";
 import { emailTemplateContextInput, emailTemplateListOutput, createEmailTemplateInput, emailTemplateOutput, updateEmailTemplateInput, archiveEmailTemplateInput, emailTemplateByIdInput, emailTemplateRenderOutput, composeEmailCampaignInput, emailCampaignOutput, emailScheduleRequestInput, emailScheduleOutput, emailScheduleDecideInput, emailCreateListInput, emailListOutput, emailSyncListInput, emailSyncOutput, emailSubscribersInput, emailSubscribersOutput } from "../marketing/email.contracts";
@@ -663,6 +664,10 @@ const appRouter = t.router({
     cancelExpense: publicProcedure
       .input(cancelExpenseInput)
       .output(expenseMutationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    markExpensePaid: publicProcedure
+      .input(markExpensePaidInput)
+      .output(expenseMutationOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   google: t.router({
@@ -761,6 +766,80 @@ const appRouter = t.router({
       .input(audienceExportInput)
       .output(audienceExportOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
+    }),
+  marketingAutomation: t.router({
+    config: publicProcedure
+      .input(automationConfigInput)
+      .output(automationConfigOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    updateConfig: publicProcedure
+      .input(updateAutomationConfigInput)
+      .output(automationConfigOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    plan: publicProcedure
+      .input(automationPlanInput)
+      .output(automationPlanOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    upsertContent: publicProcedure
+      .input(automationUpsertContentInput)
+      .output(automationContentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    requestMedia: publicProcedure
+      .input(mediaSelectionRequestInput)
+      .output(mediaSelectionOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    registerAsset: publicProcedure
+      .input(registerDriveAssetInput)
+      .output(driveAssetOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    saveCopy: publicProcedure
+      .input(saveCopyInput)
+      .output(automationContentOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    saveRender: publicProcedure
+      .input(saveRenderInput)
+      .output(canvaRenderOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    sendApproval: publicProcedure
+      .input(sendApprovalInput)
+      .output(approvalStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    approvalStatus: publicProcedure
+      .input(approvalStatusInput)
+      .output(approvalStatusOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    decideApproval: publicProcedure
+      .input(decideApprovalInput)
+      .output(approvalStatusOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    publishResult: publicProcedure
+      .input(publishResultInput)
+      .output(publishAttemptOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    recordPostIds: publicProcedure
+      .input(recordPostIdsInput)
+      .output(z.object({ ok: z.boolean() }))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    recordFailure: publicProcedure
+      .input(recordFailureInput)
+      .output(publishAttemptOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    saveMetrics: publicProcedure
+      .input(saveMetricsInput)
+      .output(metricOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    recordUsage: publicProcedure
+      .input(recordUsageInput)
+      .output(z.object({
+			id: z.string(),
+			assetId: z.string(),
+			replayed: z.boolean(),
+		}))
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    brainContext: publicProcedure
+      .input(brainContextInput)
+      .output(brainContextOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any)
     }),
   marketingCampaigns: t.router({
     list: publicProcedure

@@ -62,6 +62,7 @@ model User {
   createdSocialPosts                 SocialPost[]                  @relation("SocialPostCreator")
   approvedSocialPosts                SocialPost[]                  @relation("SocialPostApprover")
   createdMarketingEmailTemplates     MarketingEmailTemplate[]      @relation("MarketingEmailTemplateCreator")
+  marketingAutomationAudits          MarketingAutomationAudit[]    @relation("MarketingAutomationAuditActor")
   conversationShares                 AgentConversationShare[]      @relation("ConversationShareCreator")
   conversationSubmissions            AgentConversationSubmission[] @relation("ConversationSubmissionAuthor")
   conversationFeedback               AgentConversationFeedback[]   @relation("ConversationFeedbackAuthor")
@@ -1184,6 +1185,9 @@ enum ExpenseSource {
 }
 
 enum ExpenseStatus {
+  PROJECTED
+  CONFIRMED
+  PAID
   RECORDED
   NEEDS_REVIEW
   CANCELLED
@@ -2021,6 +2025,11 @@ model BusinessUnit {
   socialAccounts          SocialAccount[]
   socialPosts             SocialPost[]
   socialInteractions      SocialInteraction[]
+  driveMediaAssets        DriveMediaAsset[]
+  canvaRenders            CanvaRender[]
+  socialPublishAttempts   SocialPublishAttempt[]
+  marketingContentMetrics MarketingContentMetric[]
+  marketingAutomationAudits MarketingAutomationAudit[]
   calendarEvents          CalendarEvent[]
   mailboxSyncs            MailboxSync[]
   customerIdentities      CustomerIdentity[]
@@ -2780,12 +2789,26 @@ enum MarketingCampaignStatus {
 enum MarketingContentStatus {
   IDEA
   DRAFT
+  PLANNED
+  MEDIA_SELECTED
+  COPY_GENERATED
+  DESIGN_GENERATED
   READY_FOR_REVIEW
+  AWAITING_APPROVAL
   APPROVED
   SCHEDULED
+  PUBLISHING
   PUBLISHED
+  FAILED
+  CANCELLED
   REJECTED
   ARCHIVED
+}
+
+enum MarketingAutomationMode {
+  MANUAL
+  APPROVAL_REQUIRED
+  FULL_AUTO
 }
 
 enum MarketingContentType {
@@ -2856,6 +2879,7 @@ model MarketingContent {
   type     MarketingContentType   @default(SOCIAL_POST)
   status   MarketingContentStatus @default(DRAFT)
   platforms Json                  @default("[]")
+  service  String?
 
   caption  String?
   headline String?
@@ -2872,6 +2896,13 @@ model MarketingContent {
 
   listmonkCampaignId Int?
 
+  automationMode MarketingAutomationMode?
+
+  externalKey String?
+
+  selectedDriveAssetId String?
+  selectedDriveAsset   DriveMediaAsset? @relation("ContentSelectedDriveAsset", fields: [selectedDriveAssetId], references: [id], onDelete: SetNull)
+
   ownerId String?
   owner   User?   @relation("MarketingContentOwner", fields: [ownerId], references: [id], onDelete: SetNull)
 
@@ -2887,12 +2918,19 @@ model MarketingContent {
   media MarketingContentMedia[]
   socialPosts SocialPost[]
 
+  canvaRenders    CanvaRender[]
+  publishAttempts SocialPublishAttempt[]
+  metrics         MarketingContentMetric[]
+  automationAudit MarketingAutomationAudit[]
+  driveAssetUsage DriveAssetUsage[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
   @@index([businessUnitId, status])
   @@index([businessUnitId, scheduledAt])
   @@index([campaignId])
+  @@unique([businessUnitId, externalKey])
   @@map("marketingContent")
 }
 
@@ -3160,6 +3198,9 @@ model SocialPost {
 
   targets SocialPostTarget[]
 
+  publishAttempts SocialPublishAttempt[]
+  driveAssetUsage DriveAssetUsage[]
+
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -3232,6 +3273,216 @@ model SocialInteraction {
   @@unique([accountId, kind, externalId])
   @@index([businessUnitId, status, occurredAt])
   @@map("socialInteraction")
+}
+
+enum DriveAssetApprovalState {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum DriveMediaKind {
+  IMAGE
+  VIDEO
+  OTHER
+}
+
+model DriveMediaAsset {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  driveFileId String
+  fileName    String
+  mimeType    String
+  mediaKind   DriveMediaKind @default(OTHER)
+
+  service    String?
+  folderName String?
+
+  approvalState DriveAssetApprovalState @default(PENDING)
+
+  lastUsedAt    DateTime?
+  timesUsed     Int        @default(0)
+  doNotUseUntil DateTime?
+
+  archivedAt DateTime?
+
+  usages DriveAssetUsage[]
+  renders CanvaRender[]
+  selectedByContent MarketingContent[] @relation("ContentSelectedDriveAsset")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([businessUnitId, driveFileId])
+  @@index([businessUnitId, approvalState, service])
+  @@map("driveMediaAsset")
+}
+
+model DriveAssetUsage {
+  id String @id @default(cuid())
+
+  assetId String
+  asset   DriveMediaAsset @relation(fields: [assetId], references: [id], onDelete: Cascade)
+
+  contentId String?
+  content   MarketingContent? @relation(fields: [contentId], references: [id], onDelete: SetNull)
+
+  socialPostId String?
+  socialPost   SocialPost? @relation(fields: [socialPostId], references: [id], onDelete: SetNull)
+
+  context        String?
+  idempotencyKey String  @unique
+
+  usedAt    DateTime @default(now())
+  createdAt DateTime @default(now())
+
+  @@index([assetId, usedAt])
+  @@map("driveAssetUsage")
+}
+
+enum CanvaRenderStatus {
+  QUEUED
+  RENDERING
+  READY
+  FAILED
+}
+
+model CanvaRender {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  contentId String
+  content   MarketingContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  templateId String
+  service    String?
+  format     String
+  platform   String
+
+  sourceAssetId String?
+  sourceAsset   DriveMediaAsset? @relation(fields: [sourceAssetId], references: [id], onDelete: SetNull)
+
+  headline String?
+  body     String?
+  cta      String?
+
+  renderedUrl String?
+  designId    String?
+
+  status CanvaRenderStatus @default(QUEUED)
+  error  String?
+
+  idempotencyKey String @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([contentId, createdAt])
+  @@index([businessUnitId, status])
+  @@map("canvaRender")
+}
+
+enum PublishErrorCategory {
+  PERMISSION
+  RATE_LIMIT
+  MEDIA_REJECTED
+  NETWORK
+  PROVIDER
+  VALIDATION
+  OTHER
+}
+
+model SocialPublishAttempt {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  contentId String?
+  content   MarketingContent? @relation(fields: [contentId], references: [id], onDelete: SetNull)
+
+  socialPostId String?
+  socialPost   SocialPost? @relation(fields: [socialPostId], references: [id], onDelete: SetNull)
+
+  platform  String
+  accountId String?
+
+  scheduledAt DateTime?
+  attemptNo   Int       @default(1)
+
+  providerRequestId String?
+  externalPostId    String?
+  externalPostUrl   String?
+
+  success       Boolean               @default(false)
+  retryCount    Int                   @default(0)
+  errorCategory PublishErrorCategory?
+  errorSummary  String?
+
+  publishedAt DateTime?
+
+  idempotencyKey String @unique
+
+  createdAt DateTime @default(now())
+
+  @@index([businessUnitId, platform, createdAt])
+  @@index([contentId, createdAt])
+  @@map("socialPublishAttempt")
+}
+
+model MarketingContentMetric {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  contentId String
+  content   MarketingContent @relation(fields: [contentId], references: [id], onDelete: Cascade)
+
+  platform String
+  date     DateTime @db.Date
+
+  impressions Int @default(0)
+  reach       Int @default(0)
+  likes       Int @default(0)
+  comments    Int @default(0)
+  shares      Int @default(0)
+  clicks      Int @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([contentId, platform, date])
+  @@index([businessUnitId, date])
+  @@map("marketingContentMetric")
+}
+
+model MarketingAutomationAudit {
+  id String @id @default(cuid())
+
+  businessUnitId String
+  businessUnit   BusinessUnit @relation(fields: [businessUnitId], references: [id], onDelete: Cascade)
+
+  contentId String?
+  content   MarketingContent? @relation(fields: [contentId], references: [id], onDelete: SetNull)
+
+  actor  String
+  action String
+  detail Json?
+
+  createdById String?
+  createdBy   User?   @relation("MarketingAutomationAuditActor", fields: [createdById], references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+
+  @@index([businessUnitId, createdAt])
+  @@index([contentId, createdAt])
+  @@map("marketingAutomationAudit")
 }
 
 model CalendarEvent {
