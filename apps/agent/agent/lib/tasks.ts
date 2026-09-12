@@ -1,5 +1,6 @@
 import { db, type Prisma } from "@crm/db";
 import { MAX_ATTEMPTS, RETIRED_OUTCOME } from "@crm/db/agent-tasks";
+import { lockIdempotencyKey } from "@crm/db/idempotency";
 import { DISPATCH } from "./dispatch-config";
 
 export type LeasedTask = {
@@ -14,6 +15,20 @@ export type LeasedTask = {
 	attempts: number;
 	priority: number;
 	dueAt: Date;
+};
+
+type ScheduleTaskInput = {
+	contactId?: string | null;
+	companyId?: string | null;
+	dealId?: string | null;
+	kind: string;
+	reason: string;
+	payload?: Prisma.InputJsonValue | null;
+	dueAt: Date;
+	priority?: number;
+	budget?: number;
+	subject?: string | null;
+	excludeTaskId?: string;
 };
 
 export type TaskSubject = {
@@ -146,37 +161,76 @@ export async function noteSession(
 	});
 }
 
-export async function scheduleTask(input: {
-	contactId?: string | null;
-	companyId?: string | null;
-	dealId?: string | null;
-	kind: string;
-	reason: string;
-	payload?: Prisma.InputJsonValue | null;
-	dueAt: Date;
-	priority?: number;
-	budget?: number;
-}): Promise<{ id: string }> {
-	const existing = await db.agentTask.findFirst({
+export async function openTask(taskId: string): Promise<boolean> {
+	const row = await db.agentTask.findUnique({
+		where: { id: taskId },
+		select: { finishedAt: true },
+	});
+
+	return row?.finishedAt === null;
+}
+
+export async function scheduleTask(
+	input: ScheduleTaskInput,
+): Promise<{ id: string }> {
+	return db.$transaction((tx) => scheduleTaskIn(tx, input));
+}
+
+export async function completeTaskAndScheduleTask(
+	taskId: string,
+	outcome: string,
+	input: ScheduleTaskInput,
+): Promise<{ completed: boolean; nextTaskId: string }> {
+	return db.$transaction(async (tx) => {
+		const next = await scheduleTaskIn(tx, { ...input, excludeTaskId: taskId });
+		const { count } = await tx.agentTask.updateMany({
+			where: { id: taskId, finishedAt: null },
+			data: {
+				finishedAt: new Date(),
+				outcome: outcome.slice(0, 500),
+			},
+		});
+
+		return { completed: count > 0, nextTaskId: next.id };
+	});
+}
+
+async function scheduleTaskIn(
+	tx: Prisma.TransactionClient,
+	input: ScheduleTaskInput,
+): Promise<{ id: string }> {
+	if (input.subject) {
+		await lockIdempotencyKey(tx, `agent-task:${input.kind}:${input.subject}`);
+	}
+
+	const existing = await tx.agentTask.findFirst({
 		where: {
 			kind: input.kind,
 			finishedAt: null,
+			id: input.excludeTaskId ? { not: input.excludeTaskId } : undefined,
 			contactId: input.contactId ?? undefined,
 			companyId: input.companyId ?? undefined,
 			dealId: input.dealId ?? undefined,
+			subject: input.subject ?? undefined,
 		},
 		select: { id: true },
 	});
 
 	if (existing) {
-		await db.agentTask.update({
+		await tx.agentTask.update({
 			where: { id: existing.id },
-			data: { dueAt: input.dueAt, reason: input.reason },
+			data: {
+				dueAt: input.dueAt,
+				reason: input.reason,
+				payload: input.payload ?? undefined,
+				priority: input.priority ?? undefined,
+				budget: input.budget ?? undefined,
+			},
 		});
 		return existing;
 	}
 
-	return db.agentTask.create({
+	return tx.agentTask.create({
 		data: {
 			contactId: input.contactId ?? null,
 			companyId: input.companyId ?? null,
@@ -184,6 +238,7 @@ export async function scheduleTask(input: {
 			kind: input.kind,
 			reason: input.reason,
 			payload: input.payload ?? undefined,
+			subject: input.subject ?? null,
 			dueAt: input.dueAt,
 			priority: input.priority ?? 0,
 			budget: input.budget ?? 4,

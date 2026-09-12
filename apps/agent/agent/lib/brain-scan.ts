@@ -17,11 +17,21 @@ const CONFLICT_KINDS = new Set(["PRICING", "POLICY", "PRODUCT_SERVICE"]);
 
 const brainScanPayload = z.object({ jobId: z.string().min(1) });
 
+export function brainScanJobId(
+	payload: Prisma.JsonValue | null,
+): string | null {
+	const parsed = brainScanPayload.safeParse(payload);
+	return parsed.success ? parsed.data.jobId : null;
+}
+
 export type BrainScanOutcome = {
 	processed: number;
 	written: number;
 	conflicts: number;
 	finished: boolean;
+	processedTotal: number;
+	cursorThreadId: string | null;
+	cursorPresent: boolean;
 	reason?: string;
 };
 
@@ -29,19 +39,22 @@ export async function runBrainScan(
 	payload: Prisma.JsonValue | null,
 	extract: BrainExtractor,
 ): Promise<BrainScanOutcome> {
-	const parsed = brainScanPayload.safeParse(payload);
-	if (!parsed.success) {
+	const jobId = brainScanJobId(payload);
+	if (!jobId) {
 		return {
 			processed: 0,
 			written: 0,
 			conflicts: 0,
 			finished: true,
+			processedTotal: 0,
+			cursorThreadId: null,
+			cursorPresent: false,
 			reason: "No job was named.",
 		};
 	}
 
 	const job = await db.brainAnalysisJob.findUnique({
-		where: { id: parsed.data.jobId },
+		where: { id: jobId },
 	});
 
 	if (!job) {
@@ -50,6 +63,9 @@ export async function runBrainScan(
 			written: 0,
 			conflicts: 0,
 			finished: true,
+			processedTotal: 0,
+			cursorThreadId: null,
+			cursorPresent: false,
 			reason: "The job is gone.",
 		};
 	}
@@ -60,18 +76,31 @@ export async function runBrainScan(
 			written: 0,
 			conflicts: 0,
 			finished: true,
+			processedTotal: job.processedThreads,
+			cursorThreadId: job.cursorThreadId,
+			cursorPresent: job.cursorThreadId !== null,
 			reason: `The job is ${job.status.toLowerCase()}.`,
 		};
 	}
 
 	if (job.status === "COMPLETED" || job.status === "FAILED") {
-		return { processed: 0, written: 0, conflicts: 0, finished: true };
+		return {
+			processed: 0,
+			written: 0,
+			conflicts: 0,
+			finished: true,
+			processedTotal: job.processedThreads,
+			cursorThreadId: job.cursorThreadId,
+			cursorPresent: job.cursorThreadId !== null,
+		};
 	}
 
+	let totalThreads = job.totalThreads;
 	if (job.status === "PLANNING") {
 		const total = await db.emailThread.count({
 			where: { messages: { some: { syncedByUserId: job.userId } } },
 		});
+		totalThreads = total;
 
 		await db.brainAnalysisJob.update({
 			where: { id: job.id },
@@ -123,7 +152,22 @@ export async function runBrainScan(
 			where: { id: job.id },
 			data: { status: "COMPLETED", completedAt: new Date() },
 		});
-		return { processed: 0, written: 0, conflicts: 0, finished: true };
+		console.warn("[brain-scan]", {
+			event: "brain_scan_completed",
+			jobId: job.id,
+			processedTotal: job.processedThreads,
+			cursorThreadId: job.cursorThreadId,
+			cursorPresent: job.cursorThreadId !== null,
+		});
+		return {
+			processed: 0,
+			written: 0,
+			conflicts: 0,
+			finished: true,
+			processedTotal: job.processedThreads,
+			cursorThreadId: job.cursorThreadId,
+			cursorPresent: job.cursorThreadId !== null,
+		};
 	}
 
 	const digests: ThreadDigest[] = threads.map((thread) => ({
@@ -157,7 +201,7 @@ export async function runBrainScan(
 	} catch (error) {
 		const reason = error instanceof Error ? error.message : String(error);
 		console.warn("[brain-scan]", {
-			event: "brain_scan_batch_failed",
+			event: "brain_scan_failed",
 			jobId: job.id,
 			threadCount: threads.length,
 			reason,
@@ -166,7 +210,16 @@ export async function runBrainScan(
 			where: { id: job.id },
 			data: { status: "FAILED", lastError: reason, completedAt: new Date() },
 		});
-		return { processed: 0, written: 0, conflicts: 0, finished: true, reason };
+		return {
+			processed: 0,
+			written: 0,
+			conflicts: 0,
+			finished: true,
+			processedTotal: job.processedThreads,
+			cursorThreadId: job.cursorThreadId,
+			cursorPresent: job.cursorThreadId !== null,
+			reason,
+		};
 	}
 
 	let written = 0;
@@ -242,11 +295,15 @@ export async function runBrainScan(
 	}
 
 	const last = threads[threads.length - 1];
-	const exhausted = threads.length < BRAIN.batchSize;
+	const processedTotal = job.processedThreads + threads.length;
+	const cursorThreadId = last?.id ?? job.cursorThreadId;
+	const exhausted =
+		threads.length < BRAIN.batchSize ||
+		(totalThreads > 0 && processedTotal >= totalThreads);
 
 	const progress: Prisma.BrainAnalysisJobUncheckedUpdateInput = {
 		cursorLastMessageAt: last?.lastMessageAt ?? job.cursorLastMessageAt,
-		cursorThreadId: last?.id ?? job.cursorThreadId,
+		cursorThreadId,
 		processedThreads: { increment: threads.length },
 		knowledgeWritten: { increment: written },
 		conflictsFound: { increment: conflicts },
@@ -273,14 +330,27 @@ export async function runBrainScan(
 		written,
 		conflicts,
 		exhausted,
-		cursorThreadId: last?.id ?? job.cursorThreadId,
+		cursorThreadId,
 	});
+
+	if (exhausted) {
+		console.warn("[brain-scan]", {
+			event: "brain_scan_completed",
+			jobId: job.id,
+			processedTotal,
+			cursorThreadId,
+			cursorPresent: cursorThreadId !== null,
+		});
+	}
 
 	return {
 		processed: threads.length,
 		written,
 		conflicts,
 		finished: exhausted,
+		processedTotal,
+		cursorThreadId,
+		cursorPresent: cursorThreadId !== null,
 	};
 }
 
