@@ -18,13 +18,11 @@ export const metadata: Metadata = {
 	title: "Campaign",
 };
 
-export default async function MarketingCampaignDetailPage({
+export default function MarketingCampaignDetailPage({
 	params,
 }: {
 	params: Promise<{ id: string }>;
 }) {
-	const { id } = await params;
-
 	return (
 		<PageShell>
 			<PageShellHeader>
@@ -37,14 +35,15 @@ export default async function MarketingCampaignDetailPage({
 			</PageShellHeader>
 			<PageShellContent>
 				<Suspense fallback={<PageShellLoading />}>
-					<CampaignData id={id} />
+					<CampaignData params={params} />
 				</Suspense>
 			</PageShellContent>
 		</PageShell>
 	);
 }
 
-async function CampaignData({ id }: { id: string }) {
+async function CampaignData({ params }: { params: Promise<{ id: string }> }) {
+	const { id } = await params;
 	await requireSession();
 	const queryClient = getServerQueryClient();
 	const trpc = getServerTrpc();

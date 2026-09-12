@@ -284,6 +284,9 @@ function AudienceEditor({
 			onError: (error) => toast.error(error.message),
 		}),
 	);
+	const countPreview = useMutation(
+		trpc.marketingAudiences.count.mutationOptions({}),
+	);
 
 	const buildRules = (): Rules => {
 		const rules: Rules = { consent };
@@ -465,11 +468,9 @@ function AudienceEditor({
 						variant="outline"
 						onClick={async () => {
 							try {
-								const result = await queryClient.fetchQuery(
-									trpc.marketingAudiences.count.queryOptions({
-										rules: buildRules(),
-									}),
-								);
+								const result = await countPreview.mutateAsync({
+									rules: buildRules(),
+								});
 								setPreviewCount(result.count);
 							} catch (error) {
 								toast.error(

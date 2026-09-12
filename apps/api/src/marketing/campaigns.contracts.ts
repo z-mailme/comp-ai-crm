@@ -12,11 +12,6 @@ export const MARKETING_CHANNELS = [
 
 export const marketingChannel = z.enum(MARKETING_CHANNELS);
 
-export const campaignDateRangeInput = z.object({
-	from: z.string().datetime({ offset: true }).optional(),
-	to: z.string().datetime({ offset: true }).optional(),
-});
-
 const utmFields = {
 	utmSource: z.string().trim().min(1).max(120).nullish(),
 	utmMedium: z.string().trim().min(1).max(120).nullish(),
@@ -54,7 +49,8 @@ export const listCampaignsInput = z.object({
 export const campaignByIdInput = z.object({
 	businessUnitId: z.string().trim().min(1).optional(),
 	id: z.string().trim().min(1),
-	range: campaignDateRangeInput.optional(),
+	from: z.string().datetime({ offset: true }).optional(),
+	to: z.string().datetime({ offset: true }).optional(),
 });
 
 export const campaignOutput = z.object({

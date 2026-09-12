@@ -417,7 +417,7 @@ export function AdsStats({ data }: { data: AdsOutput }) {
 					key={metric.label}
 					label={metric.label}
 					value={metric.measured ? formatMetric(metric) : "—"}
-					description={metric.unit}
+					description={metricUnitLabel(metric.unit)}
 				/>
 			))}
 		</StatGroup>
@@ -579,7 +579,7 @@ function SearchTermsCard({ terms }: { terms: AdsOutput["searchTerms"] }) {
 									{term.costMicros === null ? (
 										<EmptyCellValue />
 									) : (
-										`${formatNumber(term.costMicros)} micros`
+										formatAccountUnits(term.costMicros)
 									)}
 								</TableCell>
 								<TableCell className="tabular-nums">
@@ -613,7 +613,11 @@ function AdsPerformance({
 						key={metric.label}
 						label={metric.label}
 						value={metric.measured ? formatMetric(metric) : "—"}
-						description={metric.measured ? metric.unit : "Not measured yet"}
+						description={
+							metric.measured
+								? metricUnitLabel(metric.unit)
+								: "Not measured yet"
+						}
 					/>
 				))}
 			</StatGroup>
@@ -646,7 +650,7 @@ function AdsPerformance({
 										{campaign.spendMicros === null ? (
 											<EmptyCellValue />
 										) : (
-											formatNumber(campaign.spendMicros)
+											formatAccountUnits(campaign.spendMicros)
 										)}
 									</TableCell>
 									<TableCell className="tabular-nums">
@@ -674,7 +678,7 @@ function AdsPerformance({
 										{campaign.cpaMicros === null ? (
 											<EmptyCellValue />
 										) : (
-											formatNumber(campaign.cpaMicros)
+											formatAccountUnits(campaign.cpaMicros)
 										)}
 									</TableCell>
 									<TableCell className="tabular-nums">
@@ -849,7 +853,7 @@ function AdsCampaignRow({
 											<span className="text-muted-foreground text-xs tabular-nums">
 												{ad.costPerResultMicros === null
 													? "—"
-													: `${formatNumber(ad.costPerResultMicros)} micros / result`}
+													: `${formatAccountUnits(ad.costPerResultMicros)} / result`}
 											</span>
 										</div>
 									))}
@@ -922,12 +926,17 @@ export function Metric({
 	return (
 		<div className="rounded-md bg-muted px-2.5 py-2">
 			<p className="text-muted-foreground">{label}</p>
-			<p className="mt-1 font-medium tabular-nums">
+			<p
+				className="mt-1 font-medium tabular-nums"
+				title={suffix === "micros" ? "Account currency" : undefined}
+			>
 				{value === null
 					? "—"
 					: percent
 						? `${(value * 100).toFixed(1)}%`
-						: `${formatNumber(value)}${suffix ? ` ${suffix}` : ""}`}
+						: suffix === "micros"
+							? formatAccountUnits(value)
+							: `${formatNumber(value)}${suffix ? ` ${suffix}` : ""}`}
 			</p>
 		</div>
 	);
@@ -963,8 +972,13 @@ export function formatMetric(metric: {
 	unit: string;
 }): string {
 	if (metric.value === null) return "—";
+	if (metric.unit === "micros") return formatAccountUnits(metric.value);
 	if (metric.unit === "ratio") return metric.value.toFixed(2);
 	return formatNumber(metric.value);
+}
+
+export function metricUnitLabel(unit: string): string {
+	return unit === "micros" ? "account currency" : unit;
 }
 
 export function formatNumber(value: number): string {

@@ -45,10 +45,10 @@ export class MarketingAudiencesRouter {
 		return this.audiences.list(sourceOf(ctx, input));
 	}
 
-	@Query({
+	@Mutation({
 		input: audienceCountInput,
 		output: audienceCountOutput,
-		meta: restMeta("GET", "/marketing/audiences/count", ["Marketing"]),
+		meta: restMeta("POST", "/marketing/audiences/count", ["Marketing"]),
 	})
 	async count(
 		@Ctx() ctx: AuthedTrpcContext,

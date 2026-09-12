@@ -744,7 +744,7 @@ const appRouter = t.router({
     count: publicProcedure
       .input(audienceCountInput)
       .output(audienceCountOutput)
-      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     create: publicProcedure
       .input(createAudienceInput)
       .output(audienceOutput)

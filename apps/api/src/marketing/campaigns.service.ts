@@ -64,15 +64,16 @@ export class MarketingCampaignsService {
 		input: {
 			businessUnitId?: string;
 			id: string;
-			range?: { from?: string; to?: string };
+			from?: string;
+			to?: string;
 		},
 	) {
 		const campaign = await this.byId(source, input);
 		const performance = await this.attribution.performanceForUtmCampaign(
 			campaign.utmCampaign,
 			{
-				from: input.range?.from ? new Date(input.range.from) : undefined,
-				to: input.range?.to ? new Date(input.range.to) : undefined,
+				from: input.from ? new Date(input.from) : undefined,
+				to: input.to ? new Date(input.to) : undefined,
 			},
 		);
 		return { campaign, performance };
