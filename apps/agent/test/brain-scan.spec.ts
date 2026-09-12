@@ -223,5 +223,88 @@ describe("runBrainScan", () => {
 		});
 		expect(updated?.status).toBe("FAILED");
 		expect(updated?.lastError).toBe("model offline");
+		expect(updated?.completedAt).not.toBeNull();
+	});
+
+	it("keeps the checkpoint when a later batch fails", async () => {
+		const { userId } = await seedMailbox(
+			"checkpoint-failure",
+			BRAIN.batchSize + 1,
+		);
+		let calls = 0;
+		const failingAfterFirst: BrainExtractor = async (threads) => {
+			calls += 1;
+			if (calls > 1) throw new Error("model timeout");
+			return extractor(threads);
+		};
+
+		const job = await db.brainAnalysisJob.create({
+			data: { userId, source: "gmail" },
+		});
+
+		await runBrainScan({ jobId: job.id }, failingAfterFirst);
+		const afterFirst = await db.brainAnalysisJob.findUnique({
+			where: { id: job.id },
+		});
+
+		const failed = await runBrainScan({ jobId: job.id }, failingAfterFirst);
+		expect(failed.reason).toBe("model timeout");
+
+		const afterFailure = await db.brainAnalysisJob.findUnique({
+			where: { id: job.id },
+		});
+		expect(afterFailure?.status).toBe("FAILED");
+		expect(afterFailure?.processedThreads).toBe(BRAIN.batchSize);
+		expect(afterFailure?.cursorThreadId).toBe(afterFirst?.cursorThreadId);
+	});
+
+	it("does not duplicate Gmail facts when a saved batch replays", async () => {
+		const { userId } = await seedMailbox("idempotent", 2);
+		const singleFact: BrainExtractor = async (threads) => ({
+			facts: threads.map((thread) => ({
+				threadId: thread.threadId,
+				kind: "FACT" as const,
+				subject: `Replay-safe fact from ${thread.subject}`,
+				detail: null,
+				confidence: 0.9,
+			})),
+			usage: {
+				inputTokens: 10,
+				outputTokens: 5,
+				model: "test/model",
+				provider: "test",
+			},
+		});
+
+		const job = await db.brainAnalysisJob.create({
+			data: { userId, source: "gmail" },
+		});
+
+		const first = await runBrainScan({ jobId: job.id }, singleFact);
+		expect(first.written).toBe(2);
+
+		const countAfterFirst = await db.businessKnowledge.count({
+			where: { subject: { contains: "Replay-safe fact" } },
+		});
+
+		await db.brainAnalysisJob.update({
+			where: { id: job.id },
+			data: {
+				status: "RUNNING",
+				cursorLastMessageAt: null,
+				cursorThreadId: null,
+				processedThreads: 0,
+				knowledgeWritten: 0,
+				completedAt: null,
+			},
+		});
+
+		const replay = await runBrainScan({ jobId: job.id }, singleFact);
+		expect(replay.written).toBe(0);
+
+		const countAfterReplay = await db.businessKnowledge.count({
+			where: { subject: { contains: "Replay-safe fact" } },
+		});
+		expect(countAfterReplay).toBe(countAfterFirst);
 	});
 });

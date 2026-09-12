@@ -1,5 +1,6 @@
 import { describe, expect, it, spyOn } from "bun:test";
 import { MockLanguageModelV4 } from "ai/test";
+import { BRAIN } from "../agent/lib/brain-config";
 import {
 	aiExtractor,
 	EXTRACTION_SYSTEM_PROMPT,
@@ -101,8 +102,8 @@ function userText(call: CallOptions): string {
 		.join("\n");
 }
 
-describe("aiExtractor JSON mode", () => {
-	it("pairs every JSON-mode request with an explicit JSON instruction", async () => {
+describe("aiExtractor text JSON mode", () => {
+	it("uses text generation with explicit JSON instructions", async () => {
 		const calls: CallOptions[] = [];
 		const extract = aiExtractor({
 			model: mockModel(VALID_OUTPUT, calls),
@@ -112,7 +113,7 @@ describe("aiExtractor JSON mode", () => {
 		await extract([threadWith("Our draping is R120 per metre.")]);
 
 		const call = onlyCall(calls);
-		expect(call.responseFormat?.type).toBe("json");
+		expect(call.responseFormat?.type).not.toBe("json");
 		expect(systemText(call)).toContain("Return only valid JSON");
 		expect(EXTRACTION_SYSTEM_PROMPT).toMatch(/json/i);
 	});
@@ -143,7 +144,10 @@ describe("aiExtractor JSON mode", () => {
 
 		await expect(
 			extract([threadWith("Our draping is R120 per metre.")]),
-		).rejects.toThrow();
+		).rejects.toThrow(
+			"Business Brain extraction produced no usable JSON result.",
+		);
+		expect(calls).toHaveLength(2);
 	});
 
 	it("keeps injection text as data and never as instructions", async () => {
@@ -184,7 +188,11 @@ describe("aiExtractor DeepSeek schema compliance", () => {
 
 			expect(result.facts).toHaveLength(1);
 			expect(calls).toHaveLength(1);
-			expect(warnings).toHaveLength(0);
+			expect(
+				warnings.some((entry) =>
+					JSON.stringify(entry).includes("validation_failed"),
+				),
+			).toBe(false);
 		} finally {
 			spy.mockRestore();
 		}
@@ -224,7 +232,9 @@ describe("aiExtractor DeepSeek schema compliance", () => {
 			expect(result.facts).toHaveLength(1);
 			expect(result.facts[0]?.confidence).toBe(0.9);
 			expect(calls).toHaveLength(1);
-			expect(warnings.length).toBeGreaterThan(0);
+			expect(
+				warnings.some((entry) => JSON.stringify(entry).includes("normalized")),
+			).toBe(true);
 		} finally {
 			spy.mockRestore();
 		}
@@ -265,7 +275,7 @@ describe("aiExtractor DeepSeek schema compliance", () => {
 		}
 	});
 
-	it("rejects a fact with an invalid kind instead of inventing one", async () => {
+	it("repairs a fact with an invalid kind instead of inventing one", async () => {
 		const output = JSON.stringify({
 			threads: [
 				{
@@ -291,15 +301,17 @@ describe("aiExtractor DeepSeek schema compliance", () => {
 		const spy = spyOn(console, "warn").mockImplementation(() => {});
 		try {
 			const extract = aiExtractor({
-				model: mockModel(output, calls),
+				model: mockModelSequence([output, VALID_OUTPUT], calls),
 				modelId: "test/mock-json",
 			});
 
-			const result = await extract([threadWith("We accept returns.")]);
+			const result = await extract([
+				threadWith("Our draping is R120 per metre."),
+			]);
 
 			expect(result.facts).toHaveLength(1);
-			expect(result.facts[0]?.kind).toBe("POLICY");
-			expect(calls).toHaveLength(1);
+			expect(result.facts[0]?.kind).toBe("PRICING");
+			expect(calls).toHaveLength(2);
 		} finally {
 			spy.mockRestore();
 		}
@@ -386,7 +398,9 @@ describe("aiExtractor DeepSeek schema compliance", () => {
 
 			await expect(
 				extract([threadWith("Our draping is R120 per metre.")]),
-			).rejects.toThrow("No object generated");
+			).rejects.toThrow(
+				"Business Brain extraction produced no usable JSON result.",
+			);
 			expect(calls).toHaveLength(2);
 		} finally {
 			spy.mockRestore();
@@ -421,14 +435,43 @@ describe("aiExtractor DeepSeek schema compliance", () => {
 				modelId: "test/mock-json",
 			});
 
-			const result = await extract([threadWith(secret)]);
-
-			expect(result.facts).toHaveLength(0);
+			await expect(extract([threadWith(secret)])).rejects.toThrow(
+				"Business Brain extraction produced no usable JSON result.",
+			);
 			for (const args of warnings) {
 				expect(JSON.stringify(args)).not.toContain(secret);
 			}
 		} finally {
 			spy.mockRestore();
+		}
+	});
+
+	it("bounds model calls with a timeout", async () => {
+		const calls: CallOptions[] = [];
+		const original = BRAIN.modelCallTimeoutMs;
+		(BRAIN as { modelCallTimeoutMs: number }).modelCallTimeoutMs = 5;
+		const model = new MockLanguageModelV4({
+			provider: "test",
+			modelId: "mock-json",
+			doGenerate: async (options) => {
+				calls.push(options);
+				await new Promise(() => {});
+				throw new Error("unreachable");
+			},
+		});
+		try {
+			const extract = aiExtractor({
+				model,
+				modelId: "test/mock-json",
+			});
+			const startedAt = Date.now();
+			await expect(
+				extract([threadWith("Our draping is R120 per metre.")]),
+			).rejects.toThrow("Business Brain extraction exceeded 5ms.");
+			expect(Date.now() - startedAt).toBeLessThan(500);
+			expect(calls).toHaveLength(1);
+		} finally {
+			(BRAIN as { modelCallTimeoutMs: number }).modelCallTimeoutMs = original;
 		}
 	});
 
