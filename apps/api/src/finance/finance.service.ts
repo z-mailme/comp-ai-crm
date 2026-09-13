@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import type { Db, Prisma } from "@crm/db";
 import {
 	BookingStatus,
@@ -35,6 +36,8 @@ import {
 	type ExpenseEntryOutput,
 	type ExpenseEvidence,
 	type FinanceDashboardOutput,
+	type FinanceDocumentOutput,
+	type FinanceSettingsOutput,
 	type FinanceWeekOutput,
 	type FinanceWeekRowOutput,
 	type InvoiceListOutput,
@@ -47,9 +50,23 @@ import {
 } from "./finance.contracts";
 import { FINANCE } from "./finance-config";
 import {
+	type FinanceDocumentLine,
+	type FinanceDocumentPdfInput,
+	money,
+	renderFinanceDocumentPdf,
+} from "./finance-document";
+import {
+	DEFAULT_FINANCE_SETTINGS,
+	type FinanceSettingsValue,
+	financeSettingsValue,
+} from "./finance-settings";
+import {
 	bookingDurationMinutes,
+	DEFAULT_OPERATOR_LABOUR_RULE,
+	type OperatorLabourRule,
 	operatorCountOf,
 	operatorLabourCostCents,
+	operatorLabourRuleValue,
 	operatorRateCents,
 } from "./operator-labour";
 
@@ -107,7 +124,16 @@ type ExpenseRow = Prisma.ExpenseGetPayload<{
 		currency: true;
 		incurredAt: true;
 		note: true;
+		receiptReference: true;
 		evidence: true;
+		ruleKey: true;
+		ruleVersion: true;
+		expectedAmountCents: true;
+		discrepancyCents: true;
+		operatorContact: {
+			select: { id: true; firstName: true; lastName: true };
+		};
+		recurringTemplateKey: true;
 	};
 }>;
 
@@ -122,7 +148,14 @@ const EXPENSE_SELECT = {
 	currency: true,
 	incurredAt: true,
 	note: true,
+	receiptReference: true,
 	evidence: true,
+	ruleKey: true,
+	ruleVersion: true,
+	expectedAmountCents: true,
+	discrepancyCents: true,
+	operatorContact: { select: { id: true, firstName: true, lastName: true } },
+	recurringTemplateKey: true,
 } as const satisfies Prisma.ExpenseSelect;
 
 const FINANCE_AUDIT_SELECT = {
@@ -137,12 +170,22 @@ const QUOTE_SELECT = {
 	number: true,
 	title: true,
 	status: true,
+	service: true,
+	eventDate: true,
 	currency: true,
 	subtotalCents: true,
+	discountCents: true,
+	travelFeeCents: true,
 	taxCents: true,
 	totalCents: true,
+	depositCents: true,
+	balanceCents: true,
 	taxEnabled: true,
 	taxRateBasisPoints: true,
+	notes: true,
+	terms: true,
+	documentKey: true,
+	documentGeneratedAt: true,
 	validUntil: true,
 	sentAt: true,
 	acceptedAt: true,
@@ -159,6 +202,7 @@ const QUOTE_SELECT = {
 			description: true,
 			quantity: true,
 			unitAmountCents: true,
+			discountCents: true,
 			totalCents: true,
 			sortOrder: true,
 		},
@@ -177,14 +221,24 @@ const INVOICE_SELECT = {
 	number: true,
 	title: true,
 	status: true,
+	service: true,
+	eventDate: true,
 	currency: true,
 	subtotalCents: true,
+	discountCents: true,
+	travelFeeCents: true,
 	taxCents: true,
 	totalCents: true,
+	depositRequiredCents: true,
 	paidCents: true,
 	balanceCents: true,
 	taxEnabled: true,
 	taxRateBasisPoints: true,
+	notes: true,
+	terms: true,
+	paymentReference: true,
+	documentKey: true,
+	documentGeneratedAt: true,
 	issueDate: true,
 	dueDate: true,
 	sentAt: true,
@@ -202,6 +256,7 @@ const INVOICE_SELECT = {
 			description: true,
 			quantity: true,
 			unitAmountCents: true,
+			discountCents: true,
 			totalCents: true,
 			sortOrder: true,
 		},
@@ -223,7 +278,11 @@ const PAYMENT_SELECT = {
 	method: true,
 	reference: true,
 	payerName: true,
+	proofReference: true,
+	notes: true,
 	status: true,
+	confirmedAt: true,
+	failedAt: true,
 	invoice: { select: { id: true, number: true } },
 	deal: { select: { id: true, name: true } },
 	booking: { select: { id: true, bookingKey: true } },
@@ -434,6 +493,250 @@ export class FinanceService {
 		};
 	}
 
+	async settings(
+		source: BusinessContextSource,
+	): Promise<FinanceSettingsOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const [settings, operatorRule] = await Promise.all([
+			this.financeSettings(context.businessUnitId),
+			this.operatorLabourRule(context.businessUnitId),
+		]);
+		return {
+			businessUnitId: context.businessUnitId,
+			version: settings.version,
+			...settings.value,
+			operatorRule,
+		};
+	}
+
+	async updateSettings(
+		source: BusinessContextSource & { userId: string },
+		input: {
+			defaultCurrency: string;
+			taxEnabled: boolean;
+			taxRateBasisPoints: number;
+			depositBasisPoints: number;
+			quoteValidityDays: number;
+			invoiceDueDays: number;
+			quotePrefix: string;
+			invoicePrefix: string;
+			operatorShortRateCents: number;
+			operatorLongRateCents: number;
+			operatorThresholdMinutes: number;
+		},
+	): Promise<FinanceSettingsOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const [settingsVersion, ruleVersion] = await Promise.all([
+			this.nextFinanceRuleVersion(
+				context.businessUnitId,
+				FINANCE.settings.ruleKey,
+			),
+			this.nextFinanceRuleVersion(
+				context.businessUnitId,
+				FINANCE.operatorLabour.ruleKey,
+			),
+		]);
+
+		await this.db.$transaction(async (tx) => {
+			await tx.financeRule.updateMany({
+				where: {
+					businessUnitId: context.businessUnitId,
+					key: {
+						in: [FINANCE.settings.ruleKey, FINANCE.operatorLabour.ruleKey],
+					},
+					active: true,
+				},
+				data: { active: false },
+			});
+			await tx.financeRule.create({
+				data: {
+					businessUnitId: context.businessUnitId,
+					key: FINANCE.settings.ruleKey,
+					version: settingsVersion,
+					active: true,
+					value: {
+						defaultCurrency: input.defaultCurrency,
+						taxEnabled: input.taxEnabled,
+						taxRateBasisPoints: input.taxRateBasisPoints,
+						depositBasisPoints: input.depositBasisPoints,
+						quoteValidityDays: input.quoteValidityDays,
+						invoiceDueDays: input.invoiceDueDays,
+						quotePrefix: input.quotePrefix,
+						invoicePrefix: input.invoicePrefix,
+					},
+					createdById: source.userId,
+				},
+			});
+			await tx.financeRule.create({
+				data: {
+					businessUnitId: context.businessUnitId,
+					key: FINANCE.operatorLabour.ruleKey,
+					version: ruleVersion,
+					active: true,
+					value: {
+						currency: input.defaultCurrency,
+						shortRateCents: input.operatorShortRateCents,
+						longRateCents: input.operatorLongRateCents,
+						longThresholdMinutes: input.operatorThresholdMinutes,
+					},
+					createdById: source.userId,
+				},
+			});
+		});
+
+		return this.settings(source);
+	}
+
+	async generateQuoteDocument(
+		source: BusinessContextSource & { userId: string },
+		input: { id: string },
+	): Promise<FinanceDocumentOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const quote = await this.db.quote.findFirst({
+			where: { AND: [{ id: input.id }, directBusinessUnitScope(context)] },
+			select: QUOTE_SELECT,
+		});
+		if (!quote) throw new NotFoundException(`No quote with id ${input.id}.`);
+		const key = documentKey("quote", quote.id, quoteDocumentFingerprint(quote));
+		const generatedAt =
+			quote.documentKey === key && quote.documentGeneratedAt
+				? quote.documentGeneratedAt
+				: new Date();
+		if (quote.documentKey !== key) {
+			await this.db.quote.update({
+				where: { id: quote.id },
+				data: {
+					documentKey: key,
+					documentGeneratedAt: generatedAt,
+					auditEvents: {
+						create: {
+							businessUnitId: context.businessUnitId,
+							action: FinanceAuditAction.UPDATED,
+							summary: "Quote document generated.",
+							actorUserId: source.userId,
+							after: { documentKey: key },
+						},
+					},
+				},
+			});
+		}
+		return documentOutput(
+			key,
+			"quotes",
+			quote.id,
+			generatedAt,
+			context.businessUnitId,
+		);
+	}
+
+	async generateInvoiceDocument(
+		source: BusinessContextSource & { userId: string },
+		input: { id: string },
+	): Promise<FinanceDocumentOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const invoice = await this.db.invoice.findFirst({
+			where: { AND: [{ id: input.id }, directBusinessUnitScope(context)] },
+			select: INVOICE_SELECT,
+		});
+		if (!invoice)
+			throw new NotFoundException(`No invoice with id ${input.id}.`);
+		const key = documentKey(
+			"invoice",
+			invoice.id,
+			invoiceDocumentFingerprint(invoice),
+		);
+		const generatedAt =
+			invoice.documentKey === key && invoice.documentGeneratedAt
+				? invoice.documentGeneratedAt
+				: new Date();
+		if (invoice.documentKey !== key) {
+			await this.db.invoice.update({
+				where: { id: invoice.id },
+				data: {
+					documentKey: key,
+					documentGeneratedAt: generatedAt,
+					auditEvents: {
+						create: {
+							businessUnitId: context.businessUnitId,
+							action: FinanceAuditAction.UPDATED,
+							summary: "Invoice document generated.",
+							actorUserId: source.userId,
+							after: { documentKey: key },
+						},
+					},
+				},
+			});
+		}
+		return documentOutput(
+			key,
+			"invoices",
+			invoice.id,
+			generatedAt,
+			context.businessUnitId,
+		);
+	}
+
+	async documentPdf(
+		source: BusinessContextSource,
+		kind: "quotes" | "invoices",
+		id: string,
+	): Promise<{ filename: string; content: Buffer }> {
+		const context = await resolveBusinessContext(this.db, source);
+		if (kind === "quotes") {
+			const quote = await this.db.quote.findFirst({
+				where: { AND: [{ id }, directBusinessUnitScope(context)] },
+				select: QUOTE_SELECT,
+			});
+			if (!quote) throw new NotFoundException(`No quote with id ${id}.`);
+			return {
+				filename: `${quote.number}.pdf`,
+				content: renderFinanceDocumentPdf(quoteDocumentInput(quote)),
+			};
+		}
+		const invoice = await this.db.invoice.findFirst({
+			where: { AND: [{ id }, directBusinessUnitScope(context)] },
+			select: INVOICE_SELECT,
+		});
+		if (!invoice) throw new NotFoundException(`No invoice with id ${id}.`);
+		const entries = await this.db.ledgerEntry.findMany({
+			where: { invoiceId: invoice.id },
+			orderBy: { occurredAt: "asc" },
+			take: 10,
+			select: {
+				id: true,
+				source: true,
+				sourceId: true,
+				memo: true,
+				currency: true,
+				debitCents: true,
+				creditCents: true,
+				occurredAt: true,
+				createdAt: true,
+				account: { select: { id: true, name: true } },
+			},
+		});
+		return {
+			filename: `${invoice.number}.pdf`,
+			content: renderFinanceDocumentPdf(
+				invoiceDocumentInput(
+					invoice,
+					entries.map((entry) => ({
+						id: entry.id,
+						account: { id: entry.account.id, name: entry.account.name },
+						source: entry.source,
+						sourceId: entry.sourceId,
+						memo: entry.memo,
+						currency: entry.currency,
+						debitCents: entry.debitCents,
+						creditCents: entry.creditCents,
+						occurredAt: entry.occurredAt.toISOString().slice(0, 10),
+						createdAt: entry.createdAt.toISOString(),
+					})),
+				),
+			),
+		};
+	}
+
 	async quotes(
 		source: BusinessContextSource,
 		input: { search?: string; limit?: number },
@@ -476,20 +779,39 @@ export class FinanceService {
 			companyId?: string;
 			contactId?: string;
 			title: string;
+			service?: string;
+			eventDate?: string;
 			currency: string;
 			validUntil?: string;
 			notes?: string;
+			terms?: string;
+			travelFeeCents?: number;
+			discountCents?: number;
+			depositCents?: number;
 			lineItems: {
 				description: string;
 				quantity: number;
 				unitAmountCents: number;
+				discountCents?: number;
 			}[];
 		},
 	): Promise<QuoteMutationOutput> {
 		const context = await resolveBusinessContext(this.db, source);
+		const settings = await this.financeSettings(context.businessUnitId);
 		const links = await this.resolveFinanceLinks(context, input);
-		const totals = lineTotals(input.lineItems);
-		const number = await this.nextDocumentNumber(FINANCE.documents.quotePrefix);
+		const totals = lineTotals(input.lineItems, {
+			discountCents: input.discountCents,
+			travelFeeCents: input.travelFeeCents,
+			depositCents: input.depositCents,
+			taxEnabled: settings.value.taxEnabled,
+			taxRateBasisPoints: settings.value.taxRateBasisPoints,
+		});
+		const number = await this.nextDocumentNumber(settings.value.quotePrefix);
+		const validUntil =
+			input.validUntil ??
+			new Date(Date.now() + settings.value.quoteValidityDays * DAY_MS)
+				.toISOString()
+				.slice(0, 10);
 
 		const quote = await this.db.quote.create({
 			data: {
@@ -501,21 +823,32 @@ export class FinanceService {
 				number,
 				title: input.title,
 				status: FinanceDocumentStatus.DRAFT,
+				service: input.service ?? null,
+				eventDate: input.eventDate ? dayDate(input.eventDate) : null,
 				currency: input.currency,
 				subtotalCents: totals.subtotalCents,
-				taxCents: 0,
-				totalCents: totals.subtotalCents,
-				taxEnabled: false,
-				taxRateBasisPoints: 0,
-				validUntil: input.validUntil ? dayDate(input.validUntil) : null,
+				discountCents: totals.discountCents,
+				travelFeeCents: totals.travelFeeCents,
+				taxCents: totals.taxCents,
+				totalCents: totals.totalCents,
+				depositCents: totals.depositCents,
+				balanceCents: totals.balanceCents,
+				taxEnabled: settings.value.taxEnabled,
+				taxRateBasisPoints: settings.value.taxRateBasisPoints,
+				validUntil: dayDate(validUntil),
 				notes: input.notes ?? null,
+				terms: input.terms ?? null,
 				createdById: source.userId,
 				lineItems: {
 					create: input.lineItems.map((line, index) => ({
 						description: line.description,
 						quantity: line.quantity,
 						unitAmountCents: line.unitAmountCents,
-						totalCents: line.quantity * line.unitAmountCents,
+						discountCents: line.discountCents ?? 0,
+						totalCents: Math.max(
+							line.quantity * line.unitAmountCents - (line.discountCents ?? 0),
+							0,
+						),
 						sortOrder: index,
 					})),
 				},
@@ -526,7 +859,8 @@ export class FinanceService {
 						summary: "Quote created.",
 						actorUserId: source.userId,
 						after: {
-							totalCents: totals.subtotalCents,
+							totalCents: totals.totalCents,
+							depositCents: totals.depositCents,
 							currency: input.currency,
 						},
 					},
@@ -545,11 +879,183 @@ export class FinanceService {
 		return { quote: toQuoteOutput(quote) };
 	}
 
+	async updateQuote(
+		source: BusinessContextSource & { userId: string },
+		input: {
+			id: string;
+			businessUnitId?: string;
+			dealId?: string;
+			bookingId?: string;
+			companyId?: string;
+			contactId?: string;
+			title: string;
+			service?: string;
+			eventDate?: string;
+			currency: string;
+			validUntil?: string;
+			notes?: string;
+			terms?: string;
+			travelFeeCents?: number;
+			discountCents?: number;
+			depositCents?: number;
+			lineItems: {
+				description: string;
+				quantity: number;
+				unitAmountCents: number;
+				discountCents?: number;
+			}[];
+		},
+	): Promise<QuoteMutationOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const existing = await this.db.quote.findFirst({
+			where: { AND: [{ id: input.id }, directBusinessUnitScope(context)] },
+			select: {
+				id: true,
+				status: true,
+				taxEnabled: true,
+				taxRateBasisPoints: true,
+				invoices: { take: 1, select: { id: true } },
+			},
+		});
+		if (!existing) throw new NotFoundException(`No quote with id ${input.id}.`);
+		if (
+			existing.status === FinanceDocumentStatus.ACCEPTED ||
+			existing.status === FinanceDocumentStatus.DECLINED ||
+			existing.status === FinanceDocumentStatus.EXPIRED ||
+			existing.status === FinanceDocumentStatus.ARCHIVED ||
+			existing.status === FinanceDocumentStatus.VOID ||
+			existing.invoices.length > 0
+		) {
+			throw new BadRequestException(
+				"Only an unconverted active quote can edit.",
+			);
+		}
+
+		const links = await this.resolveFinanceLinks(context, input);
+		const totals = lineTotals(input.lineItems, {
+			discountCents: input.discountCents,
+			travelFeeCents: input.travelFeeCents,
+			depositCents: input.depositCents,
+			taxEnabled: existing.taxEnabled,
+			taxRateBasisPoints: existing.taxRateBasisPoints,
+		});
+		const quote = await this.db.quote.update({
+			where: { id: existing.id },
+			data: {
+				dealId: links.dealId,
+				bookingId: links.bookingId,
+				companyId: links.companyId,
+				contactId: links.contactId,
+				title: input.title,
+				status:
+					existing.status === FinanceDocumentStatus.SENT
+						? FinanceDocumentStatus.READY
+						: existing.status,
+				service: input.service ?? null,
+				eventDate: input.eventDate ? dayDate(input.eventDate) : null,
+				currency: input.currency,
+				subtotalCents: totals.subtotalCents,
+				discountCents: totals.discountCents,
+				travelFeeCents: totals.travelFeeCents,
+				taxCents: totals.taxCents,
+				totalCents: totals.totalCents,
+				depositCents: totals.depositCents,
+				balanceCents: totals.balanceCents,
+				validUntil: input.validUntil ? dayDate(input.validUntil) : null,
+				notes: input.notes ?? null,
+				terms: input.terms ?? null,
+				documentKey: null,
+				documentGeneratedAt: null,
+				lineItems: {
+					deleteMany: {},
+					create: input.lineItems.map((line, index) => ({
+						description: line.description,
+						quantity: line.quantity,
+						unitAmountCents: line.unitAmountCents,
+						discountCents: line.discountCents ?? 0,
+						totalCents: Math.max(
+							line.quantity * line.unitAmountCents - (line.discountCents ?? 0),
+							0,
+						),
+						sortOrder: index,
+					})),
+				},
+				auditEvents: {
+					create: {
+						businessUnitId: context.businessUnitId,
+						action: FinanceAuditAction.UPDATED,
+						summary: "Quote updated.",
+						actorUserId: source.userId,
+						before: { status: existing.status },
+						after: {
+							totalCents: totals.totalCents,
+							depositCents: totals.depositCents,
+							currency: input.currency,
+						},
+					},
+				},
+			},
+			select: QUOTE_SELECT,
+		});
+
+		if (links.dealId) {
+			await this.db.deal.update({
+				where: { id: links.dealId },
+				data: { quoteStatus: "READY" },
+			});
+		}
+
+		return { quote: toQuoteOutput(quote) };
+	}
+
+	async duplicateQuote(
+		source: BusinessContextSource & { userId: string },
+		input: { id: string; businessUnitId?: string },
+	): Promise<QuoteMutationOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const quote = await this.db.quote.findFirst({
+			where: { AND: [{ id: input.id }, directBusinessUnitScope(context)] },
+			select: QUOTE_SELECT,
+		});
+		if (!quote) throw new NotFoundException(`No quote with id ${input.id}.`);
+
+		return this.createQuote(source, {
+			businessUnitId: context.businessUnitId ?? undefined,
+			dealId: quote.deal?.id,
+			bookingId: quote.booking?.id,
+			companyId: quote.company?.id,
+			contactId: quote.contact?.id,
+			title: `${quote.title} copy`,
+			service: quote.service ?? undefined,
+			eventDate: quote.eventDate?.toISOString().slice(0, 10),
+			currency: quote.currency,
+			validUntil: quote.validUntil?.toISOString().slice(0, 10),
+			notes: quote.notes ?? undefined,
+			terms: quote.terms ?? undefined,
+			travelFeeCents: quote.travelFeeCents,
+			discountCents: quote.discountCents,
+			depositCents: quote.depositCents,
+			lineItems: quote.lineItems.map((line) => ({
+				description: line.description,
+				quantity: line.quantity,
+				unitAmountCents: line.unitAmountCents,
+				discountCents: line.discountCents,
+			})),
+		});
+	}
+
 	async updateQuoteStatus(
 		source: BusinessContextSource & { userId: string },
 		input: {
 			id: string;
-			status: "READY" | "SENT" | "ACCEPTED" | "DECLINED" | "VOID";
+			status:
+				| "READY"
+				| "SENT"
+				| "ACCEPTED"
+				| "DECLINED"
+				| "EXPIRED"
+				| "ARCHIVED"
+				| "VOID";
 		},
 	): Promise<QuoteMutationOutput> {
 		const context = await resolveBusinessContext(this.db, source);
@@ -570,7 +1076,10 @@ export class FinanceService {
 				declinedAt:
 					status === FinanceDocumentStatus.DECLINED ? new Date() : undefined,
 				voidedAt:
-					status === FinanceDocumentStatus.VOID ? new Date() : undefined,
+					status === FinanceDocumentStatus.VOID ||
+					status === FinanceDocumentStatus.ARCHIVED
+						? new Date()
+						: undefined,
 				auditEvents: {
 					create: {
 						businessUnitId: context.businessUnitId,
@@ -593,6 +1102,65 @@ export class FinanceService {
 		}
 
 		return { quote: toQuoteOutput(quote) };
+	}
+
+	async convertQuoteToInvoice(
+		source: BusinessContextSource & { userId: string },
+		input: { id: string; issueDate?: string; dueDate?: string },
+	): Promise<InvoiceMutationOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const quote = await this.db.quote.findFirst({
+			where: { AND: [{ id: input.id }, directBusinessUnitScope(context)] },
+			select: {
+				id: true,
+				status: true,
+				title: true,
+				currency: true,
+				invoices: {
+					take: 1,
+					orderBy: { createdAt: "asc" },
+					select: INVOICE_SELECT,
+				},
+			},
+		});
+		if (!quote) throw new NotFoundException(`No quote with id ${input.id}.`);
+		if (quote.invoices[0])
+			return { invoice: toInvoiceOutput(quote.invoices[0]) };
+		if (quote.status !== FinanceDocumentStatus.ACCEPTED) {
+			throw new BadRequestException("Only an accepted quote can convert.");
+		}
+
+		const settings = await this.financeSettings(context.businessUnitId);
+		const issueDate = input.issueDate ?? new Date().toISOString().slice(0, 10);
+		const dueDate =
+			input.dueDate ??
+			new Date(
+				dayDate(issueDate).getTime() + settings.value.invoiceDueDays * DAY_MS,
+			)
+				.toISOString()
+				.slice(0, 10);
+		const invoice = await this.createInvoice(source, {
+			quoteId: quote.id,
+			title: quote.title,
+			currency: quote.currency,
+			issueDate,
+			dueDate,
+			lineItems: [
+				{ description: quote.title, quantity: 1, unitAmountCents: 0 },
+			],
+		});
+		await this.db.financeAuditEvent.create({
+			data: {
+				businessUnitId: context.businessUnitId,
+				quoteId: quote.id,
+				invoiceId: invoice.invoice.id,
+				action: FinanceAuditAction.CONVERTED,
+				summary: "Quote converted to invoice.",
+				actorUserId: source.userId,
+				after: { invoiceId: invoice.invoice.id },
+			},
+		});
+		return invoice;
 	}
 
 	async invoices(
@@ -638,18 +1206,27 @@ export class FinanceService {
 			companyId?: string;
 			contactId?: string;
 			title: string;
+			service?: string;
+			eventDate?: string;
 			currency: string;
 			issueDate: string;
 			dueDate?: string;
 			notes?: string;
+			terms?: string;
+			travelFeeCents?: number;
+			discountCents?: number;
+			depositRequiredCents?: number;
+			paymentReference?: string;
 			lineItems: {
 				description: string;
 				quantity: number;
 				unitAmountCents: number;
+				discountCents?: number;
 			}[];
 		},
 	): Promise<InvoiceMutationOutput> {
 		const context = await resolveBusinessContext(this.db, source);
+		const settings = await this.financeSettings(context.businessUnitId);
 		const quote = input.quoteId
 			? await this.db.quote.findFirst({
 					where: {
@@ -661,6 +1238,26 @@ export class FinanceService {
 						bookingId: true,
 						companyId: true,
 						contactId: true,
+						title: true,
+						service: true,
+						eventDate: true,
+						currency: true,
+						notes: true,
+						terms: true,
+						discountCents: true,
+						travelFeeCents: true,
+						depositCents: true,
+						taxEnabled: true,
+						taxRateBasisPoints: true,
+						lineItems: {
+							orderBy: { sortOrder: "asc" },
+							select: {
+								description: true,
+								quantity: true,
+								unitAmountCents: true,
+								discountCents: true,
+							},
+						},
 					},
 				})
 			: null;
@@ -674,10 +1271,32 @@ export class FinanceService {
 			companyId: input.companyId ?? quote?.companyId ?? undefined,
 			contactId: input.contactId ?? quote?.contactId ?? undefined,
 		});
-		const totals = lineTotals(input.lineItems);
-		const number = await this.nextDocumentNumber(
-			FINANCE.documents.invoicePrefix,
-		);
+		const lines = input.quoteId && quote ? quote.lineItems : input.lineItems;
+		const totals = lineTotals(lines, {
+			discountCents:
+				input.quoteId && quote ? quote.discountCents : input.discountCents,
+			travelFeeCents:
+				input.quoteId && quote ? quote.travelFeeCents : input.travelFeeCents,
+			depositCents:
+				input.quoteId && quote
+					? quote.depositCents
+					: input.depositRequiredCents,
+			taxEnabled:
+				input.quoteId && quote ? quote.taxEnabled : settings.value.taxEnabled,
+			taxRateBasisPoints:
+				input.quoteId && quote
+					? quote.taxRateBasisPoints
+					: settings.value.taxRateBasisPoints,
+		});
+		const number = await this.nextDocumentNumber(settings.value.invoicePrefix);
+		const dueDate =
+			input.dueDate ??
+			new Date(
+				dayDate(input.issueDate).getTime() +
+					settings.value.invoiceDueDays * DAY_MS,
+			)
+				.toISOString()
+				.slice(0, 10);
 
 		const invoice = await this.db.$transaction(async (tx) => {
 			const created = await tx.invoice.create({
@@ -689,26 +1308,50 @@ export class FinanceService {
 					companyId: links.companyId,
 					contactId: links.contactId,
 					number,
-					title: input.title,
+					title: input.quoteId && quote ? quote.title : input.title,
 					status: InvoiceLifecycleStatus.DRAFT,
-					currency: input.currency,
+					service:
+						input.quoteId && quote ? quote.service : (input.service ?? null),
+					eventDate:
+						input.quoteId && quote
+							? quote.eventDate
+							: input.eventDate
+								? dayDate(input.eventDate)
+								: null,
+					currency: input.quoteId && quote ? quote.currency : input.currency,
 					subtotalCents: totals.subtotalCents,
-					taxCents: 0,
-					totalCents: totals.subtotalCents,
+					discountCents: totals.discountCents,
+					travelFeeCents: totals.travelFeeCents,
+					taxCents: totals.taxCents,
+					totalCents: totals.totalCents,
+					depositRequiredCents: totals.depositCents,
 					paidCents: 0,
-					balanceCents: totals.subtotalCents,
-					taxEnabled: false,
-					taxRateBasisPoints: 0,
+					balanceCents: totals.totalCents,
+					taxEnabled:
+						input.quoteId && quote
+							? quote.taxEnabled
+							: settings.value.taxEnabled,
+					taxRateBasisPoints:
+						input.quoteId && quote
+							? quote.taxRateBasisPoints
+							: settings.value.taxRateBasisPoints,
 					issueDate: dayDate(input.issueDate),
-					dueDate: input.dueDate ? dayDate(input.dueDate) : null,
-					notes: input.notes ?? null,
+					dueDate: dayDate(dueDate),
+					notes: input.quoteId && quote ? quote.notes : (input.notes ?? null),
+					terms: input.quoteId && quote ? quote.terms : (input.terms ?? null),
+					paymentReference: input.paymentReference ?? null,
 					createdById: source.userId,
 					lineItems: {
-						create: input.lineItems.map((line, index) => ({
+						create: lines.map((line, index) => ({
 							description: line.description,
 							quantity: line.quantity,
 							unitAmountCents: line.unitAmountCents,
-							totalCents: line.quantity * line.unitAmountCents,
+							discountCents: line.discountCents ?? 0,
+							totalCents: Math.max(
+								line.quantity * line.unitAmountCents -
+									(line.discountCents ?? 0),
+								0,
+							),
 							sortOrder: index,
 						})),
 					},
@@ -719,8 +1362,10 @@ export class FinanceService {
 							summary: "Invoice created.",
 							actorUserId: source.userId,
 							after: {
-								totalCents: totals.subtotalCents,
-								currency: input.currency,
+								totalCents: totals.totalCents,
+								depositRequiredCents: totals.depositCents,
+								currency:
+									input.quoteId && quote ? quote.currency : input.currency,
 							},
 						},
 					},
@@ -741,9 +1386,138 @@ export class FinanceService {
 		return { invoice: toInvoiceOutput(invoice) };
 	}
 
+	async updateInvoice(
+		source: BusinessContextSource & { userId: string },
+		input: {
+			id: string;
+			businessUnitId?: string;
+			dealId?: string;
+			bookingId?: string;
+			companyId?: string;
+			contactId?: string;
+			title: string;
+			service?: string;
+			eventDate?: string;
+			currency: string;
+			issueDate: string;
+			dueDate?: string;
+			notes?: string;
+			terms?: string;
+			travelFeeCents?: number;
+			discountCents?: number;
+			depositRequiredCents?: number;
+			paymentReference?: string;
+			lineItems: {
+				description: string;
+				quantity: number;
+				unitAmountCents: number;
+				discountCents?: number;
+			}[];
+		},
+	): Promise<InvoiceMutationOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const existing = await this.db.invoice.findFirst({
+			where: { AND: [{ id: input.id }, directBusinessUnitScope(context)] },
+			select: {
+				id: true,
+				status: true,
+				quoteId: true,
+				paidCents: true,
+				taxEnabled: true,
+				taxRateBasisPoints: true,
+			},
+		});
+		if (!existing)
+			throw new NotFoundException(`No invoice with id ${input.id}.`);
+		if (existing.status !== InvoiceLifecycleStatus.DRAFT) {
+			throw new BadRequestException("Only a draft invoice can edit.");
+		}
+		if (existing.paidCents > 0) {
+			throw new BadRequestException("A paid invoice cannot edit.");
+		}
+
+		const links = await this.resolveFinanceLinks(context, input);
+		const totals = lineTotals(input.lineItems, {
+			discountCents: input.discountCents,
+			travelFeeCents: input.travelFeeCents,
+			depositCents: input.depositRequiredCents,
+			taxEnabled: existing.taxEnabled,
+			taxRateBasisPoints: existing.taxRateBasisPoints,
+		});
+		const invoice = await this.db.$transaction(async (tx) => {
+			const updated = await tx.invoice.update({
+				where: { id: existing.id },
+				data: {
+					dealId: links.dealId,
+					bookingId: links.bookingId,
+					companyId: links.companyId,
+					contactId: links.contactId,
+					title: input.title,
+					service: input.service ?? null,
+					eventDate: input.eventDate ? dayDate(input.eventDate) : null,
+					currency: input.currency,
+					subtotalCents: totals.subtotalCents,
+					discountCents: totals.discountCents,
+					travelFeeCents: totals.travelFeeCents,
+					taxCents: totals.taxCents,
+					totalCents: totals.totalCents,
+					depositRequiredCents: totals.depositCents,
+					balanceCents: totals.totalCents,
+					issueDate: dayDate(input.issueDate),
+					dueDate: input.dueDate ? dayDate(input.dueDate) : null,
+					notes: input.notes ?? null,
+					terms: input.terms ?? null,
+					paymentReference: input.paymentReference ?? null,
+					documentKey: null,
+					documentGeneratedAt: null,
+					lineItems: {
+						deleteMany: {},
+						create: input.lineItems.map((line, index) => ({
+							description: line.description,
+							quantity: line.quantity,
+							unitAmountCents: line.unitAmountCents,
+							discountCents: line.discountCents ?? 0,
+							totalCents: Math.max(
+								line.quantity * line.unitAmountCents -
+									(line.discountCents ?? 0),
+								0,
+							),
+							sortOrder: index,
+						})),
+					},
+					auditEvents: {
+						create: {
+							businessUnitId: context.businessUnitId,
+							action: FinanceAuditAction.UPDATED,
+							summary: "Invoice updated.",
+							actorUserId: source.userId,
+							after: {
+								totalCents: totals.totalCents,
+								depositRequiredCents: totals.depositCents,
+								currency: input.currency,
+							},
+						},
+					},
+				},
+				select: INVOICE_SELECT,
+			});
+			await this.ensureInvoiceLedger(tx, context.businessUnitId, updated);
+			return updated;
+		});
+
+		if (links.dealId) {
+			await this.db.deal.update({
+				where: { id: links.dealId },
+				data: { invoiceStatus: "REQUESTED" },
+			});
+		}
+
+		return { invoice: toInvoiceOutput(invoice) };
+	}
+
 	async updateInvoiceStatus(
 		source: BusinessContextSource & { userId: string },
-		input: { id: string; status: "SENT" | "VOID" },
+		input: { id: string; status: "SENT" | "OVERDUE" | "CANCELLED" | "VOID" },
 	): Promise<InvoiceMutationOutput> {
 		const context = await resolveBusinessContext(this.db, source);
 		const existing = await this.db.invoice.findFirst({
@@ -760,14 +1534,19 @@ export class FinanceService {
 				status,
 				sentAt: status === InvoiceLifecycleStatus.SENT ? new Date() : undefined,
 				voidedAt:
-					status === InvoiceLifecycleStatus.VOID ? new Date() : undefined,
+					status === InvoiceLifecycleStatus.VOID ||
+					status === InvoiceLifecycleStatus.CANCELLED
+						? new Date()
+						: undefined,
 				auditEvents: {
 					create: {
 						businessUnitId: context.businessUnitId,
 						action:
 							status === InvoiceLifecycleStatus.VOID
 								? FinanceAuditAction.VOIDED
-								: FinanceAuditAction.SENT,
+								: status === InvoiceLifecycleStatus.CANCELLED
+									? FinanceAuditAction.VOIDED
+									: FinanceAuditAction.SENT,
 						summary: `Invoice marked ${status.toLowerCase()}.`,
 						actorUserId: source.userId,
 						before: { status: existing.status },
@@ -835,6 +1614,8 @@ export class FinanceService {
 			method: Prisma.PaymentRecordCreateInput["method"];
 			reference?: string;
 			payerName?: string;
+			proofReference?: string;
+			notes?: string;
 		},
 	): Promise<PaymentMutationOutput> {
 		const context = await resolveBusinessContext(this.db, source);
@@ -875,6 +1656,8 @@ export class FinanceService {
 					method: input.method,
 					reference: input.reference ?? null,
 					payerName: input.payerName ?? null,
+					proofReference: input.proofReference ?? null,
+					notes: input.notes ?? null,
 					status: invoice
 						? PaymentRecordStatus.MATCHED
 						: PaymentRecordStatus.UNMATCHED,
@@ -987,6 +1770,85 @@ export class FinanceService {
 		return { payment: toPaymentOutput(updated) };
 	}
 
+	async updatePaymentStatus(
+		source: BusinessContextSource & { userId: string },
+		input: {
+			id: string;
+			status:
+				| "PENDING"
+				| "CONFIRMED"
+				| "FAILED"
+				| "REFUNDED"
+				| "PARTIALLY_REFUNDED"
+				| "CANCELLED";
+		},
+	): Promise<PaymentMutationOutput> {
+		const context = await resolveBusinessContext(this.db, source);
+		const existing = await this.db.paymentRecord.findFirst({
+			where: { AND: [{ id: input.id }, directBusinessUnitScope(context)] },
+			select: { id: true, invoiceId: true, status: true },
+		});
+		if (!existing)
+			throw new NotFoundException(`No payment with id ${input.id}.`);
+
+		const status = input.status as PaymentRecordStatus;
+		const payment = await this.db.$transaction(async (tx) => {
+			const updated = await tx.paymentRecord.update({
+				where: { id: existing.id },
+				data: {
+					status,
+					confirmedAt:
+						status === PaymentRecordStatus.CONFIRMED ? new Date() : null,
+					failedAt: status === PaymentRecordStatus.FAILED ? new Date() : null,
+					auditEvents: {
+						create: {
+							businessUnitId: context.businessUnitId,
+							action:
+								status === PaymentRecordStatus.CONFIRMED
+									? FinanceAuditAction.CONFIRMED
+									: status === PaymentRecordStatus.CANCELLED
+										? FinanceAuditAction.VOIDED
+										: FinanceAuditAction.UPDATED,
+							summary: `Payment marked ${status.toLowerCase()}.`,
+							actorUserId: source.userId,
+							before: { status: existing.status },
+							after: { status },
+						},
+					},
+				},
+				select: PAYMENT_SELECT,
+			});
+			if (existing.invoiceId) {
+				await this.applyPaymentToInvoice(
+					tx,
+					context.businessUnitId,
+					existing.invoiceId,
+					source.userId,
+				);
+			}
+			if (
+				updated.invoice &&
+				(updated.status === PaymentRecordStatus.MATCHED ||
+					updated.status === PaymentRecordStatus.CONFIRMED)
+			) {
+				await this.ensurePaymentLedger(tx, context.businessUnitId, updated);
+			} else {
+				await tx.ledgerEntry.deleteMany({
+					where: {
+						source: FinanceLedgerEntrySource.PAYMENT,
+						sourceId: updated.id,
+					},
+				});
+			}
+			return tx.paymentRecord.findUniqueOrThrow({
+				where: { id: updated.id },
+				select: PAYMENT_SELECT,
+			});
+		});
+
+		return { payment: toPaymentOutput(payment) };
+	}
+
 	async accounting(source: BusinessContextSource): Promise<AccountingOutput> {
 		const context = await resolveBusinessContext(this.db, source);
 		const base = await this.conversion.reportingCurrency();
@@ -1074,6 +1936,7 @@ export class FinanceService {
 		});
 
 		await this.reconcileLabour(context, bookings);
+		const labourRule = await this.operatorLabourRule(context.businessUnitId);
 
 		const expenses = await this.db.expense.findMany({
 			where: {
@@ -1096,11 +1959,15 @@ export class FinanceService {
 		}
 
 		const rows = bookings.map((booking) =>
-			this.weekRow(booking, base, expensesByBooking.get(booking.id) ?? []),
+			this.weekRow(
+				booking,
+				base,
+				expensesByBooking.get(booking.id) ?? [],
+				labourRule,
+			),
 		);
 
-		const labourIncluded =
-			base === FINANCE.operatorLabour.currency.toUpperCase();
+		const labourIncluded = base === labourRule.currency.toUpperCase();
 		const labourCents = labourIncluded
 			? expenses
 					.filter(
@@ -1167,7 +2034,7 @@ export class FinanceService {
 					0,
 				),
 				operatorLabourCents: labourCents,
-				operatorLabourCurrency: FINANCE.operatorLabour.currency,
+				operatorLabourCurrency: labourRule.currency,
 				labourExcludedFromTotals: !labourIncluded,
 				otherExpensesCents,
 				projectedGrossProfitCents,
@@ -1185,11 +2052,14 @@ export class FinanceService {
 			businessUnitId?: string;
 			bookingId?: string;
 			dealId?: string;
+			operatorContactId?: string;
 			category: ExpenseCategory;
 			amountCents: number;
 			currency?: string;
 			incurredAt: string;
 			note?: string;
+			receiptReference?: string;
+			recurringTemplateKey?: string;
 		},
 	): Promise<{ expense: ExpenseEntryOutput }> {
 		const context = await resolveBusinessContext(this.db, source);
@@ -1219,11 +2089,24 @@ export class FinanceService {
 			}
 		}
 
+		if (input.operatorContactId) {
+			const contact = await this.db.contact.findUnique({
+				where: { id: input.operatorContactId },
+				select: { id: true },
+			});
+			if (!contact) {
+				throw new NotFoundException(
+					`No contact with id ${input.operatorContactId}.`,
+				);
+			}
+		}
+
 		const expense = await this.db.expense.create({
 			data: {
 				businessUnitId: context.businessUnitId,
 				bookingId: input.bookingId ?? null,
 				dealId: input.dealId ?? null,
+				operatorContactId: input.operatorContactId ?? null,
 				category: input.category,
 				source: ExpenseSource.MANUAL,
 				status: ExpenseStatus.RECORDED,
@@ -1231,11 +2114,49 @@ export class FinanceService {
 				currency: input.currency ?? base,
 				incurredAt: dayDate(input.incurredAt),
 				note: input.note ?? null,
+				receiptReference: input.receiptReference ?? null,
+				recurringTemplateKey: input.recurringTemplateKey ?? null,
 				createdById: source.userId,
 			},
 			select: EXPENSE_SELECT,
 		});
 
+		return { expense: toExpenseEntry(expense) };
+	}
+
+	async createRecurringExpense(
+		source: BusinessContextSource & { userId: string },
+		input: {
+			templateKey: string;
+			category: ExpenseCategory;
+			amountCents: number;
+			currency?: string;
+			incurredAt: string;
+			note?: string;
+		},
+	): Promise<{ expense: ExpenseEntryOutput }> {
+		const context = await resolveBusinessContext(this.db, source);
+		const calculationKey = `recurring:${context.businessUnitId}:${input.templateKey}:${input.incurredAt}`;
+		const existing = await this.db.expense.findUnique({
+			where: { calculationKey },
+			select: EXPENSE_SELECT,
+		});
+		if (existing) return { expense: toExpenseEntry(existing) };
+
+		const created = await this.addExpense(source, {
+			businessUnitId: context.businessUnitId,
+			category: input.category,
+			amountCents: input.amountCents,
+			currency: input.currency,
+			incurredAt: input.incurredAt,
+			note: input.note,
+			recurringTemplateKey: input.templateKey,
+		});
+		const expense = await this.db.expense.update({
+			where: { id: created.expense.id },
+			data: { calculationKey },
+			select: EXPENSE_SELECT,
+		});
 		return { expense: toExpenseEntry(expense) };
 	}
 
@@ -1359,6 +2280,55 @@ export class FinanceService {
 		}
 
 		return { dealId, bookingId, companyId, contactId };
+	}
+
+	private async operatorLabourRule(
+		businessUnitId: string | null,
+	): Promise<OperatorLabourRule> {
+		const row = await this.db.financeRule.findFirst({
+			where: {
+				key: FINANCE.operatorLabour.ruleKey,
+				active: true,
+				OR: [{ businessUnitId }, { businessUnitId: null }],
+			},
+			orderBy: [{ businessUnitId: "desc" }, { version: "desc" }],
+			select: { key: true, version: true, value: true },
+		});
+		if (!row) return DEFAULT_OPERATOR_LABOUR_RULE;
+		const parsed = operatorLabourRuleValue.safeParse(row.value);
+		if (!parsed.success) return DEFAULT_OPERATOR_LABOUR_RULE;
+		return { key: row.key, version: row.version, ...parsed.data };
+	}
+
+	private async financeSettings(
+		businessUnitId: string | null,
+	): Promise<{ version: number; value: FinanceSettingsValue }> {
+		const row = await this.db.financeRule.findFirst({
+			where: {
+				key: FINANCE.settings.ruleKey,
+				active: true,
+				OR: [{ businessUnitId }, { businessUnitId: null }],
+			},
+			orderBy: [{ businessUnitId: "desc" }, { version: "desc" }],
+			select: { version: true, value: true },
+		});
+		if (!row) return { version: 1, value: DEFAULT_FINANCE_SETTINGS };
+		const parsed = financeSettingsValue.safeParse(row.value);
+		if (!parsed.success) {
+			return { version: row.version, value: DEFAULT_FINANCE_SETTINGS };
+		}
+		return { version: row.version, value: parsed.data };
+	}
+
+	private async nextFinanceRuleVersion(
+		businessUnitId: string | null,
+		key: string,
+	): Promise<number> {
+		const row = await this.db.financeRule.aggregate({
+			where: { businessUnitId, key },
+			_max: { version: true },
+		});
+		return (row._max.version ?? 0) + 1;
 	}
 
 	private async nextDocumentNumber(prefix: string): Promise<string> {
@@ -1518,9 +2488,14 @@ export class FinanceService {
 				dealId: true,
 				totalCents: true,
 				status: true,
+				sentAt: true,
 				currency: true,
 				payments: {
-					where: { status: PaymentRecordStatus.MATCHED },
+					where: {
+						status: {
+							in: [PaymentRecordStatus.MATCHED, PaymentRecordStatus.CONFIRMED],
+						},
+					},
 					select: { amountCents: true, currency: true },
 				},
 			},
@@ -1529,14 +2504,20 @@ export class FinanceService {
 			.filter((payment) => payment.currency === invoice.currency)
 			.reduce((total, payment) => total + payment.amountCents, 0);
 		const balanceCents = Math.max(invoice.totalCents - paidCents, 0);
-		const status =
-			balanceCents === 0
-				? InvoiceLifecycleStatus.PAID
-				: paidCents > 0
-					? InvoiceLifecycleStatus.PARTIALLY_PAID
-					: invoice.status === InvoiceLifecycleStatus.VOID
-						? InvoiceLifecycleStatus.VOID
-						: invoice.status;
+		let status = invoice.status;
+		if (
+			invoice.status !== InvoiceLifecycleStatus.VOID &&
+			invoice.status !== InvoiceLifecycleStatus.CANCELLED
+		) {
+			status =
+				balanceCents === 0
+					? InvoiceLifecycleStatus.PAID
+					: paidCents > 0
+						? InvoiceLifecycleStatus.PARTIALLY_PAID
+						: invoice.sentAt
+							? InvoiceLifecycleStatus.SENT
+							: InvoiceLifecycleStatus.DRAFT;
+		}
 
 		await tx.invoice.update({
 			where: { id: invoice.id },
@@ -1593,20 +2574,30 @@ export class FinanceService {
 				currency: true,
 				incurredAt: true,
 				evidence: true,
+				ruleKey: true,
+				ruleVersion: true,
+				expectedAmountCents: true,
+				discrepancyCents: true,
 			},
 		});
 		const byBooking = new Map(
 			existing.map((expense) => [expense.bookingId, expense]),
 		);
+		const rule = await this.operatorLabourRule(context.businessUnitId);
 
 		for (const booking of bookings) {
 			const durationMinutes = bookingDurationMinutes(booking);
 			const operatorCount = operatorCountOf(booking.resources);
-			const costCents = operatorLabourCostCents(durationMinutes, operatorCount);
+			const costCents = operatorLabourCostCents(
+				durationMinutes,
+				operatorCount,
+				rule,
+			);
 			const current = byBooking.get(booking.id);
 			const derivedStatus =
-				current?.status === ExpenseStatus.PAID
-					? ExpenseStatus.PAID
+				current?.status === ExpenseStatus.PAID ||
+				current?.status === ExpenseStatus.CONFIRMED
+					? current.status
 					: labourStatusOf(booking);
 
 			if (
@@ -1624,8 +2615,31 @@ export class FinanceService {
 				kind: "operator-labour-calc",
 				durationMinutes,
 				operatorCount,
-				rateCents: operatorRateCents(durationMinutes),
+				rateCents: operatorRateCents(durationMinutes, rule),
+				ruleKey: rule.key,
+				ruleVersion: rule.version,
 			};
+
+			if (
+				current &&
+				(current.status === ExpenseStatus.PAID ||
+					current.status === ExpenseStatus.CONFIRMED) &&
+				current.amountCents !== costCents
+			) {
+				await this.db.expense.update({
+					where: { id: current.id },
+					data: {
+						dealId: booking.dealId,
+						incurredAt: booking.eventDate,
+						evidence,
+						ruleKey: rule.key,
+						ruleVersion: rule.version,
+						expectedAmountCents: costCents,
+						discrepancyCents: costCents - current.amountCents,
+					},
+				});
+				continue;
+			}
 
 			const unchanged =
 				current &&
@@ -1635,7 +2649,12 @@ export class FinanceService {
 				current.incurredAt.getTime() === booking.eventDate.getTime() &&
 				parseExpenseEvidence(current.evidence)?.durationMinutes ===
 					durationMinutes &&
-				parseExpenseEvidence(current.evidence)?.operatorCount === operatorCount;
+				parseExpenseEvidence(current.evidence)?.operatorCount ===
+					operatorCount &&
+				current.ruleKey === rule.key &&
+				current.ruleVersion === rule.version &&
+				current.expectedAmountCents === costCents &&
+				(current.discrepancyCents ?? 0) === 0;
 
 			if (unchanged) continue;
 
@@ -1651,10 +2670,14 @@ export class FinanceService {
 					source: ExpenseSource.CALCULATED,
 					status: derivedStatus,
 					amountCents: costCents,
-					currency: FINANCE.operatorLabour.currency,
+					currency: rule.currency,
 					incurredAt: booking.eventDate,
 					note: "Auto-calculated operator labour",
 					evidence,
+					ruleKey: rule.key,
+					ruleVersion: rule.version,
+					expectedAmountCents: costCents,
+					discrepancyCents: 0,
 					calculationKey: `${CALCULATED_KEY_PREFIX}${booking.id}`,
 				},
 				update: {
@@ -1662,6 +2685,10 @@ export class FinanceService {
 					amountCents: costCents,
 					incurredAt: booking.eventDate,
 					evidence,
+					ruleKey: rule.key,
+					ruleVersion: rule.version,
+					expectedAmountCents: costCents,
+					discrepancyCents: 0,
 					status: derivedStatus,
 				},
 			});
@@ -1672,6 +2699,7 @@ export class FinanceService {
 		booking: WeekBooking,
 		base: string,
 		expenses: ExpenseRow[],
+		labourRule: OperatorLabourRule,
 	): FinanceWeekRowOutput {
 		const deal = booking.deal;
 		const durationMinutes = bookingDurationMinutes(booking);
@@ -1679,6 +2707,7 @@ export class FinanceService {
 		const operatorCost = operatorLabourCostCents(
 			durationMinutes,
 			operatorCount,
+			labourRule,
 		);
 
 		const amountCents = toCents(deal.amount);
@@ -1737,13 +2766,15 @@ export class FinanceService {
 			paymentsReceivedCents,
 			operatorCount,
 			operatorRateCents:
-				durationMinutes === null ? null : operatorRateCents(durationMinutes),
+				durationMinutes === null
+					? null
+					: operatorRateCents(durationMinutes, labourRule),
 			operatorCostCents: operatorCost,
 			estimatedLabourWithOneOperatorCents:
 				operatorCost === null &&
 				durationMinutes !== null &&
 				operatorCount === null
-					? operatorRateCents(durationMinutes)
+					? operatorRateCents(durationMinutes, labourRule)
 					: null,
 			otherExpensesCents,
 			projectedMarginCents,
@@ -1790,7 +2821,19 @@ function toExpenseEntry(expense: ExpenseRow): ExpenseEntryOutput {
 		currency: expense.currency,
 		incurredAt: expense.incurredAt.toISOString().slice(0, 10),
 		note: expense.note,
+		receiptReference: expense.receiptReference,
 		evidence: parseExpenseEvidence(expense.evidence),
+		ruleKey: expense.ruleKey,
+		ruleVersion: expense.ruleVersion,
+		expectedAmountCents: expense.expectedAmountCents,
+		discrepancyCents: expense.discrepancyCents,
+		operatorContact: expense.operatorContact
+			? {
+					id: expense.operatorContact.id,
+					name: contactName(expense.operatorContact),
+				}
+			: null,
+		recurringTemplateKey: expense.recurringTemplateKey,
 	};
 }
 
@@ -1802,12 +2845,22 @@ function toQuoteOutput(
 		number: quote.number,
 		title: quote.title,
 		status: quote.status,
+		service: quote.service,
+		eventDate: quote.eventDate?.toISOString().slice(0, 10) ?? null,
 		currency: quote.currency,
 		subtotalCents: quote.subtotalCents,
+		discountCents: quote.discountCents,
+		travelFeeCents: quote.travelFeeCents,
 		taxCents: quote.taxCents,
 		totalCents: quote.totalCents,
+		depositCents: quote.depositCents,
+		balanceCents: quote.balanceCents,
 		taxEnabled: quote.taxEnabled,
 		taxRateBasisPoints: quote.taxRateBasisPoints,
+		notes: quote.notes,
+		terms: quote.terms,
+		documentKey: quote.documentKey,
+		documentGeneratedAt: quote.documentGeneratedAt?.toISOString() ?? null,
 		validUntil: quote.validUntil?.toISOString().slice(0, 10) ?? null,
 		sentAt: quote.sentAt?.toISOString() ?? null,
 		acceptedAt: quote.acceptedAt?.toISOString() ?? null,
@@ -1836,14 +2889,24 @@ function toInvoiceOutput(
 		number: invoice.number,
 		title: invoice.title,
 		status: invoice.status,
+		service: invoice.service,
+		eventDate: invoice.eventDate?.toISOString().slice(0, 10) ?? null,
 		currency: invoice.currency,
 		subtotalCents: invoice.subtotalCents,
+		discountCents: invoice.discountCents,
+		travelFeeCents: invoice.travelFeeCents,
 		taxCents: invoice.taxCents,
 		totalCents: invoice.totalCents,
+		depositRequiredCents: invoice.depositRequiredCents,
 		paidCents: invoice.paidCents,
 		balanceCents: invoice.balanceCents,
 		taxEnabled: invoice.taxEnabled,
 		taxRateBasisPoints: invoice.taxRateBasisPoints,
+		notes: invoice.notes,
+		terms: invoice.terms,
+		paymentReference: invoice.paymentReference,
+		documentKey: invoice.documentKey,
+		documentGeneratedAt: invoice.documentGeneratedAt?.toISOString() ?? null,
 		issueDate: invoice.issueDate.toISOString().slice(0, 10),
 		dueDate: invoice.dueDate?.toISOString().slice(0, 10) ?? null,
 		sentAt: invoice.sentAt?.toISOString() ?? null,
@@ -1878,7 +2941,11 @@ function toPaymentOutput(
 		method: payment.method,
 		reference: payment.reference,
 		payerName: payment.payerName,
+		proofReference: payment.proofReference,
+		notes: payment.notes,
 		status: payment.status,
+		confirmedAt: payment.confirmedAt?.toISOString() ?? null,
+		failedAt: payment.failedAt?.toISOString() ?? null,
 		invoice: payment.invoice
 			? { id: payment.invoice.id, name: payment.invoice.number }
 			: null,
@@ -1891,6 +2958,242 @@ function toPaymentOutput(
 		createdAt: payment.createdAt.toISOString(),
 		updatedAt: payment.updatedAt.toISOString(),
 	};
+}
+
+function documentKey(
+	kind: "quote" | "invoice",
+	id: string,
+	value:
+		| ReturnType<typeof quoteDocumentFingerprint>
+		| ReturnType<typeof invoiceDocumentFingerprint>,
+) {
+	const hash = createHash("sha256")
+		.update(JSON.stringify(value))
+		.digest("hex")
+		.slice(0, 16);
+	return `finance/${kind}/${id}/${hash}.pdf`;
+}
+
+function documentOutput(
+	key: string,
+	kind: "quotes" | "invoices",
+	id: string,
+	generatedAt: Date,
+	businessUnitId: string,
+): FinanceDocumentOutput {
+	return {
+		documentKey: key,
+		documentUrl: `/api/finance/documents/${kind}/${id}.pdf?businessUnitId=${encodeURIComponent(businessUnitId)}`,
+		generatedAt: generatedAt.toISOString(),
+	};
+}
+
+function quoteDocumentInput(
+	quote: Prisma.QuoteGetPayload<{ select: typeof QUOTE_SELECT }>,
+): FinanceDocumentPdfInput {
+	return {
+		type: "Quote",
+		number: quote.number,
+		title: quote.title,
+		customer: customerName(quote.company, quote.contact),
+		event:
+			quote.booking?.bookingKey ??
+			quote.eventDate?.toISOString().slice(0, 10) ??
+			"Unassigned",
+		service: quote.service ?? "Event service",
+		currency: quote.currency,
+		lines: quote.lineItems.map((line) => ({
+			description: line.description,
+			quantity: line.quantity,
+			unitAmount: money(line.unitAmountCents, quote.currency),
+			discount: money(line.discountCents, quote.currency),
+			total: money(line.totalCents, quote.currency),
+		})),
+		totals: quoteTotals(quote),
+		terms: quote.terms,
+		meta: [
+			{
+				label: "Valid until",
+				value: quote.validUntil?.toISOString().slice(0, 10) ?? "Not set",
+			},
+			{ label: "Status", value: quote.status },
+			{ label: "Deposit", value: money(quote.depositCents, quote.currency) },
+			{ label: "Balance", value: money(quote.balanceCents, quote.currency) },
+		],
+		audit: [],
+	};
+}
+
+function quoteDocumentFingerprint(
+	quote: Prisma.QuoteGetPayload<{ select: typeof QUOTE_SELECT }>,
+) {
+	return {
+		number: quote.number,
+		title: quote.title,
+		status: quote.status,
+		service: quote.service,
+		eventDate: quote.eventDate?.toISOString().slice(0, 10) ?? null,
+		currency: quote.currency,
+		subtotalCents: quote.subtotalCents,
+		discountCents: quote.discountCents,
+		travelFeeCents: quote.travelFeeCents,
+		taxCents: quote.taxCents,
+		totalCents: quote.totalCents,
+		depositCents: quote.depositCents,
+		balanceCents: quote.balanceCents,
+		taxEnabled: quote.taxEnabled,
+		taxRateBasisPoints: quote.taxRateBasisPoints,
+		terms: quote.terms,
+		validUntil: quote.validUntil?.toISOString().slice(0, 10) ?? null,
+		company: quote.company?.name ?? null,
+		contact: quote.contact ? contactName(quote.contact) : null,
+		booking: quote.booking?.bookingKey ?? null,
+		lines: quote.lineItems.map((line) => ({
+			description: line.description,
+			quantity: line.quantity,
+			unitAmountCents: line.unitAmountCents,
+			discountCents: line.discountCents,
+			totalCents: line.totalCents,
+			sortOrder: line.sortOrder,
+		})),
+	};
+}
+
+function invoiceDocumentInput(
+	invoice: Prisma.InvoiceGetPayload<{ select: typeof INVOICE_SELECT }>,
+	audit: AccountingOutput["entries"],
+): FinanceDocumentPdfInput {
+	return {
+		type: "Invoice",
+		number: invoice.number,
+		title: invoice.title,
+		customer: customerName(invoice.company, invoice.contact),
+		event:
+			invoice.booking?.bookingKey ??
+			invoice.eventDate?.toISOString().slice(0, 10) ??
+			"Unassigned",
+		service: invoice.service ?? "Event service",
+		currency: invoice.currency,
+		lines: invoice.lineItems.map((line) => ({
+			description: line.description,
+			quantity: line.quantity,
+			unitAmount: money(line.unitAmountCents, invoice.currency),
+			discount: money(line.discountCents, invoice.currency),
+			total: money(line.totalCents, invoice.currency),
+		})),
+		totals: invoiceTotals(invoice),
+		terms: invoice.terms,
+		meta: [
+			{
+				label: "Issue date",
+				value: invoice.issueDate.toISOString().slice(0, 10),
+			},
+			{
+				label: "Due date",
+				value: invoice.dueDate?.toISOString().slice(0, 10) ?? "Not set",
+			},
+			{
+				label: "Payment reference",
+				value: invoice.paymentReference ?? invoice.number,
+			},
+			{ label: "Status", value: invoice.status },
+		],
+		audit,
+	};
+}
+
+function invoiceDocumentFingerprint(
+	invoice: Prisma.InvoiceGetPayload<{ select: typeof INVOICE_SELECT }>,
+) {
+	return {
+		number: invoice.number,
+		title: invoice.title,
+		status: invoice.status,
+		service: invoice.service,
+		eventDate: invoice.eventDate?.toISOString().slice(0, 10) ?? null,
+		currency: invoice.currency,
+		subtotalCents: invoice.subtotalCents,
+		discountCents: invoice.discountCents,
+		travelFeeCents: invoice.travelFeeCents,
+		taxCents: invoice.taxCents,
+		totalCents: invoice.totalCents,
+		depositRequiredCents: invoice.depositRequiredCents,
+		paidCents: invoice.paidCents,
+		balanceCents: invoice.balanceCents,
+		taxEnabled: invoice.taxEnabled,
+		taxRateBasisPoints: invoice.taxRateBasisPoints,
+		terms: invoice.terms,
+		paymentReference: invoice.paymentReference,
+		issueDate: invoice.issueDate.toISOString().slice(0, 10),
+		dueDate: invoice.dueDate?.toISOString().slice(0, 10) ?? null,
+		company: invoice.company?.name ?? null,
+		contact: invoice.contact ? contactName(invoice.contact) : null,
+		booking: invoice.booking?.bookingKey ?? null,
+		lines: invoice.lineItems.map((line) => ({
+			description: line.description,
+			quantity: line.quantity,
+			unitAmountCents: line.unitAmountCents,
+			discountCents: line.discountCents,
+			totalCents: line.totalCents,
+			sortOrder: line.sortOrder,
+		})),
+	};
+}
+
+function quoteTotals(
+	quote: Prisma.QuoteGetPayload<{ select: typeof QUOTE_SELECT }>,
+): FinanceDocumentLine[] {
+	const totals = [
+		{ label: "Subtotal", value: money(quote.subtotalCents, quote.currency) },
+		{ label: "Discount", value: money(quote.discountCents, quote.currency) },
+		{ label: "Travel", value: money(quote.travelFeeCents, quote.currency) },
+	];
+	if (quote.taxEnabled) {
+		totals.push({ label: "Tax", value: money(quote.taxCents, quote.currency) });
+	}
+	totals.push({
+		label: "Total",
+		value: money(quote.totalCents, quote.currency),
+	});
+	return totals;
+}
+
+function invoiceTotals(
+	invoice: Prisma.InvoiceGetPayload<{ select: typeof INVOICE_SELECT }>,
+): FinanceDocumentLine[] {
+	const totals = [
+		{
+			label: "Subtotal",
+			value: money(invoice.subtotalCents, invoice.currency),
+		},
+		{
+			label: "Discount",
+			value: money(invoice.discountCents, invoice.currency),
+		},
+		{ label: "Travel", value: money(invoice.travelFeeCents, invoice.currency) },
+	];
+	if (invoice.taxEnabled) {
+		totals.push({
+			label: "Tax",
+			value: money(invoice.taxCents, invoice.currency),
+		});
+	}
+	totals.push(
+		{ label: "Total", value: money(invoice.totalCents, invoice.currency) },
+		{ label: "Paid", value: money(invoice.paidCents, invoice.currency) },
+		{
+			label: "Outstanding",
+			value: money(invoice.balanceCents, invoice.currency),
+		},
+	);
+	return totals;
+}
+
+function customerName(
+	company: { name: string } | null,
+	contact: { firstName: string; lastName: string | null } | null,
+) {
+	return company?.name ?? (contact ? contactName(contact) : "Unassigned");
 }
 
 function toAuditOutput(
@@ -1913,18 +3216,57 @@ function contactName(contact: { firstName: string; lastName: string | null }) {
 type LineTotalInput = {
 	quantity: number;
 	unitAmountCents: number;
+	discountCents?: number;
 };
 
 type LineTotals = {
 	subtotalCents: number;
+	discountCents: number;
+	travelFeeCents: number;
+	taxCents: number;
+	totalCents: number;
+	depositCents: number;
+	balanceCents: number;
 };
 
-function lineTotals(lines: LineTotalInput[]): LineTotals {
+function lineTotals(
+	lines: LineTotalInput[],
+	input: {
+		discountCents?: number;
+		travelFeeCents?: number;
+		depositCents?: number;
+		taxEnabled?: boolean;
+		taxRateBasisPoints?: number;
+	} = {},
+): LineTotals {
+	const lineSubtotalCents = lines.reduce(
+		(total, line) =>
+			total +
+			Math.max(
+				line.quantity * line.unitAmountCents - (line.discountCents ?? 0),
+				0,
+			),
+		0,
+	);
+	const discountCents = input.discountCents ?? 0;
+	const travelFeeCents = input.travelFeeCents ?? 0;
+	const subtotalCents = Math.max(
+		lineSubtotalCents + travelFeeCents - discountCents,
+		0,
+	);
+	const taxCents = input.taxEnabled
+		? Math.round((subtotalCents * (input.taxRateBasisPoints ?? 0)) / 10_000)
+		: 0;
+	const totalCents = subtotalCents + taxCents;
+	const depositCents = Math.min(input.depositCents ?? 0, totalCents);
 	return {
-		subtotalCents: lines.reduce(
-			(total, line) => total + line.quantity * line.unitAmountCents,
-			0,
-		),
+		subtotalCents,
+		discountCents,
+		travelFeeCents,
+		taxCents,
+		totalCents,
+		depositCents,
+		balanceCents: totalCents - depositCents,
 	};
 }
 
@@ -1936,12 +3278,25 @@ function quoteActionOf(status: FinanceDocumentStatus): FinanceAuditAction {
 	if (status === FinanceDocumentStatus.DECLINED) {
 		return FinanceAuditAction.DECLINED;
 	}
+	if (status === FinanceDocumentStatus.EXPIRED) {
+		return FinanceAuditAction.EXPIRED;
+	}
+	if (status === FinanceDocumentStatus.ARCHIVED) {
+		return FinanceAuditAction.ARCHIVED;
+	}
 	if (status === FinanceDocumentStatus.VOID) return FinanceAuditAction.VOIDED;
 	return FinanceAuditAction.UPDATED;
 }
 
 function dealQuoteStatusOf(status: FinanceDocumentStatus) {
-	if (status === FinanceDocumentStatus.DECLINED) return "REJECTED" as const;
+	if (
+		status === FinanceDocumentStatus.DECLINED ||
+		status === FinanceDocumentStatus.EXPIRED ||
+		status === FinanceDocumentStatus.ARCHIVED ||
+		status === FinanceDocumentStatus.VOID
+	) {
+		return "REJECTED" as const;
+	}
 	if (status === FinanceDocumentStatus.DRAFT) return "NOT_READY" as const;
 	return "READY" as const;
 }

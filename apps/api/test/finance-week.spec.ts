@@ -209,6 +209,56 @@ describe("finance.week operator labour", () => {
 		);
 	});
 
+	it("applies the configured rule at 1h and 8h", async () => {
+		await seedWorkspace();
+		const rule = await db.financeRule.create({
+			data: {
+				businessUnitId: unitId,
+				key: FINANCE.operatorLabour.ruleKey,
+				version: 2,
+				active: true,
+				value: {
+					currency: "ZAR",
+					shortRateCents: 31_000,
+					longRateCents: 41_000,
+					longThresholdMinutes: 300,
+				},
+				createdById: userId,
+			},
+		});
+		try {
+			const oneHour = await seedBooking({
+				key: "rule-one-hour",
+				eventDate: "2026-09-07",
+				operators: 1,
+				durationMinutes: 60,
+				amount: 5000,
+			});
+			const eightHour = await seedBooking({
+				key: "rule-eight-hour",
+				eventDate: "2026-09-07",
+				operators: 2,
+				durationMinutes: 480,
+				amount: 5000,
+			});
+
+			const week = await service.week(source, { weekStart: "2026-09-07" });
+			const byKey = new Map(week.rows.map((row) => [row.bookingKey, row]));
+			const [oneHourExpense] = await calculatedExpenses(oneHour.id);
+			const [eightHourExpense] = await calculatedExpenses(eightHour.id);
+
+			expect(byKey.get(oneHour.bookingKey)?.operatorCostCents).toBe(31_000);
+			expect(byKey.get(eightHour.bookingKey)?.operatorCostCents).toBe(82_000);
+			expect(oneHourExpense?.ruleVersion).toBe(2);
+			expect(eightHourExpense?.ruleVersion).toBe(2);
+		} finally {
+			await db.financeRule.update({
+				where: { id: rule.id },
+				data: { active: false },
+			});
+		}
+	});
+
 	it("flags a missing operator count and estimates one operator", async () => {
 		const booking = await seedBooking({
 			key: "no-crew",
@@ -489,6 +539,34 @@ describe("finance expenses", () => {
 		expect(after?.status).toBe(ExpenseStatus.PAID);
 	});
 
+	it("records a discrepancy instead of overwriting paid calculated labour", async () => {
+		const booking = await seedBooking({
+			key: "calc-paid-discrepancy",
+			eventDate: "2026-09-07",
+			operators: 1,
+			durationMinutes: 240,
+			amount: 5000,
+		});
+		await service.week(source, { weekStart: "2026-09-07" });
+		const [calculated] = await calculatedExpenses(booking.id);
+		if (!calculated) throw new Error("expected a calculated expense");
+
+		await service.markExpensePaid(source, { id: calculated.id });
+		await db.booking.update({
+			where: { id: booking.id },
+			data: {
+				confirmedEndAt: new Date("2026-09-07T16:00:00.000Z"),
+			},
+		});
+		await service.week(source, { weekStart: "2026-09-07" });
+
+		const [after] = await calculatedExpenses(booking.id);
+		expect(after?.status).toBe(ExpenseStatus.PAID);
+		expect(after?.amountCents).toBe(SHORT_RATE);
+		expect(after?.expectedAmountCents).toBe(LONG_RATE);
+		expect(after?.discrepancyCents).toBe(LONG_RATE - SHORT_RATE);
+	});
+
 	it("refuses to mark a cancelled expense paid", async () => {
 		const booking = await seedBooking({
 			key: "cancelled-paid",
@@ -567,6 +645,96 @@ describe("finance documents", () => {
 		expect(sent.quote.auditEvents[0]?.summary).toBe("Quote marked sent.");
 	});
 
+	it("updates and duplicates a mutable quote", async () => {
+		await seedWorkspace();
+		const created = await service.createQuote(source, {
+			title: `Editable Quote ${marker}`,
+			currency: "ZAR",
+			lineItems: [
+				{
+					description: "Starter package",
+					quantity: 1,
+					unitAmountCents: 200_000,
+				},
+			],
+		});
+
+		const updated = await service.updateQuote(source, {
+			id: created.quote.id,
+			title: `Updated Quote ${marker}`,
+			service: "360 Booth",
+			eventDate: "2026-09-15",
+			currency: "ZAR",
+			travelFeeCents: 40_000,
+			discountCents: 10_000,
+			depositCents: 100_000,
+			notes: "Customer requested delivery.",
+			terms: "Valid for seven days.",
+			lineItems: [
+				{
+					description: "Updated package",
+					quantity: 2,
+					unitAmountCents: 175_000,
+					discountCents: 0,
+				},
+			],
+		});
+		const duplicated = await service.duplicateQuote(source, {
+			id: updated.quote.id,
+		});
+
+		expect(updated.quote.title).toBe(`Updated Quote ${marker}`);
+		expect(updated.quote.totalCents).toBe(380_000);
+		expect(updated.quote.depositCents).toBe(100_000);
+		expect(updated.quote.lineItems).toHaveLength(1);
+		expect(duplicated.quote.id).not.toBe(updated.quote.id);
+		expect(duplicated.quote.number).not.toBe(updated.quote.number);
+		expect(duplicated.quote.totalCents).toBe(updated.quote.totalCents);
+	});
+
+	it("keeps accepted quotes immutable after conversion", async () => {
+		await seedWorkspace();
+		const quote = await service.createQuote(source, {
+			title: `Immutable Quote ${marker}`,
+			currency: "ZAR",
+			lineItems: [
+				{
+					description: "Event package",
+					quantity: 1,
+					unitAmountCents: 200_000,
+				},
+			],
+		});
+		await service.updateQuoteStatus(source, {
+			id: quote.quote.id,
+			status: "ACCEPTED",
+		});
+		await service.convertQuoteToInvoice(source, {
+			id: quote.quote.id,
+			issueDate: "2026-09-12",
+		});
+
+		try {
+			await service.updateQuote(source, {
+				id: quote.quote.id,
+				title: "Changed",
+				currency: "ZAR",
+				lineItems: [
+					{
+						description: "Changed",
+						quantity: 1,
+						unitAmountCents: 100_000,
+					},
+				],
+			});
+			throw new Error("updateQuote should have thrown");
+		} catch (error) {
+			expect(error instanceof Error ? error.message : "").toContain(
+				"unconverted active quote",
+			);
+		}
+	});
+
 	it("creates an invoice and balanced ledger entries", async () => {
 		await seedWorkspace();
 
@@ -596,6 +764,59 @@ describe("finance documents", () => {
 		expect(
 			invoiceEntries.reduce((total, entry) => total + entry.creditCents, 0),
 		).toBe(400_000);
+	});
+
+	it("updates a draft invoice and refreshes balanced ledger entries", async () => {
+		await seedWorkspace();
+		const invoice = await service.createInvoice(source, {
+			title: `Editable Invoice ${marker}`,
+			currency: "ZAR",
+			issueDate: "2026-09-12",
+			lineItems: [
+				{
+					description: "Starter package",
+					quantity: 1,
+					unitAmountCents: 250_000,
+				},
+			],
+		});
+
+		const updated = await service.updateInvoice(source, {
+			id: invoice.invoice.id,
+			title: `Updated Invoice ${marker}`,
+			service: "360 Booth",
+			eventDate: "2026-09-15",
+			currency: "ZAR",
+			issueDate: "2026-09-12",
+			dueDate: "2026-09-19",
+			travelFeeCents: 30_000,
+			discountCents: 5_000,
+			depositRequiredCents: 100_000,
+			paymentReference: `INV-${marker}`,
+			lineItems: [
+				{
+					description: "Updated package",
+					quantity: 2,
+					unitAmountCents: 150_000,
+					discountCents: 0,
+				},
+			],
+		});
+		const accounting = await service.accounting(source);
+		const invoiceEntries = accounting.entries.filter(
+			(entry) => entry.sourceId === invoice.invoice.id,
+		);
+
+		expect(updated.invoice.totalCents).toBe(325_000);
+		expect(updated.invoice.depositRequiredCents).toBe(100_000);
+		expect(updated.invoice.balanceCents).toBe(325_000);
+		expect(invoiceEntries).toHaveLength(2);
+		expect(
+			invoiceEntries.reduce((total, entry) => total + entry.debitCents, 0),
+		).toBe(325_000);
+		expect(
+			invoiceEntries.reduce((total, entry) => total + entry.creditCents, 0),
+		).toBe(325_000);
 	});
 
 	it("matches a payment to an invoice and marks the invoice paid", async () => {
@@ -631,5 +852,240 @@ describe("finance documents", () => {
 		expect(payment.payment.status).toBe(PaymentRecordStatus.MATCHED);
 		expect(updated?.status).toBe(InvoiceLifecycleStatus.PAID);
 		expect(updated?.balanceCents).toBe(0);
+	});
+
+	it("matches and unmatches a payment candidate without confirming cash", async () => {
+		await seedWorkspace();
+		const invoice = await service.createInvoice(source, {
+			title: `Match Invoice ${marker}`,
+			currency: "ZAR",
+			issueDate: "2026-09-12",
+			lineItems: [
+				{
+					description: "Event package",
+					quantity: 1,
+					unitAmountCents: 500_000,
+				},
+			],
+		});
+		const payment = await service.createPayment(source, {
+			amountCents: 250_000,
+			currency: "ZAR",
+			paidAt: "2026-09-12",
+			method: "BANK_TRANSFER",
+			reference: `Unmatched ${marker}`,
+		});
+
+		const matched = await service.matchPayment(source, {
+			id: payment.payment.id,
+			invoiceId: invoice.invoice.id,
+		});
+		const afterMatch = await service.invoices(source, {
+			search: invoice.invoice.number,
+		});
+		const unmatched = await service.matchPayment(source, {
+			id: payment.payment.id,
+			invoiceId: null,
+		});
+		const afterUnmatch = await service.invoices(source, {
+			search: invoice.invoice.number,
+		});
+
+		expect(payment.payment.status).toBe(PaymentRecordStatus.UNMATCHED);
+		expect(matched.payment.status).toBe(PaymentRecordStatus.MATCHED);
+		expect(afterMatch.invoices[0]?.paidCents).toBe(250_000);
+		expect(afterMatch.invoices[0]?.balanceCents).toBe(250_000);
+		expect(unmatched.payment.status).toBe(PaymentRecordStatus.UNMATCHED);
+		expect(afterUnmatch.invoices[0]?.paidCents).toBe(0);
+		expect(afterUnmatch.invoices[0]?.balanceCents).toBe(500_000);
+	});
+
+	it("converts an accepted quote to one invoice idempotently", async () => {
+		await seedWorkspace();
+		const quote = await service.createQuote(source, {
+			title: `Convert Quote ${marker}`,
+			currency: "ZAR",
+			travelFeeCents: 50_000,
+			depositCents: 170_000,
+			lineItems: [
+				{
+					description: "Event package",
+					quantity: 1,
+					unitAmountCents: 290_000,
+				},
+			],
+		});
+		await service.updateQuoteStatus(source, {
+			id: quote.quote.id,
+			status: "ACCEPTED",
+		});
+
+		const first = await service.convertQuoteToInvoice(source, {
+			id: quote.quote.id,
+			issueDate: "2026-09-12",
+		});
+		const second = await service.convertQuoteToInvoice(source, {
+			id: quote.quote.id,
+			issueDate: "2026-09-12",
+		});
+		const count = await db.invoice.count({
+			where: { quoteId: quote.quote.id },
+		});
+
+		expect(first.invoice.id).toBe(second.invoice.id);
+		expect(count).toBe(1);
+		expect(first.invoice.totalCents).toBe(340_000);
+		expect(first.invoice.depositRequiredCents).toBe(170_000);
+		expect(first.invoice.balanceCents).toBe(340_000);
+	});
+
+	it("generates quote and invoice PDF document metadata idempotently", async () => {
+		await seedWorkspace();
+		const quote = await service.createQuote(source, {
+			title: `Document Quote ${marker}`,
+			currency: "ZAR",
+			lineItems: [
+				{
+					description: "Event package",
+					quantity: 1,
+					unitAmountCents: 200_000,
+				},
+			],
+		});
+		const firstQuoteDocument = await service.generateQuoteDocument(source, {
+			id: quote.quote.id,
+		});
+		const secondQuoteDocument = await service.generateQuoteDocument(source, {
+			id: quote.quote.id,
+		});
+
+		await service.updateQuoteStatus(source, {
+			id: quote.quote.id,
+			status: "ACCEPTED",
+		});
+		const invoice = await service.convertQuoteToInvoice(source, {
+			id: quote.quote.id,
+			issueDate: "2026-09-12",
+		});
+		const invoiceDocument = await service.generateInvoiceDocument(source, {
+			id: invoice.invoice.id,
+		});
+		const quotePdf = await service.documentPdf(
+			source,
+			"quotes",
+			quote.quote.id,
+		);
+		const invoicePdf = await service.documentPdf(
+			source,
+			"invoices",
+			invoice.invoice.id,
+		);
+
+		expect(firstQuoteDocument.documentKey).toBe(
+			secondQuoteDocument.documentKey,
+		);
+		expect(firstQuoteDocument.documentUrl).toContain("/api/finance/documents/");
+		expect(invoiceDocument.documentKey).toContain("finance/invoice/");
+		expect(quotePdf.content.toString("utf8", 0, 8)).toBe("%PDF-1.4");
+		expect(invoicePdf.content.toString("utf8", 0, 8)).toBe("%PDF-1.4");
+	});
+
+	it("updates finance settings as versioned finance rules", async () => {
+		await seedWorkspace();
+
+		const updated = await service.updateSettings(source, {
+			defaultCurrency: "ZAR",
+			taxEnabled: false,
+			taxRateBasisPoints: 0,
+			depositBasisPoints: 5000,
+			quoteValidityDays: 21,
+			invoiceDueDays: 10,
+			quotePrefix: "EVP-Q",
+			invoicePrefix: "EVP-I",
+			operatorShortRateCents: 32_000,
+			operatorLongRateCents: 42_000,
+			operatorThresholdMinutes: 300,
+		});
+		const quote = await service.createQuote(source, {
+			title: `Settings Quote ${marker}`,
+			currency: "ZAR",
+			lineItems: [
+				{
+					description: "Event package",
+					quantity: 1,
+					unitAmountCents: 100_000,
+				},
+			],
+		});
+
+		expect(updated.version).toBe(1);
+		expect(updated.operatorRule.shortRateCents).toBe(32_000);
+		expect(quote.quote.number).toStartWith("EVP-Q-");
+		expect(quote.quote.taxEnabled).toBe(false);
+	});
+
+	it("creates recurring expenses idempotently as unpaid records", async () => {
+		await seedWorkspace();
+
+		const first = await service.createRecurringExpense(source, {
+			templateKey: `hosting-${marker}`,
+			category: ExpenseCategory.HOSTING_IT,
+			amountCents: 250_00,
+			currency: "ZAR",
+			incurredAt: "2026-09-07",
+			note: "Hosting",
+		});
+		const second = await service.createRecurringExpense(source, {
+			templateKey: `hosting-${marker}`,
+			category: ExpenseCategory.HOSTING_IT,
+			amountCents: 250_00,
+			currency: "ZAR",
+			incurredAt: "2026-09-07",
+			note: "Hosting",
+		});
+
+		expect(second.expense.id).toBe(first.expense.id);
+		expect(second.expense.status).toBe(ExpenseStatus.RECORDED);
+		expect(second.expense.recurringTemplateKey).toBe(`hosting-${marker}`);
+	});
+
+	it("removes failed payments from invoice paid and outstanding totals", async () => {
+		await seedWorkspace();
+		const invoice = await service.createInvoice(source, {
+			title: `Failed Payment Invoice ${marker}`,
+			currency: "ZAR",
+			issueDate: "2026-09-12",
+			lineItems: [
+				{
+					description: "Event package",
+					quantity: 1,
+					unitAmountCents: 500_000,
+				},
+			],
+		});
+		const payment = await service.createPayment(source, {
+			invoiceId: invoice.invoice.id,
+			amountCents: 500_000,
+			currency: "ZAR",
+			paidAt: "2026-09-12",
+			method: "BANK_TRANSFER",
+			reference: `FAILED ${marker}`,
+		});
+
+		const failed = await service.updatePaymentStatus(source, {
+			id: payment.payment.id,
+			status: "FAILED",
+		});
+		const invoices = await service.invoices(source, {
+			search: invoice.invoice.number,
+		});
+		const updated = invoices.invoices.find(
+			(row) => row.id === invoice.invoice.id,
+		);
+
+		expect(failed.payment.status).toBe(PaymentRecordStatus.FAILED);
+		expect(updated?.paidCents).toBe(0);
+		expect(updated?.balanceCents).toBe(500_000);
+		expect(updated?.status).toBe(InvoiceLifecycleStatus.DRAFT);
 	});
 });

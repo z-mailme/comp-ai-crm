@@ -41,6 +41,8 @@ export const expenseEvidence = z.object({
 	durationMinutes: z.number(),
 	operatorCount: z.number(),
 	rateCents: z.number(),
+	ruleKey: z.string().optional(),
+	ruleVersion: z.number().optional(),
 });
 
 export type ExpenseEvidence = z.infer<typeof expenseEvidence>;
@@ -51,6 +53,11 @@ export function parseExpenseEvidence(
 	const parsed = expenseEvidence.safeParse(value);
 	return parsed.success ? parsed.data : null;
 }
+
+const financeLinkedRecordOutput = z.object({
+	id: z.string(),
+	name: z.string(),
+});
 
 const expenseEntryOutput = z.object({
 	id: z.string(),
@@ -63,7 +70,14 @@ const expenseEntryOutput = z.object({
 	currency: z.string(),
 	incurredAt: z.string(),
 	note: z.string().nullable(),
+	receiptReference: z.string().nullable(),
 	evidence: expenseEvidence.nullable(),
+	ruleKey: z.string().nullable(),
+	ruleVersion: z.number().nullable(),
+	expectedAmountCents: z.number().nullable(),
+	discrepancyCents: z.number().nullable(),
+	operatorContact: financeLinkedRecordOutput.nullable(),
+	recurringTemplateKey: z.string().nullable(),
 });
 
 export const financeWeekRowOutput = z.object({
@@ -129,6 +143,36 @@ export const addExpenseInput = z.object({
 	businessUnitId: z.string().trim().min(1).optional(),
 	bookingId: z.string().trim().min(1).optional(),
 	dealId: z.string().trim().min(1).optional(),
+	operatorContactId: z.string().trim().min(1).optional(),
+	category: z.nativeEnum(ExpenseCategory),
+	amountCents: z.number().int().min(1).max(999_999_999_999),
+	currency: z
+		.string()
+		.trim()
+		.transform(normalizeCurrency)
+		.refine(isCurrencyCode, { message: "Unsupported currency." })
+		.optional(),
+	incurredAt: z
+		.string()
+		.trim()
+		.regex(/^\d{4}-\d{2}-\d{2}$/),
+	note: z.string().trim().min(1).max(FINANCE.noteMaxLength).optional(),
+	receiptReference: z.string().trim().min(1).max(300).optional(),
+	recurringTemplateKey: z.string().trim().min(1).max(120).optional(),
+});
+
+export const cancelExpenseInput = z.object({
+	id: z.string().trim().min(1),
+});
+
+export const markExpensePaidInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	id: z.string().trim().min(1),
+});
+
+export const recurringExpenseInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	templateKey: z.string().trim().min(1).max(120),
 	category: z.nativeEnum(ExpenseCategory),
 	amountCents: z.number().int().min(1).max(999_999_999_999),
 	currency: z
@@ -144,15 +188,6 @@ export const addExpenseInput = z.object({
 	note: z.string().trim().min(1).max(FINANCE.noteMaxLength).optional(),
 });
 
-export const cancelExpenseInput = z.object({
-	id: z.string().trim().min(1),
-});
-
-export const markExpensePaidInput = z.object({
-	businessUnitId: z.string().trim().min(1).optional(),
-	id: z.string().trim().min(1),
-});
-
 export const expenseMutationOutput = z.object({
 	expense: expenseEntryOutput,
 });
@@ -160,11 +195,6 @@ export const expenseMutationOutput = z.object({
 const moneySummaryOutput = z.object({
 	count: z.number(),
 	totalCents: z.number(),
-});
-
-const financeLinkedRecordOutput = z.object({
-	id: z.string(),
-	name: z.string(),
 });
 
 export const financeDashboardInput = z
@@ -195,10 +225,55 @@ export const financeDashboardOutput = z.object({
 	),
 });
 
+export const financeSettingsOutput = z.object({
+	businessUnitId: z.string(),
+	version: z.number(),
+	defaultCurrency: z.string(),
+	taxEnabled: z.boolean(),
+	taxRateBasisPoints: z.number(),
+	depositBasisPoints: z.number(),
+	quoteValidityDays: z.number(),
+	invoiceDueDays: z.number(),
+	quotePrefix: z.string(),
+	invoicePrefix: z.string(),
+	operatorRule: z.object({
+		key: z.string(),
+		version: z.number(),
+		currency: z.string(),
+		shortRateCents: z.number(),
+		longRateCents: z.number(),
+		longThresholdMinutes: z.number(),
+	}),
+});
+
+export const financeSettingsInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	defaultCurrency: z
+		.string()
+		.trim()
+		.transform(normalizeCurrency)
+		.refine(isCurrencyCode, { message: "Unsupported currency." }),
+	taxEnabled: z.boolean(),
+	taxRateBasisPoints: z.number().int().min(0).max(10_000),
+	depositBasisPoints: z.number().int().min(0).max(10_000),
+	quoteValidityDays: z.number().int().min(1).max(365),
+	invoiceDueDays: z.number().int().min(0).max(365),
+	quotePrefix: z.string().trim().min(1).max(12),
+	invoicePrefix: z.string().trim().min(1).max(12),
+	operatorShortRateCents: z.number().int().min(1).max(999_999_999_999),
+	operatorLongRateCents: z.number().int().min(1).max(999_999_999_999),
+	operatorThresholdMinutes: z
+		.number()
+		.int()
+		.min(1)
+		.max(24 * 60),
+});
+
 const lineItemInput = z.object({
 	description: z.string().trim().min(1).max(300),
 	quantity: z.number().int().min(1).max(999),
 	unitAmountCents: z.number().int().min(0).max(999_999_999_999),
+	discountCents: z.number().int().min(0).max(999_999_999_999).default(0),
 });
 
 export const financeListInput = z
@@ -217,6 +292,12 @@ export const quoteCreateInput = z.object({
 	companyId: z.string().trim().min(1).optional(),
 	contactId: z.string().trim().min(1).optional(),
 	title: z.string().trim().min(1).max(300),
+	service: z.string().trim().min(1).max(200).optional(),
+	eventDate: z
+		.string()
+		.trim()
+		.regex(/^\d{4}-\d{2}-\d{2}$/)
+		.optional(),
 	currency: z
 		.string()
 		.trim()
@@ -229,13 +310,34 @@ export const quoteCreateInput = z.object({
 		.regex(/^\d{4}-\d{2}-\d{2}$/)
 		.optional(),
 	notes: z.string().trim().max(FINANCE.noteMaxLength).optional(),
+	terms: z.string().trim().max(FINANCE.noteMaxLength).optional(),
+	travelFeeCents: z.number().int().min(0).max(999_999_999_999).default(0),
+	discountCents: z.number().int().min(0).max(999_999_999_999).default(0),
+	depositCents: z.number().int().min(0).max(999_999_999_999).default(0),
 	lineItems: z.array(lineItemInput).min(1).max(50),
+});
+
+export const quoteUpdateInput = quoteCreateInput.extend({
+	id: z.string().trim().min(1),
+});
+
+export const quoteDuplicateInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	id: z.string().trim().min(1),
 });
 
 export const quoteStatusInput = z.object({
 	businessUnitId: z.string().trim().min(1).optional(),
 	id: z.string().trim().min(1),
-	status: z.enum(["READY", "SENT", "ACCEPTED", "DECLINED", "VOID"]),
+	status: z.enum([
+		"READY",
+		"SENT",
+		"ACCEPTED",
+		"DECLINED",
+		"EXPIRED",
+		"ARCHIVED",
+		"VOID",
+	]),
 });
 
 export const quoteDetailInput = z.object({
@@ -255,6 +357,7 @@ const quoteLineOutput = z.object({
 	description: z.string(),
 	quantity: z.number(),
 	unitAmountCents: z.number(),
+	discountCents: z.number(),
 	totalCents: z.number(),
 	sortOrder: z.number(),
 });
@@ -264,12 +367,22 @@ const quoteOutput = z.object({
 	number: z.string(),
 	title: z.string(),
 	status: z.nativeEnum(FinanceDocumentStatus),
+	service: z.string().nullable(),
+	eventDate: z.string().nullable(),
 	currency: z.string(),
 	subtotalCents: z.number(),
+	discountCents: z.number(),
+	travelFeeCents: z.number(),
 	taxCents: z.number(),
 	totalCents: z.number(),
+	depositCents: z.number(),
+	balanceCents: z.number(),
 	taxEnabled: z.boolean(),
 	taxRateBasisPoints: z.number(),
+	notes: z.string().nullable(),
+	terms: z.string().nullable(),
+	documentKey: z.string().nullable(),
+	documentGeneratedAt: z.string().nullable(),
 	validUntil: z.string().nullable(),
 	sentAt: z.string().nullable(),
 	acceptedAt: z.string().nullable(),
@@ -293,6 +406,26 @@ export const quoteMutationOutput = z.object({
 	quote: quoteOutput,
 });
 
+export const quoteConvertInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	id: z.string().trim().min(1),
+	issueDate: z
+		.string()
+		.trim()
+		.regex(/^\d{4}-\d{2}-\d{2}$/)
+		.optional(),
+	dueDate: z
+		.string()
+		.trim()
+		.regex(/^\d{4}-\d{2}-\d{2}$/)
+		.optional(),
+});
+
+export const financeDocumentInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	id: z.string().trim().min(1),
+});
+
 export const invoiceCreateInput = z.object({
 	businessUnitId: z.string().trim().min(1).optional(),
 	quoteId: z.string().trim().min(1).optional(),
@@ -301,6 +434,12 @@ export const invoiceCreateInput = z.object({
 	companyId: z.string().trim().min(1).optional(),
 	contactId: z.string().trim().min(1).optional(),
 	title: z.string().trim().min(1).max(300),
+	service: z.string().trim().min(1).max(200).optional(),
+	eventDate: z
+		.string()
+		.trim()
+		.regex(/^\d{4}-\d{2}-\d{2}$/)
+		.optional(),
 	currency: z
 		.string()
 		.trim()
@@ -317,13 +456,24 @@ export const invoiceCreateInput = z.object({
 		.regex(/^\d{4}-\d{2}-\d{2}$/)
 		.optional(),
 	notes: z.string().trim().max(FINANCE.noteMaxLength).optional(),
+	terms: z.string().trim().max(FINANCE.noteMaxLength).optional(),
+	travelFeeCents: z.number().int().min(0).max(999_999_999_999).default(0),
+	discountCents: z.number().int().min(0).max(999_999_999_999).default(0),
+	depositRequiredCents: z.number().int().min(0).max(999_999_999_999).default(0),
+	paymentReference: z.string().trim().max(200).optional(),
 	lineItems: z.array(lineItemInput).min(1).max(50),
 });
+
+export const invoiceUpdateInput = invoiceCreateInput
+	.omit({ quoteId: true })
+	.extend({
+		id: z.string().trim().min(1),
+	});
 
 export const invoiceStatusInput = z.object({
 	businessUnitId: z.string().trim().min(1).optional(),
 	id: z.string().trim().min(1),
-	status: z.enum(["SENT", "VOID"]),
+	status: z.enum(["SENT", "OVERDUE", "CANCELLED", "VOID"]),
 });
 
 const invoiceLineOutput = z.object({
@@ -331,6 +481,7 @@ const invoiceLineOutput = z.object({
 	description: z.string(),
 	quantity: z.number(),
 	unitAmountCents: z.number(),
+	discountCents: z.number(),
 	totalCents: z.number(),
 	sortOrder: z.number(),
 });
@@ -340,14 +491,24 @@ const invoiceOutput = z.object({
 	number: z.string(),
 	title: z.string(),
 	status: z.nativeEnum(InvoiceLifecycleStatus),
+	service: z.string().nullable(),
+	eventDate: z.string().nullable(),
 	currency: z.string(),
 	subtotalCents: z.number(),
+	discountCents: z.number(),
+	travelFeeCents: z.number(),
 	taxCents: z.number(),
 	totalCents: z.number(),
+	depositRequiredCents: z.number(),
 	paidCents: z.number(),
 	balanceCents: z.number(),
 	taxEnabled: z.boolean(),
 	taxRateBasisPoints: z.number(),
+	notes: z.string().nullable(),
+	terms: z.string().nullable(),
+	paymentReference: z.string().nullable(),
+	documentKey: z.string().nullable(),
+	documentGeneratedAt: z.string().nullable(),
 	issueDate: z.string(),
 	dueDate: z.string().nullable(),
 	sentAt: z.string().nullable(),
@@ -392,12 +553,27 @@ export const paymentCreateInput = z.object({
 	method: z.nativeEnum(PaymentMethod).default(PaymentMethod.BANK_TRANSFER),
 	reference: z.string().trim().max(200).optional(),
 	payerName: z.string().trim().max(200).optional(),
+	proofReference: z.string().trim().max(300).optional(),
+	notes: z.string().trim().max(FINANCE.noteMaxLength).optional(),
 });
 
 export const paymentMatchInput = z.object({
 	businessUnitId: z.string().trim().min(1).optional(),
 	id: z.string().trim().min(1),
 	invoiceId: z.string().trim().min(1).nullable(),
+});
+
+export const paymentStatusInput = z.object({
+	businessUnitId: z.string().trim().min(1).optional(),
+	id: z.string().trim().min(1),
+	status: z.enum([
+		"PENDING",
+		"CONFIRMED",
+		"FAILED",
+		"REFUNDED",
+		"PARTIALLY_REFUNDED",
+		"CANCELLED",
+	]),
 });
 
 const paymentOutput = z.object({
@@ -408,7 +584,11 @@ const paymentOutput = z.object({
 	method: z.nativeEnum(PaymentMethod),
 	reference: z.string().nullable(),
 	payerName: z.string().nullable(),
+	proofReference: z.string().nullable(),
+	notes: z.string().nullable(),
 	status: z.nativeEnum(PaymentRecordStatus),
+	confirmedAt: z.string().nullable(),
+	failedAt: z.string().nullable(),
 	invoice: financeLinkedRecordOutput.nullable(),
 	deal: financeLinkedRecordOutput.nullable(),
 	booking: financeLinkedRecordOutput.nullable(),
@@ -424,6 +604,12 @@ export const paymentListOutput = z.object({
 
 export const paymentMutationOutput = z.object({
 	payment: paymentOutput,
+});
+
+export const financeDocumentOutput = z.object({
+	documentKey: z.string(),
+	documentUrl: z.string(),
+	generatedAt: z.string(),
 });
 
 export const accountingOutput = z.object({
@@ -457,10 +643,12 @@ export type FinanceWeekOutput = z.infer<typeof financeWeekOutput>;
 export type FinanceWeekRowOutput = z.infer<typeof financeWeekRowOutput>;
 export type ExpenseEntryOutput = z.infer<typeof expenseEntryOutput>;
 export type FinanceDashboardOutput = z.infer<typeof financeDashboardOutput>;
+export type FinanceSettingsOutput = z.infer<typeof financeSettingsOutput>;
 export type QuoteListOutput = z.infer<typeof quoteListOutput>;
 export type QuoteMutationOutput = z.infer<typeof quoteMutationOutput>;
 export type InvoiceListOutput = z.infer<typeof invoiceListOutput>;
 export type InvoiceMutationOutput = z.infer<typeof invoiceMutationOutput>;
 export type PaymentListOutput = z.infer<typeof paymentListOutput>;
 export type PaymentMutationOutput = z.infer<typeof paymentMutationOutput>;
+export type FinanceDocumentOutput = z.infer<typeof financeDocumentOutput>;
 export type AccountingOutput = z.infer<typeof accountingOutput>;

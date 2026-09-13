@@ -28,7 +28,7 @@ import { dashboardLayoutOutput, saveDashboardLayoutInput, dashboardSummaryInput,
 import { dealListInput, dealListOutput, dealIdInput, dealDetailOutput, dealCreateInput, dealCreateOutput, dealUpdateArgs, dealMutateOutput, setStageInput, dealSetStageOutput, dealContactsInput, dealContactOptionsOutput, dealAttachContactInput, dealContactLinkOutput, dealDetachContactInput, dealContactRoleInput, dealContactRoleOutput, dealBulkOwnerInput, dealBulkResultOutput, dealBulkStageInput, dealBulkInput } from "../deals/deals.contracts";
 import { enrichmentQueueInput } from "@crm/validation/enrichment-queue";
 import { fieldListInput, fieldListOutput, fieldByKeyInput, serializedFieldOutput, fieldEntityInput, fieldFiltersOutput, fieldIdInput, fieldCoverageOutput, fieldCreateInput, fieldUpdateArgs, fieldReorderInput, fieldReorderOutput, fieldDeleteOutput, fieldBackfillOutput } from "../fields/fields.contracts";
-import { financeWeekInput, financeWeekOutput, financeDashboardInput, financeDashboardOutput, financeListInput, quoteListOutput, quoteCreateInput, quoteMutationOutput, quoteStatusInput, invoiceListOutput, invoiceCreateInput, invoiceMutationOutput, invoiceStatusInput, paymentListOutput, paymentCreateInput, paymentMutationOutput, paymentMatchInput, accountingOutput, addExpenseInput, expenseMutationOutput, cancelExpenseInput, markExpensePaidInput } from "../finance/finance.contracts";
+import { financeWeekInput, financeWeekOutput, financeDashboardInput, financeDashboardOutput, financeSettingsOutput, financeSettingsInput, financeListInput, quoteListOutput, quoteCreateInput, quoteMutationOutput, quoteUpdateInput, quoteDuplicateInput, quoteStatusInput, quoteConvertInput, invoiceMutationOutput, financeDocumentInput, financeDocumentOutput, invoiceListOutput, invoiceCreateInput, invoiceUpdateInput, invoiceStatusInput, paymentListOutput, paymentCreateInput, paymentMutationOutput, paymentMatchInput, paymentStatusInput, accountingOutput, addExpenseInput, expenseMutationOutput, recurringExpenseInput, cancelExpenseInput, markExpensePaidInput } from "../finance/finance.contracts";
 import { gmailLabelOutput, mailboxThreadsInput, mailboxThreadsOutput, mailboxActionInput, mailboxActionOutput, googleConnectionStatusOutput, reindexCalendarInput, reindexCalendarOutput, historicalImportJobOutput, createHistoricalImportInput, historicalImportIdInput, sendEmailInput, sendEmailOutput, setAutoCreateInput, suppressDomainInput, suppressDomainOutput, threadInput, emailThreadOutput, calendarEventInput, calendarEventOutput } from "../google/google.contracts";
 import { purgeSyncedDataOutput, revokeAccessOutput, microsoftConnectionStatusOutput, setOutlookAutoCreateInput } from "../microsoft/microsoft.contracts";
 import { audienceContextInput, audienceListOutput, audienceCountInput, audienceCountOutput, createAudienceInput, audienceOutput, updateAudienceInput, audienceByIdInput, audienceExportInput, audienceExportOutput } from "../marketing/audiences.contracts";
@@ -661,6 +661,14 @@ const appRouter = t.router({
       .input(financeDashboardInput)
       .output(financeDashboardOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    settings: publicProcedure
+      .input(financeDashboardInput)
+      .output(financeSettingsOutput)
+      .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    updateSettings: publicProcedure
+      .input(financeSettingsInput)
+      .output(financeSettingsOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     quotes: publicProcedure
       .input(financeListInput)
       .output(quoteListOutput)
@@ -669,9 +677,25 @@ const appRouter = t.router({
       .input(quoteCreateInput)
       .output(quoteMutationOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    updateQuote: publicProcedure
+      .input(quoteUpdateInput)
+      .output(quoteMutationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    duplicateQuote: publicProcedure
+      .input(quoteDuplicateInput)
+      .output(quoteMutationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     updateQuoteStatus: publicProcedure
       .input(quoteStatusInput)
       .output(quoteMutationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    convertQuoteToInvoice: publicProcedure
+      .input(quoteConvertInput)
+      .output(invoiceMutationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    generateQuoteDocument: publicProcedure
+      .input(financeDocumentInput)
+      .output(financeDocumentOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     invoices: publicProcedure
       .input(financeListInput)
@@ -681,9 +705,17 @@ const appRouter = t.router({
       .input(invoiceCreateInput)
       .output(invoiceMutationOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    updateInvoice: publicProcedure
+      .input(invoiceUpdateInput)
+      .output(invoiceMutationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     updateInvoiceStatus: publicProcedure
       .input(invoiceStatusInput)
       .output(invoiceMutationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    generateInvoiceDocument: publicProcedure
+      .input(financeDocumentInput)
+      .output(financeDocumentOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     payments: publicProcedure
       .input(financeListInput)
@@ -697,12 +729,20 @@ const appRouter = t.router({
       .input(paymentMatchInput)
       .output(paymentMutationOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    updatePaymentStatus: publicProcedure
+      .input(paymentStatusInput)
+      .output(paymentMutationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     accounting: publicProcedure
       .input(financeDashboardInput)
       .output(accountingOutput)
       .query(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     addExpense: publicProcedure
       .input(addExpenseInput)
+      .output(expenseMutationOutput)
+      .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
+    createRecurringExpense: publicProcedure
+      .input(recurringExpenseInput)
       .output(expenseMutationOutput)
       .mutation(async () => "PLACEHOLDER_DO_NOT_REMOVE" as any),
     cancelExpense: publicProcedure

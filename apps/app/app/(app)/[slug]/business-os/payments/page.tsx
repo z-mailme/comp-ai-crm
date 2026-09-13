@@ -15,6 +15,8 @@ export const metadata: Metadata = {
 	title: "Payments",
 };
 
+export const instant = false;
+
 export default async function PaymentsPage() {
 	await requireSession();
 

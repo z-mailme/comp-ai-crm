@@ -15,6 +15,8 @@ export const metadata: Metadata = {
 	title: "Quotes",
 };
 
+export const instant = false;
+
 export default async function QuotesPage() {
 	await requireSession();
 
