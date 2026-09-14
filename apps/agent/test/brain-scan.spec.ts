@@ -1,10 +1,27 @@
-import { afterAll, describe, expect, it } from "bun:test";
-import { db, EmailDirection, MailboxMatchStatus } from "@crm/db";
+import { afterAll, beforeEach, describe, expect, it } from "bun:test";
+import { db, EmailDirection, MailboxMatchStatus, Prisma } from "@crm/db";
 import { BRAIN } from "../agent/lib/brain-config";
 import type { BrainExtractor } from "../agent/lib/brain-extractor";
 import { runBrainScan } from "../agent/lib/brain-scan";
+import { handleBrainScanTask } from "../agent/lib/dispatch";
+import type { LeasedTask } from "../agent/lib/tasks";
 
-const suffix = process.env.TEST_RUN_ID ?? "brain-scan-spec";
+const suffix =
+	process.env.TEST_RUN_ID ?? `brain-scan-spec-${crypto.randomUUID()}`;
+
+const leasedTaskSelect = {
+	id: true,
+	contactId: true,
+	companyId: true,
+	dealId: true,
+	kind: true,
+	reason: true,
+	payload: true,
+	budget: true,
+	attempts: true,
+	priority: true,
+	dueAt: true,
+} satisfies Prisma.AgentTaskSelect;
 
 const extractor: BrainExtractor = async (threads) => ({
 	facts: threads.flatMap((thread) => [
@@ -82,6 +99,18 @@ async function seedMailbox(name: string, threadCount: number) {
 }
 
 async function clean(): Promise<void> {
+	const jobs = await db.brainAnalysisJob.findMany({
+		where: { userId: { contains: suffix } },
+		select: { id: true },
+	});
+	const jobIds = jobs.map((job) => job.id);
+	if (jobIds.length > 0) {
+		await db.$executeRaw`
+			DELETE FROM "agentTask"
+			WHERE kind = 'brain-scan'
+				AND payload->>'jobId' IN (${Prisma.join(jobIds)})
+		`;
+	}
 	await db.businessKnowledge.deleteMany({
 		where: { subject: { contains: suffix } },
 	});
@@ -95,6 +124,34 @@ async function clean(): Promise<void> {
 	await db.user.deleteMany({ where: { id: { contains: suffix } } });
 }
 
+async function createBrainTask(jobId: string): Promise<LeasedTask> {
+	return db.agentTask.create({
+		data: {
+			kind: "brain-scan",
+			reason: `Analyse Gmail ${suffix}`,
+			payload: { jobId },
+			dueAt: new Date(Date.now() - 1000),
+			priority: 300,
+			budget: 50,
+		},
+		select: leasedTaskSelect,
+	});
+}
+
+async function nextBrainTask(jobId: string): Promise<LeasedTask> {
+	const task = await db.agentTask.findFirst({
+		where: {
+			kind: "brain-scan",
+			finishedAt: null,
+			subject: `brain-scan:${jobId}`,
+		},
+		select: leasedTaskSelect,
+	});
+	expect(task).not.toBeNull();
+	return task as LeasedTask;
+}
+
+beforeEach(clean);
 afterAll(clean);
 
 describe("runBrainScan", () => {
@@ -306,5 +363,191 @@ describe("runBrainScan", () => {
 			where: { subject: { contains: "Replay-safe fact" } },
 		});
 		expect(countAfterReplay).toBe(countAfterFirst);
+	});
+
+	it("schedules a continuation after a successful non-exhausted batch", async () => {
+		const { userId } = await seedMailbox("continuation", BRAIN.batchSize + 1);
+		const job = await db.brainAnalysisJob.create({
+			data: { userId, source: "gmail" },
+		});
+		const task = await createBrainTask(job.id);
+
+		await handleBrainScanTask(task, extractor);
+
+		const open = await db.agentTask.findMany({
+			where: {
+				kind: "brain-scan",
+				finishedAt: null,
+				subject: `brain-scan:${job.id}`,
+			},
+			select: { id: true, payload: true, subject: true },
+		});
+		const updated = await db.brainAnalysisJob.findUnique({
+			where: { id: job.id },
+		});
+
+		expect(open).toHaveLength(1);
+		expect(open[0]?.id).not.toBe(task.id);
+		expect(open[0]?.payload).toEqual({ jobId: job.id });
+		expect(open[0]?.subject).toBe(`brain-scan:${job.id}`);
+		expect(updated?.status).toBe("RUNNING");
+		expect(updated?.processedThreads).toBe(BRAIN.batchSize);
+	});
+
+	it("uses the saved cursor on the next scheduled batch", async () => {
+		const { userId } = await seedMailbox("cursor", BRAIN.batchSize * 2 + 1);
+		const job = await db.brainAnalysisJob.create({
+			data: { userId, source: "gmail" },
+		});
+		await handleBrainScanTask(await createBrainTask(job.id), extractor);
+		const afterFirst = await db.brainAnalysisJob.findUnique({
+			where: { id: job.id },
+		});
+
+		await handleBrainScanTask(await nextBrainTask(job.id), extractor);
+
+		const afterSecond = await db.brainAnalysisJob.findUnique({
+			where: { id: job.id },
+		});
+		expect(afterSecond?.status).toBe("RUNNING");
+		expect(afterSecond?.processedThreads).toBe(BRAIN.batchSize * 2);
+		expect(afterSecond?.cursorThreadId).not.toBe(afterFirst?.cursorThreadId);
+	});
+
+	it("does not schedule another task when the scan is exhausted", async () => {
+		const { userId } = await seedMailbox("exhausted", BRAIN.batchSize - 1);
+		const job = await db.brainAnalysisJob.create({
+			data: { userId, source: "gmail" },
+		});
+		const task = await createBrainTask(job.id);
+
+		await handleBrainScanTask(task, extractor);
+
+		const open = await db.agentTask.count({
+			where: {
+				kind: "brain-scan",
+				finishedAt: null,
+				OR: [{ id: task.id }, { subject: `brain-scan:${job.id}` }],
+			},
+		});
+		const updated = await db.brainAnalysisJob.findUnique({
+			where: { id: job.id },
+		});
+		expect(open).toBe(0);
+		expect(updated?.status).toBe("COMPLETED");
+		expect(updated?.processedThreads).toBe(BRAIN.batchSize - 1);
+	});
+
+	it("auto-progresses three batches without another user action", async () => {
+		const total = BRAIN.batchSize * 3;
+		const { userId } = await seedMailbox("three-batches", total);
+		const job = await db.brainAnalysisJob.create({
+			data: { userId, source: "gmail" },
+		});
+
+		await handleBrainScanTask(await createBrainTask(job.id), extractor);
+		await handleBrainScanTask(await nextBrainTask(job.id), extractor);
+		await handleBrainScanTask(await nextBrainTask(job.id), extractor);
+
+		const updated = await db.brainAnalysisJob.findUnique({
+			where: { id: job.id },
+		});
+		const open = await db.agentTask.count({
+			where: {
+				kind: "brain-scan",
+				finishedAt: null,
+				subject: `brain-scan:${job.id}`,
+			},
+		});
+		expect(updated?.status).toBe("COMPLETED");
+		expect(updated?.processedThreads).toBe(total);
+		expect(open).toBe(0);
+	});
+
+	it("ignores duplicate delivery after the current task is complete", async () => {
+		const { userId } = await seedMailbox(
+			"duplicate-delivery",
+			BRAIN.batchSize + 1,
+		);
+		const job = await db.brainAnalysisJob.create({
+			data: { userId, source: "gmail" },
+		});
+		const task = await createBrainTask(job.id);
+
+		await handleBrainScanTask(task, extractor);
+		const afterFirst = await db.brainAnalysisJob.findUnique({
+			where: { id: job.id },
+		});
+		const factsAfterFirst = await db.businessKnowledge.count({
+			where: { subject: { contains: "duplicate-delivery" } },
+		});
+
+		await handleBrainScanTask(task, extractor);
+
+		const afterReplay = await db.brainAnalysisJob.findUnique({
+			where: { id: job.id },
+		});
+		const factsAfterReplay = await db.businessKnowledge.count({
+			where: { subject: { contains: "duplicate-delivery" } },
+		});
+		expect(afterReplay?.processedThreads).toBe(afterFirst?.processedThreads);
+		expect(afterReplay?.knowledgeWritten).toBe(afterFirst?.knowledgeWritten);
+		expect(factsAfterReplay).toBe(factsAfterFirst);
+	});
+
+	it("resumes from the saved cursor after an agent restart", async () => {
+		const { userId } = await seedMailbox("restart", BRAIN.batchSize * 2 + 1);
+		const job = await db.brainAnalysisJob.create({
+			data: { userId, source: "gmail" },
+		});
+		await handleBrainScanTask(await createBrainTask(job.id), extractor);
+
+		const restartedTask = await nextBrainTask(job.id);
+		await handleBrainScanTask(restartedTask, extractor);
+
+		const updated = await db.brainAnalysisJob.findUnique({
+			where: { id: job.id },
+		});
+		expect(updated?.status).toBe("RUNNING");
+		expect(updated?.processedThreads).toBe(BRAIN.batchSize * 2);
+		expect(updated?.cursorThreadId).toBeTruthy();
+	});
+
+	it("keeps the current task recoverable when continuation creation fails", async () => {
+		const { userId } = await seedMailbox(
+			"schedule-failure",
+			BRAIN.batchSize * 2 + 1,
+		);
+		const job = await db.brainAnalysisJob.create({
+			data: { userId, source: "gmail" },
+		});
+		const task = await createBrainTask(job.id);
+
+		let thrown: unknown;
+		try {
+			await handleBrainScanTask(task, extractor, async () => {
+				throw new Error("queue unavailable");
+			});
+		} catch (error) {
+			thrown = error;
+		}
+		expect(thrown).toBeInstanceOf(Error);
+		expect((thrown as Error).message).toBe("queue unavailable");
+
+		const openCurrent = await db.agentTask.findUnique({
+			where: { id: task.id },
+		});
+		const afterFailure = await db.brainAnalysisJob.findUnique({
+			where: { id: job.id },
+		});
+		expect(openCurrent?.finishedAt).toBeNull();
+		expect(afterFailure?.status).toBe("RUNNING");
+		expect(afterFailure?.processedThreads).toBe(BRAIN.batchSize);
+
+		await handleBrainScanTask(task, extractor);
+		const recovered = await db.brainAnalysisJob.findUnique({
+			where: { id: job.id },
+		});
+		expect(recovered?.processedThreads).toBe(BRAIN.batchSize * 2);
 	});
 });

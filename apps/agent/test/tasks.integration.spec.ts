@@ -4,6 +4,7 @@ import { DIRECT_KINDS } from "@crm/db/agent-tasks";
 import {
 	claimDue,
 	completeTask,
+	completeTaskAndScheduleTask,
 	MAX_ATTEMPTS,
 	retireExhausted,
 	scheduleTask,
@@ -237,5 +238,38 @@ describe("scheduleTask", () => {
 
 		expect(second.id).toBe(first.id);
 		expect(await db.agentTask.count({ where: { kind } })).toBe(1);
+	});
+
+	it("schedules a continuation without reusing the current unfinished task", async () => {
+		const current = await queue();
+
+		const first = await completeTaskAndScheduleTask(current.id, "ran", {
+			kind,
+			reason: "continue",
+			payload: { run: "one" },
+			dueAt: new Date(),
+			subject: "continuation-one",
+		});
+		const second = await scheduleTask({
+			kind,
+			reason: "continue again",
+			payload: { run: "two" },
+			dueAt: new Date(),
+			subject: "continuation-one",
+			excludeTaskId: current.id,
+		});
+
+		expect(first.completed).toBe(true);
+		expect(first.nextTaskId).toBe(second.id);
+		expect(first.nextTaskId).not.toBe(current.id);
+
+		const rows = await db.agentTask.findMany({
+			where: { kind },
+			orderBy: { createdAt: "asc" },
+		});
+		expect(rows).toHaveLength(2);
+		expect(rows[0]?.finishedAt).not.toBeNull();
+		expect(rows[1]?.finishedAt).toBeNull();
+		expect(rows[1]?.payload).toEqual({ run: "two" });
 	});
 });
