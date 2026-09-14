@@ -3,7 +3,11 @@ import { fieldBackfillPayload } from "@crm/validation/field-backfill";
 import { z } from "zod";
 import { APP_AUTH, type AppAuth } from "./app-auth";
 import { aiExtractor } from "./brain-extractor";
-import { runBrainScan } from "./brain-scan";
+import {
+	type BrainScanOutcome,
+	brainScanJobId,
+	runBrainScan,
+} from "./brain-scan";
 import { brandOutcome, runBrand } from "./brand";
 import { queueEventAgentRuns } from "./custom-agent-dispatch";
 import { settledWithin } from "./deadline";
@@ -20,10 +24,11 @@ import { staleTaskSweep } from "./stale-tasks";
 import {
 	claimDue,
 	completeTask,
+	completeTaskAndScheduleTask,
 	DIRECT_KINDS,
 	type LeasedTask,
 	noteSession,
-	scheduleTask,
+	openTask,
 } from "./tasks";
 
 export const VISIBLE_BATCH = DISPATCH.visible.batch;
@@ -153,44 +158,27 @@ async function handleDirect(task: LeasedTask): Promise<void> {
 	}
 
 	if (task.kind === "brain-scan") {
-		const outcome = await runBrainScan(task.payload, aiExtractor());
-
-		if (!outcome.finished) {
-			await scheduleTask({
-				kind: "brain-scan",
-				reason: "Continue the Business Brain mailbox analysis",
-				payload: task.payload as Prisma.InputJsonValue,
-				dueAt: new Date(),
-				priority: task.priority,
-				budget: task.budget,
-			});
-		}
-
-		await completeTask(
-			task.id,
-			outcome.reason ??
-				`Analysed ${outcome.processed} threads, wrote ${outcome.written} facts, found ${outcome.conflicts} conflicts.`,
-		);
+		await handleBrainScanTask(task);
 		return;
 	}
 
 	if (task.kind === "event-bridge") {
 		const outcome = await drainMemoryBridge();
+		const summary = `Processed ${outcome.processed} events, detected ${outcome.pops} proofs of payment, ${outcome.failed} failed.`;
 
 		if (outcome.processed >= DISPATCH.bridge.batchSize) {
-			await scheduleTask({
+			await completeTaskAndScheduleTask(task.id, summary, {
 				kind: "event-bridge",
 				reason: "Continue draining business events",
 				dueAt: new Date(),
 				priority: task.priority,
 				budget: task.budget,
+				subject: "event-bridge",
 			});
+			return;
 		}
 
-		await completeTask(
-			task.id,
-			`Processed ${outcome.processed} events, detected ${outcome.pops} proofs of payment, ${outcome.failed} failed.`,
-		);
+		await completeTask(task.id, summary);
 		return;
 	}
 
@@ -200,6 +188,79 @@ async function handleDirect(task: LeasedTask): Promise<void> {
 	}
 
 	await completeTask(task.id, "The record this names is gone.");
+}
+
+type BrainContinuationScheduler = (
+	taskId: string,
+	outcome: string,
+	input: {
+		kind: string;
+		reason: string;
+		payload?: Prisma.InputJsonValue | null;
+		dueAt: Date;
+		priority?: number;
+		budget?: number;
+		subject?: string | null;
+	},
+) => Promise<{ completed: boolean; nextTaskId: string }>;
+
+export async function handleBrainScanTask(
+	task: LeasedTask,
+	extract = aiExtractor(),
+	continuation: BrainContinuationScheduler = completeTaskAndScheduleTask,
+): Promise<void> {
+	if (!(await openTask(task.id))) return;
+
+	const outcome = await runBrainScan(task.payload, extract);
+	const summary = brainScanSummary(outcome);
+
+	if (outcome.finished) {
+		await completeTask(task.id, summary);
+		return;
+	}
+
+	const jobId = brainScanJobId(task.payload);
+	if (!jobId) {
+		await completeTask(task.id, summary);
+		return;
+	}
+
+	try {
+		const next = await continuation(task.id, summary, {
+			kind: "brain-scan",
+			reason: "Continue the Business Brain mailbox analysis",
+			payload: task.payload as Prisma.InputJsonValue,
+			dueAt: new Date(),
+			priority: task.priority,
+			budget: task.budget,
+			subject: `brain-scan:${jobId}`,
+		});
+
+		console.warn("[brain-scan]", {
+			event: "brain_scan_continuation_scheduled",
+			jobId,
+			taskId: task.id,
+			nextTaskId: next.nextTaskId,
+			processedTotal: outcome.processedTotal,
+			cursorThreadId: outcome.cursorThreadId,
+			cursorPresent: outcome.cursorPresent,
+		});
+	} catch (error) {
+		console.warn("[brain-scan]", {
+			event: "brain_scan_failed",
+			jobId,
+			taskId: task.id,
+			reason: reasonOf(error),
+		});
+		throw error;
+	}
+}
+
+function brainScanSummary(outcome: BrainScanOutcome): string {
+	return (
+		outcome.reason ??
+		`Analysed ${outcome.processed} threads, wrote ${outcome.written} facts, found ${outcome.conflicts} conflicts.`
+	);
 }
 
 const providerTestPayload = z.object({ provider: z.string() });
