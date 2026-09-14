@@ -28,6 +28,7 @@ import { LocalDateTime } from "@/components/local-date-time";
 import { dealStagePresentation } from "@/lib/deal-stage";
 import { useTRPC } from "@/lib/trpc/client";
 import { useWorkspaceUrl } from "@/lib/use-workspace-url";
+import { FinanceDashboard } from "./finance-module-view";
 import { WeekFinance } from "./week-finance";
 
 const CELL = "px-3 py-2.5 align-middle";
@@ -64,6 +65,8 @@ export function FinanceView() {
 
 	return (
 		<div className="flex flex-col gap-6">
+			<FinanceDashboard />
+
 			<WeekFinance />
 
 			<StatGroup>

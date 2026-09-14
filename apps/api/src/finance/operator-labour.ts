@@ -1,4 +1,5 @@
 import { BookingResourceType } from "@crm/db/enums";
+import { z } from "zod";
 import { FINANCE, MINUTE_MS } from "./finance-config";
 
 export type BookingTimingFields = {
@@ -8,6 +9,29 @@ export type BookingTimingFields = {
 	operationalEndAt: Date | null;
 	requestedStartAt: Date | null;
 	requestedEndAt: Date | null;
+};
+
+export const operatorLabourRuleValue = z.object({
+	currency: z.string().default(FINANCE.operatorLabour.currency),
+	shortRateCents: z.number().int().min(0),
+	longRateCents: z.number().int().min(0),
+	longThresholdMinutes: z.number().int().min(1),
+});
+
+export type OperatorLabourRuleValue = z.infer<typeof operatorLabourRuleValue>;
+
+export type OperatorLabourRule = OperatorLabourRuleValue & {
+	key: string;
+	version: number;
+};
+
+export const DEFAULT_OPERATOR_LABOUR_RULE: OperatorLabourRule = {
+	key: FINANCE.operatorLabour.ruleKey,
+	version: 1,
+	currency: FINANCE.operatorLabour.currency,
+	shortRateCents: FINANCE.operatorLabour.shortRateCents,
+	longRateCents: FINANCE.operatorLabour.longRateCents,
+	longThresholdMinutes: FINANCE.operatorLabour.longThresholdMinutes,
 };
 
 export function bookingDurationMinutes(
@@ -37,16 +61,20 @@ export function operatorCountOf(
 	return row ? row.quantity : null;
 }
 
-export function operatorRateCents(durationMinutes: number): number {
-	return durationMinutes >= FINANCE.operatorLabour.longThresholdMinutes
-		? FINANCE.operatorLabour.longRateCents
-		: FINANCE.operatorLabour.shortRateCents;
+export function operatorRateCents(
+	durationMinutes: number,
+	rule: OperatorLabourRule = DEFAULT_OPERATOR_LABOUR_RULE,
+): number {
+	return durationMinutes >= rule.longThresholdMinutes
+		? rule.longRateCents
+		: rule.shortRateCents;
 }
 
 export function operatorLabourCostCents(
 	durationMinutes: number | null,
 	operatorCount: number | null,
+	rule: OperatorLabourRule = DEFAULT_OPERATOR_LABOUR_RULE,
 ): number | null {
 	if (durationMinutes === null || operatorCount === null) return null;
-	return operatorCount * operatorRateCents(durationMinutes);
+	return operatorCount * operatorRateCents(durationMinutes, rule);
 }
